@@ -1,7 +1,7 @@
 name: release
 
-# Publish to PyPI whenever a version tag is pushed (e.g. v0.1.0).
-# Uses PyPI Trusted Publishing (OIDC) — no API token stored in the repo.
+# On a version tag (e.g. v0.1.0): publish to PyPI AND create a GitHub Release.
+# PyPI auth uses Trusted Publishing (OIDC) — no API token stored in the repo.
 #
 # One-time setup on PyPI (https://pypi.org/manage/project/riftor/settings/publishing/):
 #   add a Trusted Publisher ->
@@ -55,3 +55,19 @@ jobs:
           path: dist/
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # required to create the GitHub Release
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
