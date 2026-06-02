@@ -29,6 +29,8 @@ jobs:
           uv venv /opt/rv
           uv pip install --python /opt/rv .
           echo "/opt/rv/bin" >> "$GITHUB_PATH"
+      - name: Pre-install ffmpeg (vhs-action's installer is flaky)
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: Render demo.gif
         uses: charmbracelet/vhs-action@v2
         with:
