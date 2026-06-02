@@ -10,29 +10,33 @@ interface backed by [litellm](https://docs.litellm.ai/), organised around the
 It's **cloud-first** (Anthropic, OpenAI, OpenRouter, …) for the strongest agent
 behaviour, with local [Ollama](https://ollama.com/) supported as an option.
 
-> **Status: Phase 2.** The agent can use tools (bash/read/write/edit/grep/glob/
-> webfetch) with permission prompts and an audit log. Scope enforcement and the
-> engagement engine are next — see [`todo.md`](./todo.md).
+> **Status: early (Phase 4a).** Working agent: streaming chat, tool use with
+> permission prompts + audit log, **scope enforcement**, RIFT stage tracking, a
+> per-engagement findings store, and **reports** (markdown + HTML with CVSS).
+> See [`todo.md`](./todo.md) for the roadmap.
 
-## Requirements
-- Python 3.11+
-- [uv](https://docs.astral.sh/uv/)
-- A model — set one of `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`
-  (or run a local Ollama server)
+## Install
+```bash
+pip install riftor          # or: uv tool install riftor / pipx install riftor
+```
+Requires Python 3.11+ and a model — set one of `ANTHROPIC_API_KEY`,
+`OPENAI_API_KEY`, `OPENROUTER_API_KEY` (or run a local [Ollama](https://ollama.com/) server).
 
-## Run
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY, etc.
-uv sync
-uv run riftor
+riftor                                 # launch the TUI
+riftor --config                        # show the config file path
+riftor --version
 ```
-On first launch riftor writes a config file and picks a default model from your
-environment keys (a cloud provider). If no key is set but an Ollama server is
-running, it falls back to that.
 
+On first launch riftor writes a config file and picks a default model from your
+environment keys (cloud-first); if no key is set but an Ollama server is running,
+it falls back to that.
+
+### From source
 ```bash
-uv run riftor --config   # show the config file path
-uv run riftor --version
+git clone https://github.com/Estudely/riftor && cd riftor
+uv sync && uv run riftor
 ```
 
 ## Configure
@@ -51,6 +55,18 @@ lore = true
 # api_base = "http://localhost:11434"
 ```
 
+## Workflow
+```text
+1. Set scope        /scope add 10.0.0.0/24 example.com
+2. Task the agent   "enumerate the web host and look for low-hanging fruit"
+                    → it runs recon tools via bash (you approve), records
+                      services/findings, and advances the R·I·F·T stage
+3. Review           /findings
+4. Report           /report            → .riftor/reports/report-*.md and .html
+```
+Out-of-scope targets are **blocked** (with an explicit per-call override). State
+lives in `.riftor/` per working directory; sessions auto-save and resume.
+
 ## Commands
 | Command | Action |
 |---|---|
@@ -58,6 +74,10 @@ lore = true
 | `/clear` | clear the conversation (`Ctrl+L`) |
 | `/model [name]` | show or switch the model |
 | `/stage [R\|I\|F\|T]` | show or set the RIFT stage |
+| `/scope [add\|out\|rm <t>\|clear\|on\|off]` | manage in/out-of-scope targets |
+| `/findings` | list recorded findings |
+| `/report [md\|html\|both]` | write a pentest report to `.riftor/reports/` |
+| `/sessions` · `/resume <id>` · `/new` | manage saved sessions |
 | `/tools` | list available tools |
 | `/lore` | toggle the rift persona |
 | `/exit` | quit (`Ctrl+C`) |
