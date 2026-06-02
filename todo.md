@@ -90,13 +90,15 @@ The agent tracks the current stage; the TUI shows `[R·I·F·T]` in the status b
 - [~] Local Ollama path: code-path verified earlier; real model run deferred (no pull)
 
 ### Phase 5 — Distribution + community
-- [x] On PyPI: `pip install riftor` (0.0.1) — name reserved, installable
+- [x] On PyPI: `pip install riftor` — name reserved, installable
 - [x] GitHub Release `v0.0.1` (notes + dist artifacts)
 - [x] Release CI: GitHub Actions -> PyPI **trusted publishing** on `v*` tags
-      (one-time: add the trusted publisher in PyPI project settings)
-- [ ] Package for `uv tool install` / `pipx` / Docker (pip works today)
+- [x] Trusted publisher configured; **0.0.2 auto-published via CI** ✅
+- [ ] CI hygiene: commit `uv.lock` (caching/reproducible); bump action versions (Node 20 -> 24)
+- [ ] Test CI: run the smoke suite on push/PR
+- [ ] CONTRIBUTING + issue/PR templates
+- [ ] Package for Docker (pip / uv tool / pipx already work)
 - [ ] Docs site + demo (asciinema/gif)
-- [ ] CONTRIBUTING, issue templates, test CI on PRs
 - [ ] Launch
 
 ---
