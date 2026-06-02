@@ -173,6 +173,50 @@ async def test_tools() -> None:
     print("TOOLS OK")
 
 
+def test_parsers() -> None:
+    from riftor.engagement.parsers import parse
+
+    nmap = (
+        "Nmap scan report for scanme.example.com (10.0.0.5)\n"
+        "PORT    STATE  SERVICE VERSION\n"
+        "22/tcp  open   ssh     OpenSSH 8.2p1 Ubuntu\n"
+        "80/tcp  open   http    nginx 1.18.0\n"
+        "443/tcp closed https\n"
+    )
+    s = parse("nmap", nmap)
+    assert len(s.services) == 2, s.services
+    assert s.services[0]["host"] == "10.0.0.5" and s.services[0]["port"] == 22
+    assert s.services[1]["service"] == "http" and "nginx" in s.services[1]["version"]
+
+    httpx_txt = (
+        "https://example.com [200] [Example Domain] [nginx]\n"
+        "http://test.example.com:8080 [403] [Forbidden]\n"
+    )
+    h = parse("httpx", httpx_txt)
+    assert len(h.services) == 2
+    assert h.services[0]["host"] == "example.com" and h.services[0]["port"] == 443
+    assert h.services[1]["port"] == 8080
+
+    hj = parse("httpx", '{"url":"https://api.example.com","status_code":200,"webserver":"nginx"}')
+    assert len(hj.services) == 1 and hj.services[0]["host"] == "api.example.com"
+
+    nuclei_txt = (
+        "[tech-detect:nginx] [http] [info] https://example.com\n"
+        "[CVE-2021-41773] [http] [critical] https://example.com/cgi-bin/x\n"
+    )
+    n = parse("nuclei", nuclei_txt)
+    assert len(n.findings) == 2 and n.findings[1]["severity"] == "critical"
+
+    nj = parse(
+        "nuclei",
+        '{"template-id":"CVE-2021-41773","info":{"name":"Apache RCE","severity":"critical"},'
+        '"host":"https://x","matched-at":"https://x/cgi-bin"}',
+    )
+    assert len(nj.findings) == 1 and nj.findings[0]["severity"] == "critical"
+
+    print("PARSERS OK")
+
+
 def test_themes() -> None:
     from riftor.tui.theme import THEMES, css_variable_defaults
 
@@ -338,6 +382,20 @@ async def test_engagement() -> None:
         r = await tools.get("scope_list").execute({}, ctx)
         assert "in-scope" in r.content
 
+        # import_scan bulk-records parsed services
+        before = len(eng.store.list_services())
+        r = await tools.get("import_scan").execute(
+            {
+                "tool": "nmap",
+                "output": (
+                    "Nmap scan report for h (10.0.0.9)\n"
+                    "PORT   STATE SERVICE VERSION\n22/tcp open ssh OpenSSH\n"
+                ),
+            },
+            ctx,
+        )
+        assert not r.is_error and len(eng.store.list_services()) == before + 1, r.content
+
         # persistence: a fresh Engagement on the same dir restores stage
         eng2 = Engagement(Path(d))
         assert eng2.stage == "I", eng2.stage
@@ -351,6 +409,7 @@ if __name__ == "__main__":
     test_repair()
     test_scope()
     asyncio.run(test_engagement())
+    test_parsers()
     test_themes()
     test_cvss()
     test_report()

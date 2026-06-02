@@ -69,8 +69,8 @@ The agent tracks the current stage; the TUI shows `[R·I·F·T]` in the status b
 - [x] Engagement tools: scope_list, record_service, record_finding, set_stage
 - [x] `/scope` and `/findings` commands; status bar shows stage/scope/finds/enforce
 - [x] Offensive system prompt wired to methodology + recon playbook
-- [~] Security tool wrappers: agent drives nmap/httpx/ffuf/nuclei/subfinder/etc via
-      scope-enforced bash + records results; dedicated output parsers deferred
+- [x] Security tooling: agent runs tools via scope-enforced bash; `import_scan`
+      parses nmap/httpx/nuclei output (text + JSON) into services/findings
 
 ### Phase 4 — Reporting + polish
 **4a — reporting + sessions  ✅**

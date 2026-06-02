@@ -14,6 +14,7 @@ from riftor.tools.core import (
 )
 from riftor.tools.engagement import (
     GenerateReportTool,
+    ImportScanTool,
     RecordFindingTool,
     RecordServiceTool,
     ScopeListTool,
@@ -28,6 +29,7 @@ ALL_TOOLS: list[Tool] = [
     GrepTool(),
     WebFetchTool(),
     SetStageTool(),
+    ImportScanTool(),
     RecordServiceTool(),
     RecordFindingTool(),
     GenerateReportTool(),

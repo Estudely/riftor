@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from riftor.engagement.cvss import base_score, severity_from_score
+from riftor.engagement.parsers import SUPPORTED, parse
 from riftor.engagement.report import write_reports
 from riftor.tools.base import Tool, ToolContext, ToolResult
 
@@ -131,6 +132,45 @@ class RecordFindingTool(Tool):
         )
         tag = severity + (f" · CVSS {score:.1f}" if score is not None else "")
         return ToolResult(f"recorded finding #{fid} [{tag}] {args['title']}")
+
+
+class ImportScanTool(Tool):
+    name = "import_scan"
+    description = (
+        "Parse the raw output of a recon tool and record the discovered "
+        "services/findings into the engagement. Run the scan with bash, then "
+        "pass its output here instead of recording each result by hand. "
+        f"Supported tools: {', '.join(SUPPORTED)}. Handles normal and JSON output."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "tool": {"type": "string", "enum": list(SUPPORTED)},
+            "output": {"type": "string", "description": "Raw stdout from the tool."},
+        },
+        "required": ["tool", "output"],
+    }
+
+    def preview(self, args: dict) -> str:
+        return f"{args.get('tool', '?')} ({len(str(args.get('output', '')))} bytes)"
+
+    async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        eng = ctx.engagement
+        if eng is None:
+            return ToolResult("error: no active engagement", is_error=True)
+        tool = str(args.get("tool", "")).lower()
+        if tool not in SUPPORTED:
+            return ToolResult(f"error: tool must be one of {', '.join(SUPPORTED)}", is_error=True)
+        scan = parse(tool, str(args.get("output", "")))
+        for service in scan.services:
+            eng.add_service(**service)
+        for finding in scan.findings:
+            eng.add_finding(**finding)
+        if not scan.services and not scan.findings:
+            return ToolResult(f"parsed {tool}: nothing recognised (check the output format)")
+        return ToolResult(
+            f"imported {tool}: {len(scan.services)} service(s), {len(scan.findings)} finding(s)"
+        )
 
 
 class GenerateReportTool(Tool):
