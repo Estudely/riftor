@@ -7,6 +7,8 @@
 [![CI](https://github.com/Estudely/riftor/actions/workflows/ci.yml/badge.svg)](https://github.com/Estudely/riftor/actions/workflows/ci.yml)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)](./LICENSE)
 
+![riftor demo](./demo.gif)
+
 riftor is a Python TUI pentest assistant: a full-screen [Textual](https://textual.textualize.io/)
 interface backed by [litellm](https://docs.litellm.ai/), organised around the
 **RIFT** methodology — **R**econ → **I**ntrusion → **F**oothold → **T**akeover.

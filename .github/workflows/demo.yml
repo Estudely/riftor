@@ -1,0 +1,46 @@
+name: demo
+
+# Render demo.gif from demo.tape with VHS and commit it back.
+# Runs on demand, or automatically when the tape/workflow changes.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "demo.tape"
+      - ".github/workflows/demo.yml"
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  ANTHROPIC_API_KEY: sk-demo  # dummy; the tape only uses offline commands
+
+jobs:
+  gif:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Install riftor (on PATH for VHS)
+        run: |
+          uv venv /opt/rv
+          uv pip install --python /opt/rv .
+          echo "/opt/rv/bin" >> "$GITHUB_PATH"
+      - name: Render demo.gif
+        uses: charmbracelet/vhs-action@v2
+        with:
+          path: demo.tape
+      - name: Commit demo.gif if changed
+        run: |
+          if [ -n "$(git status --porcelain demo.gif)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add demo.gif
+            git commit -m "chore: regenerate demo.gif [skip ci]"
+            git push
+          else
+            echo "demo.gif unchanged"
+          fi
