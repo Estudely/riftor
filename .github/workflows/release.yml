@@ -20,6 +20,10 @@ on:
     tags:
       - "v*"
 
+# Run JS actions on Node 24 (silences the Node 20 deprecation notice).
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   build:
     runs-on: ubuntu-latest
