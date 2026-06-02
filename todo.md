@@ -99,7 +99,8 @@ The agent tracks the current stage; the TUI shows `[R·I·F·T]` in the status b
 - [x] CONTRIBUTING + issue templates + PR template
 - [x] Docker image (Dockerfile + .dockerignore; build verified -> `riftor 0.0.2`)
 - [x] README badges (PyPI / CI / license) + Docker section
-- [ ] Docs site + demo (asciinema/gif) — needs a terminal recording
+- [x] Demo GIF — VHS `demo.tape` rendered + auto-committed by CI (`demo.yml`)
+- [ ] Docs site
 - [ ] Launch
 
 ---
