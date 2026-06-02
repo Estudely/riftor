@@ -94,11 +94,12 @@ The agent tracks the current stage; the TUI shows `[R·I·F·T]` in the status b
 - [x] GitHub Release `v0.0.1` (notes + dist artifacts)
 - [x] Release CI: GitHub Actions -> PyPI **trusted publishing** on `v*` tags
 - [x] Trusted publisher configured; **0.0.2 auto-published via CI** ✅
-- [ ] CI hygiene: commit `uv.lock` (caching/reproducible); bump action versions (Node 20 -> 24)
-- [ ] Test CI: run the smoke suite on push/PR
-- [ ] CONTRIBUTING + issue/PR templates
-- [ ] Package for Docker (pip / uv tool / pipx already work)
-- [ ] Docs site + demo (asciinema/gif)
+- [x] CI hygiene: `uv.lock` committed + uv cache enabled in CI
+- [x] Test CI: smoke suite + ruff on push/PR (py3.11 + py3.12)
+- [x] CONTRIBUTING + issue templates + PR template
+- [x] Docker image (Dockerfile + .dockerignore; build verified -> `riftor 0.0.2`)
+- [x] README badges (PyPI / CI / license) + Docker section
+- [ ] Docs site + demo (asciinema/gif) — needs a terminal recording
 - [ ] Launch
 
 ---

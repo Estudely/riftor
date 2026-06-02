@@ -1,0 +1,33 @@
+name: Feature request
+description: Suggest an idea or improvement for riftor
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What are you trying to do that riftor makes hard today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like riftor to do?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - TUI / UX
+        - Tools / agent loop
+        - Scope / engagement / reporting
+        - Providers / models
+        - Packaging / distribution
+        - Other

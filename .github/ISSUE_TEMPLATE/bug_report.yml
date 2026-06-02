@@ -1,0 +1,54 @@
+name: Bug report
+description: Something in riftor isn't working as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please run `riftor --version` first — many issues are
+        fixed by upgrading (`pip install -U riftor`).
+  - type: input
+    id: version
+    attributes:
+      label: riftor version
+      description: Output of `riftor --version`
+      placeholder: riftor 0.0.2
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what actually happened.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. run `riftor`
+        2. type ...
+        3. ...
+  - type: input
+    id: model
+    attributes:
+      label: Model / provider
+      placeholder: anthropic/claude-sonnet-4-6
+  - type: input
+    id: os
+    attributes:
+      label: OS / terminal
+      placeholder: Ubuntu 24.04 / kitty
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error output / logs
+      render: shell
+  - type: checkboxes
+    id: authorized
+    attributes:
+      label: Confirmation
+      options:
+        - label: This report does not involve testing systems I am not authorized to assess.
+          required: true

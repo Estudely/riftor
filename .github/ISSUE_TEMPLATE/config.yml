@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question / discussion
+    url: https://github.com/Estudely/riftor/discussions
+    about: Ask questions or share ideas here rather than opening an issue.

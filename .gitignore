@@ -8,7 +8,7 @@ dist/
 
 # uv / venv
 .venv/
-uv.lock
+# uv.lock is committed for reproducible installs + CI caching
 
 # riftor local state
 .riftor/

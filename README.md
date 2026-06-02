@@ -3,6 +3,10 @@
 > An open-source offensive-security AI agent that lives in your terminal.
 > **Find the rift. Open it. Cross through.**
 
+[![PyPI](https://img.shields.io/pypi/v/riftor)](https://pypi.org/project/riftor/)
+[![CI](https://github.com/Estudely/riftor/actions/workflows/ci.yml/badge.svg)](https://github.com/Estudely/riftor/actions/workflows/ci.yml)
+[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)](./LICENSE)
+
 riftor is a Python TUI pentest assistant: a full-screen [Textual](https://textual.textualize.io/)
 interface backed by [litellm](https://docs.litellm.ai/), organised around the
 **RIFT** methodology — **R**econ → **I**ntrusion → **F**oothold → **T**akeover.
@@ -38,6 +42,14 @@ it falls back to that.
 git clone https://github.com/Estudely/riftor && cd riftor
 uv sync && uv run riftor
 ```
+
+### Docker
+```bash
+docker build -t riftor .
+docker run -it --rm -e ANTHROPIC_API_KEY -v "$PWD:/work" riftor
+```
+The image is minimal (no `nmap`/`httpx`/etc.). For full recon tooling, run riftor
+on a host that has the tools installed, or extend the image.
 
 ## Configure
 `~/.config/riftor/config.toml`:
