@@ -28,6 +28,8 @@ from riftor.engagement.report import write_reports
 from riftor.safety.audit import AuditLog
 from riftor.safety.permissions import ConfirmScreen, Permissions
 from riftor.tools import ToolContext, ToolResult
+from riftor.tui.config_screen import ConfigScreen
+from riftor.tui.theme import THEMES, css_variable_defaults, palette
 from riftor.tui.widgets import STAGE_NAMES, Banner, StatusBar
 
 if TYPE_CHECKING:
@@ -44,6 +46,8 @@ HELP = """\
 - `/findings` — list recorded findings
 - `/report [md|html|both]` — write a pentest report to `.riftor/reports/`
 - `/sessions` — list saved sessions · `/resume <id>` · `/new` — start fresh
+- `/theme [name]` — show or switch theme (rift/void/fracture/singularity)
+- `/config` — open the settings panel
 - `/tools` — list available tools
 - `/lore` — toggle the rift persona
 - `/exit` — leave riftor (also `Ctrl+C`)
@@ -83,7 +87,27 @@ class RiftorApp(App):
         yield StatusBar(self.config.model, lore=self.config.lore)
         yield Input(placeholder="task riftor — or /help", id="prompt")
 
+    def get_css_variables(self) -> dict[str, str]:
+        # Ensure $violet/$user-bg/etc. always resolve, even on the first paint
+        # before our theme is active (built-in themes lack these variables).
+        variables = dict(css_variable_defaults())
+        variables.update(super().get_css_variables())
+        return variables
+
+    def _apply_theme(self, name: str) -> None:
+        if name not in THEMES:
+            name = "rift"
+        self.theme = name
+        try:
+            self.query_one(Banner).refresh()
+            self.status.refresh_bar()
+        except Exception:  # noqa: BLE001 — widgets may not be mounted yet
+            pass
+
     def on_mount(self) -> None:
+        for theme in THEMES.values():
+            self.register_theme(theme)
+        self._apply_theme(self.config.theme)
         self.query_one("#prompt", Input).focus()
         self.status.set_stage(self.engagement.stage)
         self._refresh_status()
@@ -118,12 +142,15 @@ class RiftorApp(App):
         return self.query_one(StatusBar)
 
     # ---- mount helpers ---------------------------------------------------------
+    def _pal(self) -> dict[str, str]:
+        return palette(self)
+
     def _note(self, text: str) -> None:
-        self.chat.mount(Static(Text(text, style="italic #5a5a6a"), classes="note"))
+        self.chat.mount(Static(Text(text, style=f"italic {self._pal()['dim']}"), classes="note"))
         self.chat.scroll_end(animate=False)
 
     def _error(self, text: str) -> None:
-        self.chat.mount(Static(Text(text, style="bold #fca5a5"), classes="note"))
+        self.chat.mount(Static(Text(text, style=f"bold {self._pal()['danger']}"), classes="note"))
         self.chat.scroll_end(animate=False)
 
     def _add_user(self, text: str) -> None:
@@ -193,8 +220,46 @@ class RiftorApp(App):
             self._resume_cmd(arg)
         elif cmd == "/new":
             self._new_session()
+        elif cmd == "/theme":
+            self._theme_cmd(arg)
+        elif cmd == "/config":
+            self._open_config()
         else:
             self._note(f"unknown command: {cmd} — try /help")
+
+    def _theme_cmd(self, arg: str) -> None:
+        name = arg.strip().lower()
+        if not name:
+            self._note(f"theme: {self.config.theme} · available: {', '.join(THEMES)}")
+            return
+        if name not in THEMES:
+            self._note(f"unknown theme: {name} · available: {', '.join(THEMES)}")
+            return
+        self.config.theme = name
+        self.config.save()
+        self._apply_theme(name)
+        self._note(f"theme → {name}")
+
+    @work(group="config")
+    async def _open_config(self) -> None:
+        result = await self.push_screen_wait(ConfigScreen(self.config))
+        if not isinstance(result, dict):
+            self._note("config unchanged")
+            return
+        self.config.model = result["model"]
+        self.config.temperature = result["temperature"]
+        self.config.max_tokens = result["max_tokens"]
+        self.config.lore = result["lore"]
+        if result.get("api_key"):
+            self.config.api_key = result["api_key"]
+        self.provider = Provider(self.config)
+        self.context.lore = self.config.lore
+        self.status.set_lore(self.config.lore)
+        self.status.set_model(self.config.model)
+        self.config.theme = result["theme"]
+        self._apply_theme(result["theme"])
+        self.config.save()
+        self._note("config saved")
 
     def _set_stage(self, arg: str) -> None:
         if not arg:
@@ -316,6 +381,7 @@ class RiftorApp(App):
 
     def _replay_transcript(self, messages: list[dict]) -> None:
         """Re-render a saved conversation (compact) so the screen reflects history."""
+        p = self._pal()
         for msg in messages:
             role = msg.get("role")
             if role == "user":
@@ -328,11 +394,11 @@ class RiftorApp(App):
                     self.chat.mount(Markdown(content, classes="assistant"))
                 for call in msg.get("tool_calls") or []:
                     name = call.get("function", {}).get("name", "tool")
-                    self.chat.mount(Static(Text(f"⛏ {name}", style="#22d3ee"), classes="tool"))
+                    self.chat.mount(Static(Text(f"⛏ {name}", style=p["cyan"]), classes="tool"))
             elif role == "tool":
                 content = str(msg.get("content", ""))
                 first = content.splitlines()[0] if content else ""
-                self.chat.mount(Static(Text(first[:200], style="#5a5a6a"), classes="tool-result"))
+                self.chat.mount(Static(Text(first[:200], style=p["dim"]), classes="tool-result"))
         self.chat.scroll_end(animate=False)
 
     def action_clear(self) -> None:
@@ -476,12 +542,13 @@ class RiftorApp(App):
 
     # ---- tool rendering --------------------------------------------------------
     async def _show_tool_call(self, name: str, preview: str, danger: bool = False) -> None:
+        p = self._pal()
         line = Text()
-        line.append("⛏ ", style="#22d3ee")
-        line.append(name, style="bold #f0abfc" if danger else "bold #22d3ee")
+        line.append("⛏ ", style=p["cyan"])
+        line.append(name, style=f"bold {p['magenta']}" if danger else f"bold {p['cyan']}")
         if preview:
             line.append("  ")
-            line.append(preview, style="#8b8ba7")
+            line.append(preview, style=p["muted"])
         await self._mount(Static(line, classes="tool"))
 
     async def _show_tool_result(self, content: str, is_error: bool = False, max_lines: int = 25) -> None:

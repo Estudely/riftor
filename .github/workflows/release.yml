@@ -1,0 +1,55 @@
+name: release
+
+# Publish to PyPI whenever a version tag is pushed (e.g. v0.1.0).
+# Uses PyPI Trusted Publishing (OIDC) — no API token stored in the repo.
+#
+# One-time setup on PyPI (https://pypi.org/manage/project/riftor/settings/publishing/):
+#   add a Trusted Publisher ->
+#     Owner:        Estudely
+#     Repository:   riftor
+#     Workflow:     release.yml
+#     Environment:  pypi
+#
+# Release flow:
+#   1. bump `version` in pyproject.toml
+#   2. commit, then: git tag vX.Y.Z && git push origin vX.Y.Z
+#   3. this workflow builds + publishes; PyPI rejects duplicate versions.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Verify tag matches pyproject version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          VER="$(uv version --short 2>/dev/null || grep -m1 '^version' pyproject.toml | cut -d'"' -f2)"
+          echo "tag=$TAG pyproject=$VER"
+          test "$TAG" = "$VER" || { echo "::error::tag v$TAG != pyproject version $VER"; exit 1; }
+      - name: Build sdist + wheel
+        run: uv build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write  # required for trusted publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

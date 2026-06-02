@@ -5,16 +5,19 @@ from __future__ import annotations
 from rich.text import Text
 from textual.widgets import Static
 
+from riftor.tui.theme import palette
+
 RIFT_STAGES = ["R", "I", "F", "T"]
 STAGE_NAMES = {"R": "Recon", "I": "Intrusion", "F": "Foothold", "T": "Takeover"}
 
 
 class Banner(Static):
     def render(self) -> Text:
+        p = palette(self.app)
         t = Text()
-        t.append("riftor", style="bold #a855f7")
-        t.append("  ▍  ", style="#22d3ee")
-        t.append("find the rift · open it · cross through", style="dim #8b8ba7")
+        t.append("riftor", style=f"bold {p['violet']}")
+        t.append("  ▍  ", style=p["cyan"])
+        t.append("find the rift · open it · cross through", style=f"dim {p['muted']}")
         return t
 
 
@@ -59,26 +62,27 @@ class StatusBar(Static):
         self.refresh_bar()
 
     def refresh_bar(self) -> None:
+        p = palette(self.app)
         t = Text()
-        t.append("[ ", style="#3a3a4a")
+        t.append("[ ", style=p["faint"])
         for i, stage in enumerate(RIFT_STAGES):
-            t.append(stage, style="bold #22d3ee" if stage == self.stage else "#4a4a5a")
+            t.append(stage, style=f"bold {p['cyan']}" if stage == self.stage else p["dim"])
             if i < len(RIFT_STAGES) - 1:
-                t.append("·", style="#3a3a4a")
-        t.append(" ]  ", style="#3a3a4a")
-        t.append(STAGE_NAMES[self.stage], style="#a855f7")
-        t.append("   scope:", style="#5a5a6a")
+                t.append("·", style=p["faint"])
+        t.append(" ]  ", style=p["faint"])
+        t.append(STAGE_NAMES[self.stage], style=p["violet"])
+        t.append("   scope:", style=p["dim"])
         if self.scope_count:
-            t.append(str(self.scope_count), style="#8b8ba7")
-            t.append("" if self.enforce else " (off)", style="#fca5a5")
+            t.append(str(self.scope_count), style=p["muted"])
+            t.append("" if self.enforce else " (off)", style=p["danger"])
         else:
-            t.append("none", style="#fca5a5" if self.enforce else "#5a5a6a")
-        t.append("   finds:", style="#5a5a6a")
-        t.append(str(self.findings), style="#f0abfc" if self.findings else "#8b8ba7")
-        t.append("   model:", style="#5a5a6a")
-        t.append(self.model, style="#8b8ba7")
-        t.append("   lore:", style="#5a5a6a")
-        t.append("on" if self.lore else "off", style="#8b8ba7")
+            t.append("none", style=p["danger"] if self.enforce else p["dim"])
+        t.append("   finds:", style=p["dim"])
+        t.append(str(self.findings), style=p["magenta"] if self.findings else p["muted"])
+        t.append("   model:", style=p["dim"])
+        t.append(self.model, style=p["muted"])
+        t.append("   lore:", style=p["dim"])
+        t.append("on" if self.lore else "off", style=p["muted"])
         if self.busy:
-            t.append("   ⟳ opening rift…", style="#22d3ee")
+            t.append("   ⟳ opening rift…", style=p["cyan"])
         self.update(t)

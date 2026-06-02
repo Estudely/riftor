@@ -80,18 +80,23 @@ The agent tracks the current stage; the TUI shows `[R·I·F·T]` in the status b
 - [x] `record_finding` gains optional `cvss_vector` (severity auto-derived)
 - [x] Session persistence + auto-resume (`/sessions`, `/resume <id>`, `/new`)
 - [x] Tests: CVSS scoring, report render, session round-trip (all offline-green)
-- [~] Live agent re-verify pending a fresh API key (old key rotated -> 401)
+- [x] Live agent re-verify (record_finding+CVSS -> report; session resume) ✅
 
-**4b — polish (next):**
-- [ ] Config screen (`/config` modal)
-- [ ] Theme variants (Void / Fracture / Singularity) + `/theme`
-- [ ] Verify local Ollama path (needs a pullable local model)
+**4b — polish  ✅**
+- [x] Config screen (`/config` modal: model/temp/max_tokens/theme/lore/api_key)
+- [x] Full live theming via Textual theme tokens: rift / void / fracture / singularity
+- [x] `/theme [name]` live switch + persisted to config; palette-driven widgets
+- [x] Tests: test_themes + headless `/theme` + `/config` checks (9/9 suites green)
+- [~] Local Ollama path: code-path verified earlier; real model run deferred (no pull)
 
 ### Phase 5 — Distribution + community
-- [ ] Package for `uv tool install` / `pipx` / Docker
-- [ ] Verify PyPI name `riftor` availability
-- [ ] Docs + demo
-- [ ] CONTRIBUTING, CI, issue templates
+- [x] On PyPI: `pip install riftor` (0.0.1) — name reserved, installable
+- [x] GitHub Release `v0.0.1` (notes + dist artifacts)
+- [x] Release CI: GitHub Actions -> PyPI **trusted publishing** on `v*` tags
+      (one-time: add the trusted publisher in PyPI project settings)
+- [ ] Package for `uv tool install` / `pipx` / Docker (pip works today)
+- [ ] Docs site + demo (asciinema/gif)
+- [ ] CONTRIBUTING, issue templates, test CI on PRs
 - [ ] Launch
 
 ---

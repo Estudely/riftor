@@ -17,6 +17,11 @@ from textual.widgets import Input, Markdown, Static
 async def main() -> None:
     cfg = Config(model="ollama_chat/smoke", api_base="http://localhost:11434", lore=True)
     workdir = tempfile.mkdtemp(prefix="riftor-smoke-")
+    # redirect the config path so /theme and /config saves never touch the real one
+    import riftor.config as cfgmod
+
+    cfgmod.CONFIG_DIR = Path(workdir)
+    cfgmod.CONFIG_PATH = Path(workdir) / "config.toml"
     app = RiftorApp(cfg, workdir=Path(workdir))
     async with app.run_test() as pilot:
         # composes with the core widgets
@@ -76,15 +81,34 @@ async def main() -> None:
             seen["warn"] = list(getattr(screen, "scope_warning", []) or [])
             return "deny"
 
+        orig_wait = app.push_screen_wait
         app.push_screen_wait = fake_wait  # type: ignore[method-assign]
         await app._run_tool(
             ToolCall(id="t1", name="bash", arguments={"command": "curl http://evil.example.net"})
         )
+        app.push_screen_wait = orig_wait  # restore so later modals work
         assert seen["warn"] and "evil.example.net" in seen["warn"], seen["warn"]
         assert any(
             m.get("role") == "tool" and "out of scope" in (m.get("content") or "")
             for m in app.context._messages
         ), "expected out-of-scope block fed back to model"
+
+        # /theme switches the live theme
+        inp.value = "/theme void"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.theme == "void", app.theme
+
+        # /config opens the modal; escape cancels it
+        from riftor.tui.config_screen import ConfigScreen
+
+        inp.value = "/config"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(app.screen, ConfigScreen), type(app.screen)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, ConfigScreen)
 
         # /report writes a file; /sessions lists the auto-saved session
         inp.value = "/report md"
@@ -147,6 +171,21 @@ async def test_tools() -> None:
             assert s["type"] == "function" and s["function"]["name"]
 
     print("TOOLS OK")
+
+
+def test_themes() -> None:
+    from riftor.tui.theme import THEMES, css_variable_defaults
+
+    assert {"rift", "void", "fracture", "singularity"} <= set(THEMES)
+    required = {
+        "violet", "cyan", "magenta", "danger", "muted", "dim", "faint", "border",
+        "user-bg", "user-fg", "assistant-bg", "tool-bg",
+    }
+    for name, theme in THEMES.items():
+        missing = required - set(theme.variables)
+        assert not missing, (name, missing)
+    assert required <= set(css_variable_defaults())
+    print("THEMES OK")
 
 
 def test_cvss() -> None:
@@ -312,6 +351,7 @@ if __name__ == "__main__":
     test_repair()
     test_scope()
     asyncio.run(test_engagement())
+    test_themes()
     test_cvss()
     test_report()
     test_session()
