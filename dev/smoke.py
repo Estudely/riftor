@@ -140,6 +140,37 @@ async def test_tools() -> None:
     print("TOOLS OK")
 
 
+def test_repair() -> None:
+    """A dangling tool_use (interrupted turn) gets a synthetic result, in order."""
+    from riftor.agent.context import Context
+
+    ctx = Context(lore=False)
+    ctx.add_user("scan it")
+    ctx.add_message(
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"id": "a", "type": "function", "function": {"name": "bash", "arguments": "{}"}},
+                {"id": "b", "type": "function", "function": {"name": "bash", "arguments": "{}"}},
+            ],
+        }
+    )
+    ctx.add_tool_result("a", "done A")
+    # tool 'b' never got a result; then a new user turn arrives (the interruption)
+    ctx.add_user("you got cut off")
+
+    assert ctx.repair() == 1
+    msgs = ctx._messages
+    ai = next(i for i, m in enumerate(msgs) if m.get("role") == "assistant" and m.get("tool_calls"))
+    assert msgs[ai + 1]["role"] == "tool" and msgs[ai + 1]["tool_call_id"] == "a"
+    assert msgs[ai + 2]["role"] == "tool" and msgs[ai + 2]["tool_call_id"] == "b"
+    assert msgs[ai + 3]["role"] == "user"  # synthetic result inserted *before* next user msg
+    assert ctx.repair() == 0  # idempotent
+
+    print("REPAIR OK")
+
+
 def test_scope() -> None:
     """Scope matching + host extraction (no model)."""
     from riftor.engagement.scope import Scope, extract_hosts
@@ -203,5 +234,6 @@ async def test_engagement() -> None:
 if __name__ == "__main__":
     asyncio.run(main())
     asyncio.run(test_tools())
+    test_repair()
     test_scope()
     asyncio.run(test_engagement())

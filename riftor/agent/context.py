@@ -51,5 +51,46 @@ class Context:
             {"role": "tool", "tool_call_id": tool_call_id, "content": content}
         )
 
+    def repair(self) -> int:
+        """Ensure every assistant tool_call has a following tool result.
+
+        If a turn was interrupted (cancel, new message mid-run, error), an
+        assistant ``tool_use`` can be left without its ``tool_result``, which
+        Anthropic rejects. We insert a synthetic result for each missing id,
+        immediately after that assistant message's existing tool results.
+        Returns the number of synthetic results inserted.
+        """
+        repaired: list[dict] = []
+        inserted = 0
+        messages = self._messages
+        i = 0
+        while i < len(messages):
+            msg = messages[i]
+            repaired.append(msg)
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                expected = [tc.get("id") for tc in msg["tool_calls"] if tc.get("id")]
+                j = i + 1
+                provided: set[str] = set()
+                while j < len(messages) and messages[j].get("role") == "tool":
+                    repaired.append(messages[j])
+                    provided.add(messages[j].get("tool_call_id"))
+                    j += 1
+                for tid in expected:
+                    if tid not in provided:
+                        repaired.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tid,
+                                "content": "[interrupted: no tool result was recorded]",
+                            }
+                        )
+                        inserted += 1
+                i = j
+                continue
+            i += 1
+        if inserted:
+            self._messages = repaired
+        return inserted
+
     def clear(self) -> None:
         self._messages.clear()

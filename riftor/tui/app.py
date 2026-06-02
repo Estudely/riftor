@@ -241,12 +241,19 @@ class RiftorApp(App):
 
     def action_cancel(self) -> None:
         self.workers.cancel_all()
+        self._close_modals()
         self.status.set_busy(False)
         self._note("cancelled")
+
+    def _close_modals(self) -> None:
+        """Pop any permission modal left over from a cancelled worker."""
+        while isinstance(self.screen, ConfirmScreen):
+            self.pop_screen()
 
     # ---- agent loop ------------------------------------------------------------
     @work(exclusive=True)
     async def _agent(self, user_text: str) -> None:
+        self._close_modals()  # a prior run may have been cancelled mid-prompt
         self.context.add_user(user_text)
         self.status.set_busy(True)
         try:
@@ -268,6 +275,10 @@ class RiftorApp(App):
             self.chat.scroll_end(animate=False)
 
     async def _assistant_turn(self) -> Turn:
+        # Guarantee a valid history: any dangling tool_use (from an interrupted
+        # or cancelled turn) gets a synthetic result before we call the model.
+        self.context.repair()
+
         bubble = Markdown("", classes="assistant")
         await self._mount(bubble)
         buffer: list[str] = []
