@@ -27,7 +27,13 @@ class Store:
         self._conn = sqlite3.connect(str(path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
+        self._migrate()
         self._conn.commit()
+
+    def _migrate(self) -> None:
+        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(findings)")}
+        if "cvss" not in cols:
+            self._conn.execute("ALTER TABLE findings ADD COLUMN cvss TEXT")
 
     # -- meta -------------------------------------------------------------------
     def set_meta(self, key: str, value: str) -> None:
@@ -88,6 +94,9 @@ class Store:
     def list_services(self) -> list[dict]:
         return [dict(r) for r in self._conn.execute("SELECT * FROM services ORDER BY host, port")]
 
+    def list_hosts(self) -> list[dict]:
+        return [dict(r) for r in self._conn.execute("SELECT * FROM hosts ORDER BY host")]
+
     # -- findings ---------------------------------------------------------------
     def add_finding(
         self,
@@ -97,11 +106,12 @@ class Store:
         evidence: str = "",
         recommendation: str = "",
         stage: str = "",
+        cvss: str = "",
     ) -> int:
         cur = self._conn.execute(
-            "INSERT INTO findings(title, severity, host, evidence, recommendation, stage, ts) "
-            "VALUES(?, ?, ?, ?, ?, ?, ?)",
-            (title, severity, host, evidence, recommendation, stage, time.time()),
+            "INSERT INTO findings(title, severity, host, evidence, recommendation, stage, cvss, ts) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+            (title, severity, host, evidence, recommendation, stage, cvss, time.time()),
         )
         self._conn.commit()
         return int(cur.lastrowid)

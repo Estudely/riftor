@@ -86,6 +86,15 @@ async def main() -> None:
             for m in app.context._messages
         ), "expected out-of-scope block fed back to model"
 
+        # /report writes a file; /sessions lists the auto-saved session
+        inp.value = "/report md"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert list((Path(workdir) / ".riftor" / "reports").glob("*.md")), "report not written"
+        inp.value = "/sessions"
+        await pilot.press("enter")
+        await pilot.pause()
+
         # /clear empties the chat
         inp.value = "/clear"
         await pilot.press("enter")
@@ -138,6 +147,72 @@ async def test_tools() -> None:
             assert s["type"] == "function" and s["function"]["name"]
 
     print("TOOLS OK")
+
+
+def test_cvss() -> None:
+    from riftor.engagement.cvss import base_score, severity_from_score
+
+    assert base_score("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H") == 9.8
+    assert severity_from_score(9.8) == "critical"
+    # scope-changed XSS, well-known 6.1 medium
+    assert base_score("CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N") == 6.1
+    assert severity_from_score(6.1) == "medium"
+    assert base_score("not-a-vector") is None
+    assert severity_from_score(0.0) == "info"
+    print("CVSS OK")
+
+
+def test_report() -> None:
+    from riftor.engagement import Engagement
+    from riftor.engagement.report import build_html, build_markdown, report_data, write_reports
+
+    with tempfile.TemporaryDirectory() as d:
+        eng = Engagement(Path(d))
+        eng.add_scope("example.com", "in")
+        eng.add_service(host="10.0.0.5", port=443, service="https", version="nginx")
+        eng.add_finding(
+            title="SQL Injection",
+            severity="high",
+            host="10.0.0.5",
+            evidence="' OR 1=1 --",
+            recommendation="Use parameterized queries",
+            cvss="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        )
+
+        data = report_data(eng)
+        assert data["findings"][0]["cvss_score"] == 9.8
+
+        md = build_markdown(data)
+        for needle in ("SQL Injection", "9.8", "10.0.0.5", "Use parameterized queries"):
+            assert needle in md, needle
+
+        html = build_html(data)
+        assert "<html" in html and "SQL Injection" in html and "9.8" in html
+
+        paths = write_reports(eng, "both")
+        assert len(paths) == 2 and all(p.exists() for p in paths)
+
+    print("REPORT OK")
+
+
+def test_session() -> None:
+    from riftor.agent import session
+
+    with tempfile.TemporaryDirectory() as d:
+        wd = Path(d)
+        msgs = [{"role": "user", "content": "enumerate the host"}, {"role": "assistant", "content": "ok"}]
+        path = session.save(wd, "20260101-000000", msgs, "anthropic/claude-sonnet-4-6")
+        assert path.exists()
+
+        loaded = session.load(wd, "20260101-000000")
+        assert loaded["messages"] == msgs
+        assert loaded["title"] == "enumerate the host"
+
+        listed = session.list_sessions(wd)
+        assert listed and listed[0]["id"] == "20260101-000000"
+        assert session.latest(wd)["messages"] == msgs
+
+    print("SESSION OK")
 
 
 def test_repair() -> None:
@@ -237,3 +312,6 @@ if __name__ == "__main__":
     test_repair()
     test_scope()
     asyncio.run(test_engagement())
+    test_cvss()
+    test_report()
+    test_session()

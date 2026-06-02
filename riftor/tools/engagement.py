@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from riftor.engagement.cvss import base_score, severity_from_score
+from riftor.engagement.report import write_reports
 from riftor.tools.base import Tool, ToolContext, ToolResult
 
 _SEVERITIES = ["info", "low", "medium", "high", "critical"]
@@ -94,6 +96,12 @@ class RecordFindingTool(Tool):
             "host": {"type": "string"},
             "evidence": {"type": "string"},
             "recommendation": {"type": "string"},
+            "cvss_vector": {
+                "type": "string",
+                "description": "Optional CVSS v3.1 vector, e.g. "
+                "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H. If given, severity is "
+                "derived from the computed score.",
+            },
         },
         "required": ["title", "severity"],
     }
@@ -105,11 +113,42 @@ class RecordFindingTool(Tool):
         severity = str(args.get("severity", "info")).lower()
         if severity not in _SEVERITIES:
             severity = "info"
+
+        vector = str(args.get("cvss_vector") or "").strip()
+        score = base_score(vector) if vector else None
+        if score is not None:
+            severity = severity_from_score(score)
+        else:
+            vector = ""  # don't store an invalid vector
+
         fid = eng.add_finding(
             title=str(args["title"]),
             severity=severity,
             host=str(args.get("host") or ""),
             evidence=str(args.get("evidence") or ""),
             recommendation=str(args.get("recommendation") or ""),
+            cvss=vector,
         )
-        return ToolResult(f"recorded finding #{fid} [{severity}] {args['title']}")
+        tag = severity + (f" · CVSS {score:.1f}" if score is not None else "")
+        return ToolResult(f"recorded finding #{fid} [{tag}] {args['title']}")
+
+
+class GenerateReportTool(Tool):
+    name = "generate_report"
+    description = "Write a pentest report of the current engagement to disk (markdown + HTML)."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "format": {"type": "string", "enum": ["md", "html", "both"]},
+        },
+    }
+
+    async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        eng = ctx.engagement
+        if eng is None:
+            return ToolResult("error: no active engagement", is_error=True)
+        fmt = str(args.get("format") or "both").lower()
+        if fmt not in ("md", "html", "both"):
+            fmt = "both"
+        paths = write_reports(eng, fmt)
+        return ToolResult("wrote report:\n" + "\n".join(str(p) for p in paths))

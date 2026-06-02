@@ -92,5 +92,12 @@ class Context:
             self._messages = repaired
         return inserted
 
+    def dump(self) -> list[dict]:
+        """Serializable copy of the message history (without the system prompt)."""
+        return [dict(m) for m in self._messages]
+
+    def load(self, messages: list[dict]) -> None:
+        self._messages = [dict(m) for m in messages]
+
     def clear(self) -> None:
         self._messages.clear()

@@ -73,11 +73,19 @@ The agent tracks the current stage; the TUI shows `[R·I·F·T]` in the status b
       scope-enforced bash + records results; dedicated output parsers deferred
 
 ### Phase 4 — Reporting + polish
-- [ ] Findings -> markdown/PDF report (CVSS + evidence)
-- [ ] Session persistence + resume
-- [ ] Config screen
-- [ ] Verify local-model (Ollama) path end-to-end
-- [ ] Theme variants (Void / Fracture / Singularity)
+**4a — reporting + sessions  ✅**
+- [x] Findings -> markdown + self-contained HTML report (CVSS v3.1 score + evidence)
+- [x] Pure-python CVSS v3.1 base score (engagement/cvss.py)
+- [x] `generate_report` tool + `/report [md|html|both]` command
+- [x] `record_finding` gains optional `cvss_vector` (severity auto-derived)
+- [x] Session persistence + auto-resume (`/sessions`, `/resume <id>`, `/new`)
+- [x] Tests: CVSS scoring, report render, session round-trip (all offline-green)
+- [~] Live agent re-verify pending a fresh API key (old key rotated -> 401)
+
+**4b — polish (next):**
+- [ ] Config screen (`/config` modal)
+- [ ] Theme variants (Void / Fracture / Singularity) + `/theme`
+- [ ] Verify local Ollama path (needs a pullable local model)
 
 ### Phase 5 — Distribution + community
 - [ ] Package for `uv tool install` / `pipx` / Docker

@@ -20,9 +20,11 @@ from textual.containers import VerticalScroll
 from textual.widgets import Input, Markdown, Static
 
 from riftor import tools
+from riftor.agent import session as sessions
 from riftor.agent.context import Context
 from riftor.agent.provider import Provider, ToolCall, Turn
 from riftor.engagement import Engagement
+from riftor.engagement.report import write_reports
 from riftor.safety.audit import AuditLog
 from riftor.safety.permissions import ConfirmScreen, Permissions
 from riftor.tools import ToolContext, ToolResult
@@ -40,6 +42,8 @@ HELP = """\
 - `/stage [R|I|F|T]` — show or set the RIFT stage (Recon/Intrusion/Foothold/Takeover)
 - `/scope [add|out|rm <t>|clear|on|off]` — manage in/out-of-scope targets
 - `/findings` — list recorded findings
+- `/report [md|html|both]` — write a pentest report to `.riftor/reports/`
+- `/sessions` — list saved sessions · `/resume <id>` · `/new` — start fresh
 - `/tools` — list available tools
 - `/lore` — toggle the rift persona
 - `/exit` — leave riftor (also `Ctrl+C`)
@@ -71,6 +75,7 @@ class RiftorApp(App):
         self.permissions = Permissions()
         self.audit = AuditLog()
         self.max_steps = 16
+        self.session_id = sessions.new_id()
 
     def compose(self) -> ComposeResult:
         yield Banner(id="banner")
@@ -82,9 +87,21 @@ class RiftorApp(App):
         self.query_one("#prompt", Input).focus()
         self.status.set_stage(self.engagement.stage)
         self._refresh_status()
-        self._note(
-            "rift online · set scope with /scope add <target> before tasking the agent"
-        )
+        if not self._resume_latest():
+            self._note(
+                "rift online · set scope with /scope add <target> before tasking the agent"
+            )
+
+    def _resume_latest(self) -> bool:
+        data = sessions.latest(self.workdir)
+        if not data or not data.get("messages"):
+            return False
+        self.session_id = data["id"]
+        self.context.load(data["messages"])
+        self.context.repair()
+        self._replay_transcript(self.context.messages)
+        self._note(f"resumed session {data['id']} ({len(data['messages'])} messages) · /new for fresh")
+        return True
 
     def _refresh_status(self) -> None:
         self.status.set_stage(self.engagement.stage)
@@ -135,6 +152,7 @@ class RiftorApp(App):
         arg = parts[1].strip() if len(parts) > 1 else ""
 
         if cmd in ("/exit", "/quit"):
+            self._save_session()
             self.exit()
         elif cmd == "/help":
             self.chat.mount(Markdown(HELP, classes="assistant"))
@@ -167,6 +185,14 @@ class RiftorApp(App):
             self._scope_cmd(arg)
         elif cmd == "/findings":
             self._show_findings()
+        elif cmd == "/report":
+            self._report_cmd(arg)
+        elif cmd == "/sessions":
+            self._sessions_cmd()
+        elif cmd == "/resume":
+            self._resume_cmd(arg)
+        elif cmd == "/new":
+            self._new_session()
         else:
             self._note(f"unknown command: {cmd} — try /help")
 
@@ -234,10 +260,89 @@ class RiftorApp(App):
         self.chat.mount(Markdown("**findings**\n\n" + "\n".join(rows), classes="assistant"))
         self.chat.scroll_end(animate=False)
 
+    def _report_cmd(self, arg: str) -> None:
+        fmt = (arg or "both").strip().lower()
+        if fmt not in ("md", "html", "both"):
+            self._note("usage: /report [md|html|both]")
+            return
+        try:
+            paths = write_reports(self.engagement, fmt)
+        except Exception as exc:  # noqa: BLE001
+            self._error(f"report failed — {exc}")
+            return
+        self._note("report written: " + ", ".join(str(p) for p in paths))
+
+    # ---- sessions --------------------------------------------------------------
+    def _save_session(self) -> None:
+        try:
+            sessions.save(self.workdir, self.session_id, self.context.dump(), self.config.model)
+        except Exception:  # noqa: BLE001 — persistence must never crash the app
+            pass
+
+    def _sessions_cmd(self) -> None:
+        rows = sessions.list_sessions(self.workdir)
+        if not rows:
+            self._note("no saved sessions")
+            return
+        lines = []
+        for s in rows:
+            marker = "→ " if s["id"] == self.session_id else "  "
+            lines.append(f"{marker}`{s['id']}` · {s['messages']} msgs · {s['title']}")
+        self.chat.mount(Markdown("**sessions**\n\n" + "\n".join(lines), classes="assistant"))
+        self.chat.scroll_end(animate=False)
+
+    def _resume_cmd(self, arg: str) -> None:
+        sid = arg.strip()
+        if not sid:
+            self._note("usage: /resume <id> — see /sessions")
+            return
+        data = sessions.load(self.workdir, sid)
+        if not data:
+            self._note(f"no such session: {sid}")
+            return
+        self.session_id = data["id"]
+        self.context.load(data.get("messages", []))
+        self.context.repair()
+        self.chat.remove_children()
+        self._replay_transcript(self.context.messages)
+        self._note(f"resumed session {sid} ({len(data.get('messages', []))} messages)")
+
+    def _new_session(self) -> None:
+        self._save_session()
+        self.session_id = sessions.new_id()
+        self.context.clear()
+        self.chat.remove_children()
+        self._note(f"new session {self.session_id}")
+
+    def _replay_transcript(self, messages: list[dict]) -> None:
+        """Re-render a saved conversation (compact) so the screen reflects history."""
+        for msg in messages:
+            role = msg.get("role")
+            if role == "user":
+                content = msg.get("content")
+                if isinstance(content, str) and content.strip():
+                    self.chat.mount(Static(Text(content), classes="user"))
+            elif role == "assistant":
+                content = msg.get("content")
+                if isinstance(content, str) and content.strip():
+                    self.chat.mount(Markdown(content, classes="assistant"))
+                for call in msg.get("tool_calls") or []:
+                    name = call.get("function", {}).get("name", "tool")
+                    self.chat.mount(Static(Text(f"⛏ {name}", style="#22d3ee"), classes="tool"))
+            elif role == "tool":
+                content = str(msg.get("content", ""))
+                first = content.splitlines()[0] if content else ""
+                self.chat.mount(Static(Text(first[:200], style="#5a5a6a"), classes="tool-result"))
+        self.chat.scroll_end(animate=False)
+
     def action_clear(self) -> None:
         self.context.clear()
         self.chat.remove_children()
         self._note("conversation cleared")
+
+    def action_quit(self) -> None:
+        self._save_session()
+        self.exit()
 
     def action_cancel(self) -> None:
         self.workers.cancel_all()
@@ -273,6 +378,7 @@ class RiftorApp(App):
         finally:
             self.status.set_busy(False)
             self.chat.scroll_end(animate=False)
+            self._save_session()
 
     async def _assistant_turn(self) -> Turn:
         # Guarantee a valid history: any dangling tool_use (from an interrupted
