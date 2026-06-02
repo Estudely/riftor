@@ -5,6 +5,8 @@ Run: uv run python dev/smoke.py
 """
 
 import asyncio
+import tempfile
+from pathlib import Path
 
 from riftor.config import Config
 from riftor.tui.app import RiftorApp
@@ -37,6 +39,17 @@ async def main() -> None:
         await pilot.pause()
         assert app.status.model == "ollama_chat/other"
 
+        # /stage moves through the RIFT stages (by name or letter)
+        assert app.status.stage == "R"
+        inp.value = "/stage intrusion"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.status.stage == "I", app.status.stage
+        inp.value = "/stage T"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.status.stage == "T", app.status.stage
+
         # /lore toggles persona
         assert app.config.lore is True
         inp.value = "/lore"
@@ -60,5 +73,51 @@ async def main() -> None:
     print("SMOKE OK")
 
 
+async def test_tools() -> None:
+    """Exercise the core tools offline (no model involved)."""
+    from riftor import tools
+    from riftor.tools import ToolContext
+
+    with tempfile.TemporaryDirectory() as d:
+        ctx = ToolContext(workdir=Path(d))
+
+        r = await tools.get("write").execute(
+            {"path": "a.txt", "content": "hello rift\nsecond line\n"}, ctx
+        )
+        assert not r.is_error, r.content
+
+        r = await tools.get("read").execute({"path": "a.txt"}, ctx)
+        assert "hello rift" in r.content, r.content
+
+        r = await tools.get("edit").execute(
+            {"path": "a.txt", "old_string": "hello", "new_string": "opened"}, ctx
+        )
+        assert not r.is_error, r.content
+        r = await tools.get("read").execute({"path": "a.txt"}, ctx)
+        assert "opened rift" in r.content, r.content
+
+        r = await tools.get("glob").execute({"pattern": "*.txt"}, ctx)
+        assert "a.txt" in r.content, r.content
+
+        r = await tools.get("grep").execute({"pattern": "opened"}, ctx)
+        assert "opened" in r.content, r.content
+
+        r = await tools.get("bash").execute({"command": "echo rift-ok"}, ctx)
+        assert "rift-ok" in r.content, r.content
+
+        # edit must refuse a missing string
+        r = await tools.get("edit").execute(
+            {"path": "a.txt", "old_string": "nope", "new_string": "x"}, ctx
+        )
+        assert r.is_error, "edit should fail on missing old_string"
+
+        # schemas are well-formed for litellm
+        for s in tools.schemas():
+            assert s["type"] == "function" and s["function"]["name"]
+
+    print("TOOLS OK")
+
+
 if __name__ == "__main__":
     asyncio.run(main())
+    asyncio.run(test_tools())

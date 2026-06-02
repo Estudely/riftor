@@ -1,8 +1,9 @@
 """riftor configuration: load/save + first-run default detection.
 
 Config lives at ``$XDG_CONFIG_HOME/riftor/config.toml`` (falls back to
-``~/.config/riftor/config.toml``). On first run we detect a sensible default:
-local Ollama if it's reachable, otherwise a cloud provider from env keys.
+``~/.config/riftor/config.toml``). riftor is cloud-first: on first run we pick a
+cloud provider from your environment keys (Anthropic, OpenAI, OpenRouter, …).
+A local Ollama server is supported as a fallback if one happens to be running.
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ OLLAMA_DEFAULT_BASE = "http://localhost:11434"
 class Config(BaseModel):
     """Runtime configuration for riftor."""
 
-    model: str = "ollama_chat/llama3.1"
+    model: str = "anthropic/claude-sonnet-4-6"
     api_base: str | None = None
     api_key: str | None = None
     temperature: float = 0.3
@@ -50,16 +51,19 @@ class Config(BaseModel):
 
     @classmethod
     def detect_defaults(cls) -> "Config":
-        models = _ollama_models()
-        if models:
-            return cls(model=f"ollama_chat/{models[0]}", api_base=OLLAMA_DEFAULT_BASE)
+        # Cloud-first: prefer a provider key from the environment.
         if os.environ.get("ANTHROPIC_API_KEY"):
-            return cls(model="anthropic/claude-3-5-sonnet-latest")
+            return cls(model="anthropic/claude-sonnet-4-6")
         if os.environ.get("OPENAI_API_KEY"):
             return cls(model="openai/gpt-4o")
         if os.environ.get("OPENROUTER_API_KEY"):
             return cls(model="openrouter/auto")
-        return cls(model="ollama_chat/llama3.1", api_base=OLLAMA_DEFAULT_BASE)
+        # Optional local fallback if an Ollama server is already running.
+        models = _ollama_models()
+        if models:
+            return cls(model=f"ollama_chat/{models[0]}", api_base=OLLAMA_DEFAULT_BASE)
+        # Default to a cloud model; the operator adds a key on first run.
+        return cls(model="anthropic/claude-sonnet-4-6")
 
     def save(self) -> None:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)

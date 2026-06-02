@@ -42,5 +42,14 @@ class Context:
     def add_assistant(self, content: str) -> None:
         self._messages.append({"role": "assistant", "content": content})
 
+    def add_message(self, message: dict) -> None:
+        """Append a raw provider message (e.g. assistant turn with tool_calls)."""
+        self._messages.append(message)
+
+    def add_tool_result(self, tool_call_id: str, content: str) -> None:
+        self._messages.append(
+            {"role": "tool", "tool_call_id": tool_call_id, "content": content}
+        )
+
     def clear(self) -> None:
         self._messages.clear()

@@ -39,6 +39,57 @@ Screen {
     padding: 0 2;
 }
 
+.tool {
+    margin: 1 0 0 0;
+    padding: 0 2;
+}
+
+.tool-result {
+    margin: 0;
+    padding: 0 2 0 3;
+    color: #9a9ab0;
+    background: #0c0c14;
+}
+
+.tool-result.error {
+    color: #fca5a5;
+}
+
+/* permission modal */
+ConfirmScreen {
+    align: center middle;
+    background: #0a0a12 70%;
+}
+
+#confirm-box {
+    width: 76;
+    max-width: 90%;
+    height: auto;
+    padding: 1 2;
+    background: #14141f;
+    border: round #a855f7;
+}
+
+#confirm-title {
+    padding-bottom: 1;
+}
+
+#confirm-detail {
+    height: auto;
+    max-height: 12;
+    padding-bottom: 1;
+    color: #c8c8d4;
+}
+
+#confirm-buttons {
+    height: auto;
+    align: center middle;
+}
+
+#confirm-buttons Button {
+    margin: 0 1;
+}
+
 StatusBar {
     height: 1;
     background: #14141f;

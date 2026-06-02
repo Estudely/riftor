@@ -5,14 +5,15 @@
 
 ## What riftor is
 A Python TUI pentest assistant. Full-screen [Textual](https://textual.textualize.io/)
-interface, [litellm](https://docs.litellm.ai/) for cloud + local (Ollama) models,
-hand-rolled agent loop. Its spine is the **RIFT** methodology engine.
+interface, [litellm](https://docs.litellm.ai/) — **cloud-first** (Anthropic/OpenAI/
+OpenRouter/…), with local Ollama as an option — and a hand-rolled agent loop. Its
+spine is the **RIFT** methodology engine.
 
 ## Locked decisions
 - **Name:** `riftor`  (repo: https://github.com/Estudely/riftor)
 - **Language:** Python 3.11+
 - **TUI:** Textual (full-screen)
-- **LLM layer:** litellm (own agent loop), cloud + local Ollama
+- **LLM layer:** litellm (own agent loop); cloud-first, local Ollama optional
 - **License:** GPL-3.0
 - **RIFT:** real methodology engine *and* branding
 - **Lore:** subtle, toggleable (`/lore`); professional by default
@@ -53,12 +54,13 @@ The agent tracks the current stage; the TUI shows `[R·I·F·T]` in the status b
       Ollama pull, an Ollama subscription, or a cloud API key)
 > Goal: prove TUI + provider + streaming end-to-end. No tools yet. **Done.**
 
-### Phase 2 — Agent loop + core tools
-- [ ] Tool ABC (schema + execute + permission level)
-- [ ] Core tools: bash, read, write, edit, grep, glob, webfetch
-- [ ] Tool-calling agent loop (multi-turn)
-- [ ] Permission prompts for dangerous ops
-- [ ] Audit log of every command
+### Phase 2 — Agent loop + core tools  ✅
+- [x] Tool ABC (schema + execute + permission level)
+- [x] Core tools: bash, read, write, edit, grep, glob, webfetch
+- [x] Tool-calling agent loop (multi-turn, streaming + tool-call deltas)
+- [x] Permission prompts for dangerous ops (allow once / session / deny)
+- [x] Audit log of every command (JSONL under XDG state dir)
+- [x] /tools command + tool rendering in the TUI
 
 ### Phase 3 — RIFT specialization
 - [ ] Scope manager + enforcement (in-scope targets only)
@@ -85,8 +87,10 @@ The agent tracks the current stage; the TUI shows `[R·I·F·T]` in the status b
 
 ## Environment notes
 - uv 0.11.14, Python 3.12.3 at /usr/bin/python3
-- Ollama running on :11434, model available: `kimi-k2.6:cloud`
-- No cloud API keys set -> Phase 1 defaults to local Ollama
+- **Cloud-first**: default model `anthropic/claude-sonnet-4-6`; key in local
+  config (`~/.config/riftor/config.toml`, perms 600, outside the repo)
+- Local Ollama is a supported fallback, not the identity (`kimi-k2.6:cloud`
+  present locally but is subscription-gated)
 - Reference reads: NousResearch/hermes-agent (Python analog), earendil-works/pi (minimal core)
 
 ## Reference layout
@@ -99,10 +103,10 @@ riftor/
     widgets.py           chat log, input, [R·I·F·T] status bar
     themes/rift.tcss     void bg + violet->cyan glow
   agent/
-    provider.py          litellm streaming wrapper (cloud + Ollama)
-    context.py           conversation history
-    prompts/system.md    offensive persona + RIFT methodology
-  tools/        (Phase 2)
+    provider.py          litellm wrapper: stream + stream_turn (tool calls)
+    context.py           conversation history (+ tool messages)
+    prompts/system.md    offensive persona + RIFT methodology + tools
+  tools/                 base + core (bash/read/write/edit/grep/glob/webfetch)  ✅
+  safety/                audit log + permission modal  ✅
   engagement/   (Phase 3)
-  safety/       (Phase 2-3)
 ```
