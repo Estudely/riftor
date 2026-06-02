@@ -1,0 +1,47 @@
+[project]
+name = "riftor"
+version = "0.0.1"
+description = "An open-source offensive-security AI agent that lives in your terminal."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "GPL-3.0-or-later" }
+authors = [{ name = "Estudely" }]
+keywords = ["security", "pentest", "offensive-security", "ai-agent", "tui", "llm"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+]
+dependencies = [
+    "textual>=0.79",
+    "litellm>=1.55",
+    "pydantic>=2.6",
+]
+
+[project.optional-dependencies]
+dev = [
+    "textual-dev>=1.5",
+    "ruff>=0.6",
+]
+
+[project.urls]
+Homepage = "https://github.com/Estudely/riftor"
+Repository = "https://github.com/Estudely/riftor"
+
+[project.scripts]
+riftor = "riftor.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["riftor"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

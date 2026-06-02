@@ -1,0 +1,58 @@
+/* The "Rift" theme — void background, violet -> cyan rift glow. */
+
+Screen {
+    background: #0a0a12;
+    color: #c8c8d4;
+    layout: vertical;
+}
+
+#banner {
+    height: auto;
+    padding: 1 2 0 2;
+}
+
+#chat {
+    height: 1fr;
+    padding: 0 2 1 2;
+    background: #0a0a12;
+    scrollbar-color: #2a2a3a;
+    scrollbar-color-hover: #a855f7;
+}
+
+.user {
+    background: #1a1426;
+    color: #e9d5ff;
+    margin: 1 0 0 0;
+    padding: 0 2;
+    border-left: thick #a855f7;
+}
+
+.assistant {
+    background: #101019;
+    margin: 1 0 0 0;
+    padding: 0 1;
+    border-left: thick #22d3ee;
+}
+
+.note {
+    margin: 1 0 0 0;
+    padding: 0 2;
+}
+
+StatusBar {
+    height: 1;
+    background: #14141f;
+    padding: 0 2;
+}
+
+#prompt {
+    height: 3;
+    margin: 0 1 1 1;
+    border: round #2a2a3a;
+    background: #0e0e18;
+    color: #e9e9f2;
+}
+
+#prompt:focus {
+    border: round #a855f7;
+}

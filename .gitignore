@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# uv / venv
+.venv/
+uv.lock
+
+# riftor local state (later phases)
+*.sqlite
+*.sqlite3
+engagements/
+reports/
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
