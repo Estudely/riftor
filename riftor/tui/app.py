@@ -1,9 +1,10 @@
 """The riftor Textual app.
 
-Phase 2: a real agent loop. The model can call tools (bash/read/write/edit/
-grep/glob/webfetch); dangerous tools prompt for permission; every call is
-audited. The RIFT status bar is still driven manually via /stage (Phase 3 wires
-it to the engagement engine).
+Phase 3: an offensive-security agent. The model calls tools (bash/read/write/
+edit/grep/glob/webfetch + engagement tools); dangerous tools prompt for
+permission; scope-sensitive tools are blocked against out-of-scope targets
+(with an explicit per-call override); RIFT stage, scope and findings live in the
+engagement state and show in the status bar.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from textual.widgets import Input, Markdown, Static
 from riftor import tools
 from riftor.agent.context import Context
 from riftor.agent.provider import Provider, ToolCall, Turn
+from riftor.engagement import Engagement
 from riftor.safety.audit import AuditLog
 from riftor.safety.permissions import ConfirmScreen, Permissions
 from riftor.tools import ToolContext, ToolResult
@@ -36,6 +38,8 @@ HELP = """\
 - `/clear` — clear the conversation (also `Ctrl+L`)
 - `/model [name]` — show or switch the model
 - `/stage [R|I|F|T]` — show or set the RIFT stage (Recon/Intrusion/Foothold/Takeover)
+- `/scope [add|out|rm <t>|clear|on|off]` — manage in/out-of-scope targets
+- `/findings` — list recorded findings
 - `/tools` — list available tools
 - `/lore` — toggle the rift persona
 - `/exit` — leave riftor (also `Ctrl+C`)
@@ -54,14 +58,16 @@ class RiftorApp(App):
         ("escape", "cancel", "Cancel"),
     ]
 
-    def __init__(self, config: "Config") -> None:
+    def __init__(self, config: "Config", workdir: Path | None = None) -> None:
         super().__init__()
         self.config = config
+        self.workdir = workdir or Path.cwd()
         self.context = Context(lore=config.lore)
         self.provider = Provider(config)
         self.tools = tools.all_tools()
         self.tool_schemas = tools.schemas()
-        self.toolctx = ToolContext(workdir=Path.cwd())
+        self.engagement = Engagement(self.workdir)
+        self.toolctx = ToolContext(workdir=self.workdir, engagement=self.engagement)
         self.permissions = Permissions()
         self.audit = AuditLog()
         self.max_steps = 16
@@ -74,9 +80,16 @@ class RiftorApp(App):
 
     def on_mount(self) -> None:
         self.query_one("#prompt", Input).focus()
+        self.status.set_stage(self.engagement.stage)
+        self._refresh_status()
         self._note(
-            "rift online · agent can use tools (with your approval) · stay in scope"
+            "rift online · set scope with /scope add <target> before tasking the agent"
         )
+
+    def _refresh_status(self) -> None:
+        self.status.set_stage(self.engagement.stage)
+        self.status.set_scope(self.engagement.scope_count(), self.engagement.enforce)
+        self.status.set_findings(self.engagement.findings_count())
 
     # ---- accessors -------------------------------------------------------------
     @property
@@ -150,12 +163,16 @@ class RiftorApp(App):
                 self._note(f"model: {self.config.model}")
         elif cmd == "/stage":
             self._set_stage(arg)
+        elif cmd == "/scope":
+            self._scope_cmd(arg)
+        elif cmd == "/findings":
+            self._show_findings()
         else:
             self._note(f"unknown command: {cmd} — try /help")
 
     def _set_stage(self, arg: str) -> None:
         if not arg:
-            cur = self.status.stage
+            cur = self.engagement.stage
             stages = " · ".join(f"{k} {v}" for k, v in STAGE_NAMES.items())
             self._note(f"stage: {cur} ({STAGE_NAMES[cur]})   ·   {stages}")
             return
@@ -163,10 +180,59 @@ class RiftorApp(App):
         token = arg.strip()
         letter = token.upper() if token.upper() in STAGE_NAMES else name_to_letter.get(token.lower())
         if letter:
-            self.status.set_stage(letter)
+            self.engagement.set_stage(letter)
+            self._refresh_status()
             self._note(f"stage → {letter} ({STAGE_NAMES[letter]})")
         else:
             self._note(f"unknown stage: {arg} — use R/I/F/T or recon/intrusion/foothold/takeover")
+
+    def _scope_cmd(self, arg: str) -> None:
+        parts = arg.split()
+        if not parts:
+            ins = ", ".join(t.raw for t in self.engagement.scope.in_scope) or "(none)"
+            outs = self.engagement.scope.out_of_scope
+            line = f"scope · enforce {'on' if self.engagement.enforce else 'off'} · in: {ins}"
+            if outs:
+                line += " · out: " + ", ".join(t.raw for t in outs)
+            self._note(line)
+            return
+        sub, rest = parts[0].lower(), parts[1:]
+        if sub in ("add", "in") and rest:
+            for target in rest:
+                self.engagement.add_scope(target, "in")
+            self._note(f"in-scope += {', '.join(rest)}")
+        elif sub == "out" and rest:
+            for target in rest:
+                self.engagement.add_scope(target, "out")
+            self._note(f"out-of-scope += {', '.join(rest)}")
+        elif sub in ("rm", "remove", "del") and rest:
+            for target in rest:
+                self.engagement.remove_scope(target)
+            self._note(f"removed {', '.join(rest)}")
+        elif sub == "clear":
+            self.engagement.clear_scope()
+            self._note("scope cleared")
+        elif sub == "on":
+            self.engagement.set_enforce(True)
+            self._note("scope enforcement ON")
+        elif sub == "off":
+            self.engagement.set_enforce(False)
+            self._error("scope enforcement OFF — riftor will not block out-of-scope actions")
+        else:
+            self._note("usage: /scope [add <t>|out <t>|rm <t>|clear|on|off]")
+        self._refresh_status()
+
+    def _show_findings(self) -> None:
+        findings = self.engagement.store.list_findings()
+        if not findings:
+            self._note("no findings recorded yet")
+            return
+        rows = []
+        for i, f in enumerate(findings, 1):
+            host = f" — `{f['host']}`" if f["host"] else ""
+            rows.append(f"{i}. **[{f['severity']}]** {f['title']}{host}")
+        self.chat.mount(Markdown("**findings**\n\n" + "\n".join(rows), classes="assistant"))
+        self.chat.scroll_end(animate=False)
 
     def action_clear(self) -> None:
         self.context.clear()
@@ -241,20 +307,36 @@ class RiftorApp(App):
         preview = tool.preview(call.arguments)
         await self._show_tool_call(tool.name, preview, danger=tool.danger)
 
-        if self.permissions.needs_prompt(tool.name, tool.requires_permission):
-            decision = await self.push_screen_wait(ConfirmScreen(tool.name, preview))
+        # scope enforcement for target-touching tools (bash, webfetch)
+        scope_warning: list[str] = []
+        if getattr(tool, "scope_sensitive", False):
+            probe = " ".join(str(v) for v in call.arguments.values())
+            scope_warning = self.engagement.violations(probe)
+
+        if scope_warning or self.permissions.needs_prompt(tool.name, tool.requires_permission):
+            decision = await self.push_screen_wait(
+                ConfirmScreen(tool.name, preview, scope_warning=scope_warning)
+            )
             if decision == "deny":
-                await self._show_tool_result("denied by operator", is_error=True)
-                self.context.add_tool_result(
-                    call.id,
-                    "[denied by operator] The action was refused. Do not retry it; "
-                    "explain the limitation or propose a safer, in-scope alternative.",
-                )
+                reason = "blocked — out of scope" if scope_warning else "denied by operator"
+                await self._show_tool_result(reason, is_error=True)
+                if scope_warning:
+                    hint = (
+                        f"[blocked: out of scope] {', '.join(scope_warning)} not in scope. "
+                        "Do not attempt these targets; work only within the defined scope."
+                    )
+                else:
+                    hint = (
+                        "[denied by operator] The action was refused. Do not retry it; "
+                        "explain the limitation or propose a safer, in-scope alternative."
+                    )
+                self.context.add_tool_result(call.id, hint)
                 self.audit.record(tool.name, preview, allowed=False)
                 return
             if decision == "session":
                 self.permissions.allow_for_session(tool.name)
 
+        audit_preview = preview + (" [scope-override]" if scope_warning else "")
         start = time.monotonic()
         try:
             result = await tool.execute(call.arguments, self.toolctx)
@@ -265,7 +347,7 @@ class RiftorApp(App):
 
         self.audit.record(
             tool.name,
-            preview,
+            audit_preview,
             allowed=True,
             is_error=result.is_error,
             duration=duration,
@@ -273,6 +355,7 @@ class RiftorApp(App):
         )
         await self._show_tool_result(result.content, is_error=result.is_error)
         self.context.add_tool_result(call.id, result.content)
+        self._refresh_status()
 
     # ---- tool rendering --------------------------------------------------------
     async def _show_tool_call(self, name: str, preview: str, danger: bool = False) -> None:

@@ -62,12 +62,15 @@ The agent tracks the current stage; the TUI shows `[R·I·F·T]` in the status b
 - [x] Audit log of every command (JSONL under XDG state dir)
 - [x] /tools command + tool rendering in the TUI
 
-### Phase 3 — RIFT specialization
-- [ ] Scope manager + enforcement (in-scope targets only)
-- [ ] R·I·F·T stage tracking in engagement state
-- [ ] Security tool wrappers: nmap, httpx, ffuf, nuclei, subfinder
-- [ ] Engagement state DB (sqlite): hosts/ports/services/findings
-- [ ] Offensive system prompt wired to methodology
+### Phase 3 — RIFT specialization  ✅
+- [x] Scope manager + enforcement (hard-block out-of-scope + per-call override)
+- [x] R·I·F·T stage tracking in engagement state (agent `set_stage` + `/stage`)
+- [x] Engagement state DB (sqlite): scope/hosts/services/findings/meta, persistent
+- [x] Engagement tools: scope_list, record_service, record_finding, set_stage
+- [x] `/scope` and `/findings` commands; status bar shows stage/scope/finds/enforce
+- [x] Offensive system prompt wired to methodology + recon playbook
+- [~] Security tool wrappers: agent drives nmap/httpx/ffuf/nuclei/subfinder/etc via
+      scope-enforced bash + records results; dedicated output parsers deferred
 
 ### Phase 4 — Reporting + polish
 - [ ] Findings -> markdown/PDF report (CVSS + evidence)
@@ -106,7 +109,7 @@ riftor/
     provider.py          litellm wrapper: stream + stream_turn (tool calls)
     context.py           conversation history (+ tool messages)
     prompts/system.md    offensive persona + RIFT methodology + tools
-  tools/                 base + core (bash/read/write/edit/grep/glob/webfetch)  ✅
-  safety/                audit log + permission modal  ✅
-  engagement/   (Phase 3)
+  tools/                 base + core + engagement (scope_list/record_*/set_stage)  ✅
+  safety/                audit log + permission modal (+ scope warning)  ✅
+  engagement/            scope.py + state.py (sqlite) + Engagement facade  ✅
 ```

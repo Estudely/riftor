@@ -25,6 +25,9 @@ class StatusBar(Static):
         self.stage = stage
         self.lore = lore
         self.busy = False
+        self.scope_count = 0
+        self.enforce = True
+        self.findings = 0
 
     def on_mount(self) -> None:
         self.refresh_bar()
@@ -46,18 +49,32 @@ class StatusBar(Static):
             self.stage = stage
             self.refresh_bar()
 
+    def set_scope(self, count: int, enforce: bool) -> None:
+        self.scope_count = count
+        self.enforce = enforce
+        self.refresh_bar()
+
+    def set_findings(self, count: int) -> None:
+        self.findings = count
+        self.refresh_bar()
+
     def refresh_bar(self) -> None:
         t = Text()
         t.append("[ ", style="#3a3a4a")
         for i, stage in enumerate(RIFT_STAGES):
-            if stage == self.stage:
-                t.append(stage, style="bold #22d3ee")
-            else:
-                t.append(stage, style="#4a4a5a")
+            t.append(stage, style="bold #22d3ee" if stage == self.stage else "#4a4a5a")
             if i < len(RIFT_STAGES) - 1:
                 t.append("·", style="#3a3a4a")
         t.append(" ]  ", style="#3a3a4a")
         t.append(STAGE_NAMES[self.stage], style="#a855f7")
+        t.append("   scope:", style="#5a5a6a")
+        if self.scope_count:
+            t.append(str(self.scope_count), style="#8b8ba7")
+            t.append("" if self.enforce else " (off)", style="#fca5a5")
+        else:
+            t.append("none", style="#fca5a5" if self.enforce else "#5a5a6a")
+        t.append("   finds:", style="#5a5a6a")
+        t.append(str(self.findings), style="#f0abfc" if self.findings else "#8b8ba7")
         t.append("   model:", style="#5a5a6a")
         t.append(self.model, style="#8b8ba7")
         t.append("   lore:", style="#5a5a6a")

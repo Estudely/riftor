@@ -10,7 +10,8 @@ dist/
 .venv/
 uv.lock
 
-# riftor local state (later phases)
+# riftor local state
+.riftor/
 *.sqlite
 *.sqlite3
 engagements/

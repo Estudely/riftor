@@ -74,6 +74,11 @@ ConfirmScreen {
     padding-bottom: 1;
 }
 
+#confirm-scope {
+    height: auto;
+    padding-bottom: 1;
+}
+
 #confirm-detail {
     height: auto;
     max-height: 12;

@@ -12,13 +12,23 @@ from riftor.tools.core import (
     WebFetchTool,
     WriteTool,
 )
+from riftor.tools.engagement import (
+    RecordFindingTool,
+    RecordServiceTool,
+    ScopeListTool,
+    SetStageTool,
+)
 
 # Order is roughly safe -> mutating; it's also the order shown to the model.
 ALL_TOOLS: list[Tool] = [
+    ScopeListTool(),
     ReadTool(),
     GlobTool(),
     GrepTool(),
     WebFetchTool(),
+    SetStageTool(),
+    RecordServiceTool(),
+    RecordFindingTool(),
     WriteTool(),
     EditTool(),
     BashTool(),

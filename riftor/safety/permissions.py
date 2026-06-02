@@ -31,17 +31,26 @@ class ConfirmScreen(ModalScreen[str]):
         ("s", "decide('session')", "Allow session"),
     ]
 
-    def __init__(self, tool_name: str, preview: str) -> None:
+    def __init__(self, tool_name: str, preview: str, scope_warning: list[str] | None = None) -> None:
         super().__init__()
         self.tool_name = tool_name
         self.preview = preview
+        self.scope_warning = scope_warning or []
 
     def compose(self) -> ComposeResult:
         with Vertical(id="confirm-box"):
-            yield Static(
-                Text(f"permission required  ·  {self.tool_name}", style="bold #f0abfc"),
-                id="confirm-title",
-            )
+            if self.scope_warning:
+                title = f"⚠ OUT OF SCOPE  ·  {self.tool_name}"
+                title_style = "bold #fca5a5"
+            else:
+                title = f"permission required  ·  {self.tool_name}"
+                title_style = "bold #f0abfc"
+            yield Static(Text(title, style=title_style), id="confirm-title")
+            if self.scope_warning:
+                yield Static(
+                    Text("not in scope: " + ", ".join(self.scope_warning), style="bold #fca5a5"),
+                    id="confirm-scope",
+                )
             yield Static(Text(self.preview or "(no detail)", style="#e9e9f2"), id="confirm-detail")
             with Horizontal(id="confirm-buttons"):
                 yield Button("Allow once (a)", id="once", variant="success")

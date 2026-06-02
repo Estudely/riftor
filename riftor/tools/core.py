@@ -23,6 +23,7 @@ class BashTool(Tool):
     )
     requires_permission = True
     danger = True
+    scope_sensitive = True
     parameters = {
         "type": "object",
         "properties": {
@@ -254,6 +255,7 @@ class GrepTool(Tool):
 class WebFetchTool(Tool):
     name = "webfetch"
     description = "Fetch a URL over HTTP(S) and return readable text (HTML is stripped to text)."
+    scope_sensitive = True
     parameters = {
         "type": "object",
         "properties": {"url": {"type": "string", "description": "Fully-qualified URL."}},

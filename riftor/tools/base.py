@@ -29,6 +29,7 @@ class ToolContext:
     """Shared execution context handed to every tool."""
 
     workdir: Path = field(default_factory=Path.cwd)
+    engagement: object | None = None
 
 
 def resolve_path(ctx: ToolContext, raw: str) -> Path:
@@ -44,6 +45,7 @@ class Tool(ABC):
     parameters: dict = {}
     requires_permission: bool = False
     danger: bool = False
+    scope_sensitive: bool = False  # touches targets -> enforce scope before running
 
     def preview(self, args: dict) -> str:
         """One-line human summary for permission prompts and the audit log."""
