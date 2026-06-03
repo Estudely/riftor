@@ -21,7 +21,7 @@ from pathlib import Path
 
 from rich.text import Text
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Static
 
@@ -205,7 +205,8 @@ class ConfirmScreen(ModalScreen[str]):
                 )
             yield Static(Text(self.preview or "(no detail)", style="#e9e9f2"), id="confirm-detail")
             if self.detail:
-                yield Static(self._render_detail(), id="confirm-diff")
+                with VerticalScroll(id="confirm-diff"):
+                    yield Static(self._render_detail(), id="confirm-diff-body")
             with Horizontal(id="confirm-buttons"):
                 yield Button("Once (a)", id="once", variant="success")
                 yield Button("Session (s)", id="session", variant="primary")
