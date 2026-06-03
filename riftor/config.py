@@ -16,6 +16,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, field_validator
 
+from riftor.providers import provider_key_for_model
+
 
 def _config_dir() -> Path:
     base = os.environ.get("XDG_CONFIG_HOME")
@@ -106,6 +108,10 @@ class Config(BaseModel):
         """True if a key is configured (explicit, env, or local Ollama)."""
         if self.api_key:
             return True
+        key_name = provider_key_for_model(self.model)
+        entry = self.providers.get(key_name)
+        if entry and entry.api_key:
+            return True
         if self.model.startswith(("ollama/", "ollama_chat/")):
             return True
         env = self.provider_env()
@@ -113,6 +119,24 @@ class Config(BaseModel):
             return True
         # Unknown provider: don't block; litellm may resolve it from its own env.
         return self.provider_env() is None
+
+    def creds_for(self, model: str) -> tuple[str | None, str | None]:
+        """Resolve (api_key, api_base) for ``model``.
+
+        Precedence: per-provider table → legacy global fields → env var (key
+        only) → (None, None). Model-keyed so a future multi-model feature can
+        resolve each model's creds without touching this layer.
+        """
+        key_name = provider_key_for_model(model)
+        entry = self.providers.get(key_name)
+        if entry and (entry.api_key or entry.api_base):
+            return entry.api_key, entry.api_base
+        if self.api_key or self.api_base:
+            return self.api_key, self.api_base
+        env = self.provider_env()  # uses self.model; same provider as `model` in practice
+        if env and os.environ.get(env):
+            return os.environ[env], None
+        return None, None
 
     @classmethod
     def load(cls) -> "Config":

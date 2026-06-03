@@ -124,3 +124,35 @@ def test_empty_providers_emits_no_section(tmp_path, monkeypatch):
     Config(model="anthropic/claude-opus-4-8").save()
     text = (tmp_path / "config.toml").read_text()
     assert "[providers" not in text
+
+
+def test_creds_for_precedence(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    # 1. per-provider table wins
+    cfg = Config(model="anthropic/claude-opus-4-8", api_key="legacy-global")
+    cfg.providers = {"anthropic": cfgmod.ProviderCreds(api_key="from-table",
+                                                       api_base="https://t/")}
+    assert cfg.creds_for("anthropic/claude-opus-4-8") == ("from-table", "https://t/")
+
+    # 2. legacy global key, no table entry
+    cfg2 = Config(model="anthropic/claude-opus-4-8", api_key="legacy-global",
+                  api_base="https://legacy/")
+    assert cfg2.creds_for("anthropic/claude-opus-4-8") == ("legacy-global", "https://legacy/")
+
+    # 3. env var fallback for the key
+    cfg3 = Config(model="anthropic/claude-opus-4-8")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "from-env")
+    assert cfg3.creds_for("anthropic/claude-opus-4-8") == ("from-env", None)
+
+    # 4. nothing
+    cfg4 = Config(model="anthropic/claude-opus-4-8")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert cfg4.creds_for("anthropic/claude-opus-4-8") == (None, None)
+
+
+def test_has_credentials_via_provider_table(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    cfg = Config(model="openai/gpt-5.5")
+    assert not cfg.has_credentials()
+    cfg.providers = {"openai": cfgmod.ProviderCreds(api_key="sk-x")}
+    assert cfg.has_credentials()
