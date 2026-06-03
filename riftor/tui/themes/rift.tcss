@@ -57,27 +57,74 @@ Screen {
     color: $error;
 }
 
-/* modals: permission + config */
+/* ───────────────────────── modals: permission + config ───────────────────── */
 ConfirmScreen, ConfigScreen {
     align: center middle;
-    background: $background 70%;
+    background: $background 75%;
 }
 
 #confirm-box, #config-box {
-    width: 76;
+    width: 72;
     max-width: 90%;
     height: auto;
-    padding: 1 2;
+    max-height: 90%;
+    padding: 1 2 1 2;
     background: $panel;
     border: round $violet;
 }
 
+/* title bar — bold, with an underline rule that spans the card */
 #confirm-title, #config-title {
-    padding-bottom: 1;
+    width: 1fr;
+    padding: 0 0 1 0;
+    margin-bottom: 1;
+    border-bottom: solid $border;
     color: $violet;
     text-style: bold;
 }
 
+/* — config body & field rows — */
+#config-body {
+    height: auto;
+    max-height: 28;
+    padding: 0;
+}
+
+.config-section {
+    width: 1fr;
+    color: $cyan;
+    text-style: bold;
+    margin: 1 0 0 0;
+}
+
+.field-row {
+    height: 3;
+    align: left middle;
+    margin-bottom: 0;
+}
+
+.field-label {
+    width: 14;
+    height: 3;
+    color: $muted;
+    content-align: left middle;
+}
+
+.field-row Input,
+.field-row Select {
+    width: 1fr;
+}
+
+.field-row Switch {
+    height: 3;
+}
+
+#config-body Rule {
+    color: $border;
+    margin: 0;
+}
+
+/* — confirm modal detail/diff — */
 #confirm-scope {
     height: auto;
     padding-bottom: 1;
@@ -85,11 +132,21 @@ ConfirmScreen, ConfigScreen {
 
 #confirm-detail {
     height: auto;
-    max-height: 12;
     padding-bottom: 1;
     color: $foreground;
 }
 
+#confirm-diff {
+    height: auto;
+    max-height: 14;
+    margin-bottom: 1;
+    padding: 0 1;
+    background: $tool-bg;
+    border: round $border;
+    scrollbar-color: $border;
+}
+
+/* — shared footer — */
 #confirm-buttons, #config-buttons {
     height: auto;
     align: center middle;
@@ -97,20 +154,8 @@ ConfirmScreen, ConfigScreen {
 }
 
 #confirm-buttons Button, #config-buttons Button {
+    min-width: 12;
     margin: 0 1;
-}
-
-#config-box Label {
-    color: $muted;
-}
-
-#config-box Input {
-    margin-bottom: 1;
-}
-
-#cfg-lore-row {
-    height: auto;
-    margin-bottom: 1;
 }
 
 StatusBar {

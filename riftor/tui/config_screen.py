@@ -1,18 +1,24 @@
-"""The /config settings modal."""
+"""The /config settings modal — a grouped, aligned settings card."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Label, Select, Switch
+from textual.widget import Widget
+from textual.widgets import Button, Input, Label, Rule, Select, Switch
 
 from riftor.tui.theme import THEMES
 
 if TYPE_CHECKING:
     from riftor.config import Config
+
+
+def _row(label: str, field: Widget) -> Horizontal:
+    """A label-column + field row, so every field's left edge lines up."""
+    return Horizontal(Label(label, classes="field-label"), field, classes="field-row")
 
 
 class ConfigScreen(ModalScreen[dict | None]):
@@ -25,27 +31,34 @@ class ConfigScreen(ModalScreen[dict | None]):
         self.config = config
 
     def compose(self) -> ComposeResult:
+        theme = self.config.theme if self.config.theme in THEMES else "rift"
         with Vertical(id="config-box"):
             yield Label("riftor · config", id="config-title")
-            yield Label("model")
-            yield Input(value=self.config.model, id="cfg-model")
-            yield Label("temperature")
-            yield Input(value=str(self.config.temperature), id="cfg-temp")
-            yield Label("max tokens")
-            yield Input(value=str(self.config.max_tokens), id="cfg-maxtok")
-            yield Label("theme")
-            theme = self.config.theme if self.config.theme in THEMES else "rift"
-            yield Select(
-                [(name, name) for name in THEMES],
-                value=theme,
-                allow_blank=False,
-                id="cfg-theme",
-            )
-            with Horizontal(id="cfg-lore-row"):
-                yield Label("lore  ")
-                yield Switch(value=self.config.lore, id="cfg-lore")
-            yield Label("api key (blank = keep current)")
-            yield Input(password=True, placeholder="leave blank to keep", id="cfg-key")
+            with VerticalScroll(id="config-body"):
+                yield Label("MODEL", classes="config-section")
+                yield _row("Model", Input(value=self.config.model, id="cfg-model"))
+                yield _row(
+                    "API key",
+                    Input(password=True, placeholder="leave blank to keep", id="cfg-key"),
+                )
+
+                yield Rule()
+                yield Label("GENERATION", classes="config-section")
+                yield _row("Temperature", Input(value=str(self.config.temperature), id="cfg-temp"))
+                yield _row("Max tokens", Input(value=str(self.config.max_tokens), id="cfg-maxtok"))
+
+                yield Rule()
+                yield Label("APPEARANCE", classes="config-section")
+                yield _row(
+                    "Theme",
+                    Select(
+                        [(name, name) for name in THEMES],
+                        value=theme,
+                        allow_blank=False,
+                        id="cfg-theme",
+                    ),
+                )
+                yield _row("Lore", Switch(value=self.config.lore, id="cfg-lore"))
             with Horizontal(id="config-buttons"):
                 yield Button("Save", id="save", variant="success")
                 yield Button("Cancel", id="cancel", variant="error")
