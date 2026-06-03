@@ -77,3 +77,32 @@ async def test_record_finding_dedup_skip(toolctx):
     r = await rf.execute({"title": "Dup", "severity": "high", "host": "h"}, toolctx)
     assert "skipped" in r.content
     assert toolctx.engagement.findings_count() == 1
+
+
+@pytest.mark.asyncio
+async def test_add_scope_adds_in_scope_targets(toolctx):
+    eng = toolctx.engagement
+    r = await tools.get("add_scope").execute(
+        {"targets": ["admin.example.com", "10.0.0.0/24"],
+         "reason": "found in DNS of in-scope example.com"},
+        toolctx,
+    )
+    assert not r.is_error, r.content
+    raws = {t.raw for t in eng.scope.in_scope}
+    assert "admin.example.com" in raws
+    assert "10.0.0.0/24" in raws
+    # added in-scope only — nothing landed in out-of-scope
+    assert eng.scope.out_of_scope == []
+
+
+def test_add_scope_tool_metadata():
+    tool = tools.get("add_scope")
+    assert tool is not None
+    assert tool.requires_permission is True
+    # must NOT be scope_sensitive (it edits the scope list, doesn't touch a host)
+    assert tool.scope_sensitive is False
+    props = tool.parameters["properties"]
+    assert "targets" in props and "reason" in props
+    assert set(tool.parameters["required"]) == {"targets", "reason"}
+    prev = tool.preview({"targets": ["a.com", "b.com"], "reason": "why"})
+    assert "a.com" in prev and "why" in prev

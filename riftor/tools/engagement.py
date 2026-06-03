@@ -51,6 +51,72 @@ class ScopeListTool(Tool):
         )
 
 
+class AddScopeTool(Tool):
+    name = "add_scope"
+    requires_permission = True
+    description = (
+        "Request adding one or more targets to the IN-SCOPE list so you can test "
+        "them (e.g. a subdomain discovered on an in-scope host). Requires operator "
+        "approval. This only WIDENS scope — you cannot remove or exclude targets. "
+        "Give a clear reason so the operator can decide."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "targets": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Targets to add: IP, CIDR, domain, or *.wildcard.",
+            },
+            "reason": {
+                "type": "string",
+                "description": "Why these belong in scope (shown to the operator).",
+            },
+        },
+        "required": ["targets", "reason"],
+    }
+
+    def preview(self, args: dict) -> str:
+        targets = args.get("targets") or []
+        if isinstance(targets, str):
+            targets = [targets]
+        joined = ", ".join(str(t) for t in targets) or "(none)"
+        reason = str(args.get("reason") or "").strip()
+        text = f"add to scope: {joined}"
+        if reason:
+            text += f' — "{reason}"'
+        return text[:300]
+
+    async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        eng = ctx.engagement
+        if eng is None:
+            return ToolResult("error: no active engagement", is_error=True)
+        raw_targets = args.get("targets")
+        if isinstance(raw_targets, str):
+            raw_targets = [raw_targets]
+        targets = [str(t).strip() for t in (raw_targets or []) if str(t).strip()]
+        if not targets:
+            return ToolResult("error: no targets given", is_error=True)
+
+        existing = {t.raw for t in eng.scope.in_scope}
+        added: list[str] = []
+        already: list[str] = []
+        for raw in targets:
+            target = eng.add_scope(raw, "in")  # parse + persist + log
+            if target.raw in existing:
+                already.append(target.raw)
+            else:
+                existing.add(target.raw)
+                added.append(target.raw)
+
+        if not added and already:
+            return ToolResult(f"already in scope: {', '.join(already)}")
+        msg = f"added {len(added)} target(s) to scope: {', '.join(added)}"
+        if already:
+            msg += f" · {len(already)} already present"
+        return ToolResult(msg)
+
+
 class RecordServiceTool(Tool):
     name = "record_service"
     description = "Record a discovered host/port/service in the engagement state."
