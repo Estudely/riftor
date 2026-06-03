@@ -252,7 +252,8 @@ def test_parsers() -> None:
 def test_themes() -> None:
     from riftor.tui.theme import THEMES, css_variable_defaults
 
-    assert {"rift", "void", "fracture", "singularity"} <= set(THEMES)
+    # dark signatures + the new light/mid themes
+    assert {"rift", "void", "fracture", "singularity", "dusk", "dawn", "paper"} <= set(THEMES)
     required = {
         "violet", "cyan", "magenta", "danger", "muted", "dim", "faint", "border",
         "user-bg", "user-fg", "assistant-bg", "tool-bg",
@@ -261,6 +262,9 @@ def test_themes() -> None:
         missing = required - set(theme.variables)
         assert not missing, (name, missing)
     assert required <= set(css_variable_defaults())
+    # at least one genuinely light theme exists (dark=False)
+    assert any(not t.dark for t in THEMES.values()), "expected a light theme"
+    assert THEMES["paper"].dark is False and THEMES["rift"].dark is True
     print("THEMES OK")
 
 
