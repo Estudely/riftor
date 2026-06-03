@@ -55,3 +55,41 @@ def test_load_keybindings(tmp_path, monkeypatch):
     assert cfgmod.load_keybindings() == {}
     (tmp_path / "keybindings.toml").write_text('[keybindings]\nclear = "ctrl+k"\n')
     assert cfgmod.load_keybindings() == {"clear": "ctrl+k"}
+
+
+def test_providers_table_roundtrips(tmp_path, monkeypatch):
+    monkeypatch.setattr(cfgmod, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(cfgmod, "CONFIG_PATH", tmp_path / "config.toml")
+    cfg = Config(model="anthropic/claude-opus-4-8")
+    cfg.providers = {
+        "anthropic": cfgmod.ProviderCreds(api_key="sk-ant-x"),
+        "ollama": cfgmod.ProviderCreds(api_base="http://localhost:11434"),
+    }
+    cfg.save()
+    loaded = Config.load()
+    assert loaded.providers["anthropic"].api_key == "sk-ant-x"
+    assert loaded.providers["ollama"].api_base == "http://localhost:11434"
+
+
+def test_old_flat_config_loads_without_providers(tmp_path, monkeypatch):
+    monkeypatch.setattr(cfgmod, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(cfgmod, "CONFIG_PATH", tmp_path / "config.toml")
+    (tmp_path / "config.toml").write_text(
+        '[riftor]\nmodel = "openai/gpt-5.5"\ntemperature = 0.3\n'
+    )
+    loaded = Config.load()
+    assert loaded.model == "openai/gpt-5.5"
+    assert loaded.providers == {}
+
+
+def test_providers_table_is_owner_only(tmp_path, monkeypatch):
+    import os
+    import stat
+    monkeypatch.setattr(cfgmod, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(cfgmod, "CONFIG_PATH", tmp_path / "config.toml")
+    cfg = Config(model="anthropic/claude-opus-4-8")
+    cfg.providers = {"anthropic": cfgmod.ProviderCreds(api_key="sk-secret-xyz")}
+    cfg.save()
+    mode = stat.S_IMODE(os.stat(cfgmod.CONFIG_PATH).st_mode)
+    assert mode == 0o600, oct(mode)
+    assert "sk-secret-xyz" in cfgmod.CONFIG_PATH.read_text()
