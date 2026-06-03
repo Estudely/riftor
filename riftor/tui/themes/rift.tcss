@@ -73,6 +73,14 @@ ConfirmScreen, ConfigScreen {
     border: round $violet;
 }
 
+/* config card lays out as: title (auto) · body (flexes/scrolls) · footer (auto).
+   The flexing body is what keeps the Save/Cancel footer on-screen even on short
+   terminals — without this the body's fixed height pushed the buttons off the
+   bottom. */
+#config-box {
+    layout: vertical;
+}
+
 /* title bar — bold, with an underline rule that spans the card */
 #confirm-title, #config-title {
     width: 1fr;
@@ -84,9 +92,11 @@ ConfirmScreen, ConfigScreen {
 }
 
 /* — config body & field rows — */
+/* 1fr so the body takes only the space left after the title + footer, and
+   scrolls inside it. This guarantees the footer buttons stay visible on short
+   terminals. height:auto would let the body grow and shove the footer off. */
 #config-body {
-    height: auto;
-    max-height: 28;
+    height: 1fr;
     padding: 0;
 }
 

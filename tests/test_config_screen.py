@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from textual.widgets import Input, Select, Switch
+from textual.widgets import Button, Input, Select, Switch
 
 import riftor.config as cfgmod
 from riftor.config import Config
@@ -45,6 +45,26 @@ async def test_config_modal_renders_all_fields():
             assert len(list(screen.query(".field-label"))) == 6
             await pilot.press("escape")
             await pilot.pause()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("height", [24, 30, 40])
+async def test_save_cancel_buttons_visible_on_short_terminals(height):
+    # regression: the footer used to render below the viewport on short terminals
+    with tempfile.TemporaryDirectory() as d:
+        _patch_paths(Path(d))
+        cfg = Config(model="ollama_chat/x", api_base="http://localhost:11434")
+        app = RiftorApp(cfg, workdir=Path(d))
+        async with app.run_test(size=(90, height)) as pilot:
+            app.query_one("#prompt", Input).value = "/config"
+            await pilot.press("enter")
+            await pilot.pause()
+            for bid in ("#save", "#cancel"):
+                btn = app.screen.query_one(bid, Button)
+                r = btn.region
+                assert r.y >= 0 and (r.y + r.height) <= height, (
+                    f"{bid} off-screen at height={height}: y={r.y} h={r.height}"
+                )
 
 
 @pytest.mark.asyncio
