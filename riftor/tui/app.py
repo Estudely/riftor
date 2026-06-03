@@ -35,7 +35,7 @@ from riftor.safety.permissions import ConfirmScreen, Permissions
 from riftor.tools import ToolContext, ToolResult
 from riftor.tui.config_screen import ConfigScreen
 from riftor.tui.theme import THEMES, css_variable_defaults, palette
-from riftor.tui.widgets import STAGE_NAMES, Banner, StatusBar
+from riftor.tui.widgets import STAGE_NAMES, Banner, CommandDropdown, StatusBar
 
 if TYPE_CHECKING:
     from riftor.config import Config
@@ -175,6 +175,7 @@ class RiftorApp(App):
         yield Banner(id="banner")
         yield VerticalScroll(id="chat")
         yield StatusBar(self.config.model, lore=self.config.lore)
+        yield CommandDropdown(_COMMANDS, id="cmd-dropdown")
         yield Input(placeholder="task riftor — or /help", id="prompt")
 
     def get_css_variables(self) -> dict[str, str]:
@@ -274,6 +275,10 @@ class RiftorApp(App):
     def status(self) -> StatusBar:
         return self.query_one(StatusBar)
 
+    @property
+    def cmd_dropdown(self) -> CommandDropdown:
+        return self.query_one("#cmd-dropdown", CommandDropdown)
+
     # ---- mount helpers ---------------------------------------------------------
     def _pal(self) -> dict[str, str]:
         return palette(self)
@@ -304,6 +309,21 @@ class RiftorApp(App):
 
     # ---- events ----------------------------------------------------------------
     def on_input_submitted(self, event: Input.Submitted) -> None:
+        # Dropdown selection: if the dropdown is visible and the user hasn't
+        # typed an exact command match, fill with the highlighted suggestion.
+        # Exact matches pass through to normal command dispatch.
+        if self.cmd_dropdown.visible:
+            text = event.value.strip()
+            if text not in _COMMANDS:
+                cmd = self.cmd_dropdown.highlighted_command
+                if cmd:
+                    inp = self.query_one("#prompt", Input)
+                    inp.value = cmd + " "
+                    inp.cursor_position = len(inp.value)
+                    self.cmd_dropdown.hide()
+                return
+            self.cmd_dropdown.hide()
+
         text = event.value.strip()
         self.query_one("#prompt", Input).clear()
         self._history_idx = None
@@ -317,9 +337,41 @@ class RiftorApp(App):
         self._add_user(text)
         self._agent(text)
 
+    def on_input_changed(self, event: Input.Changed) -> None:
+        """Show the command dropdown when the user starts typing a slash command."""
+        value = event.value
+        if value.startswith("/") and " " not in value:
+            self.cmd_dropdown.filter(value)
+        else:
+            self.cmd_dropdown.hide()
+
     def on_key(self, event) -> None:
-        # ↑/↓ recall previous prompts when the input is focused and empty-ish.
         inp = self.query_one("#prompt", Input)
+
+        # Dropdown navigation — takes priority over history recall.
+        if self.cmd_dropdown.visible and inp.has_focus:
+            if event.key == "tab":
+                cmd = self.cmd_dropdown.highlighted_command
+                if cmd:
+                    inp.value = cmd + " "
+                    inp.cursor_position = len(inp.value)
+                    self.cmd_dropdown.hide()
+                event.prevent_default()
+                return
+            if event.key in ("up", "down"):
+                lv = self.cmd_dropdown.list_view
+                if event.key == "up":
+                    lv.action_cursor_up()
+                else:
+                    lv.action_cursor_down()
+                event.prevent_default()
+                return
+            if event.key == "escape":
+                self.cmd_dropdown.hide()
+                event.prevent_default()
+                return
+
+        # ↑/↓ recall previous prompts when the input is focused.
         if not inp.has_focus or event.key not in ("up", "down"):
             return
         if not self._history:

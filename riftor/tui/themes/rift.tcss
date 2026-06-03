@@ -185,3 +185,34 @@ StatusBar {
 #prompt:focus {
     border: round $violet;
 }
+
+/* ──────────────────────────── command dropdown ──────────────────────── */
+#cmd-dropdown {
+    display: none;
+    height: auto;
+    max-height: 12;
+    margin: 0 1 0 1;
+    border: round $violet;
+    background: $panel;
+    padding: 0;
+}
+
+#cmd-dropdown.visible {
+    display: block;
+}
+
+#cmd-dropdown ListView {
+    background: $panel;
+    color: $foreground;
+    padding: 0 1;
+}
+
+#cmd-dropdown ListView > ListItem {
+    padding: 0 1;
+    color: $muted;
+}
+
+#cmd-dropdown ListView > ListItem.--highlight {
+    background: $violet 30%;
+    color: $foreground;
+}
