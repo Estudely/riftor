@@ -449,6 +449,8 @@ class RiftorApp(App):
 
     @work(group="config")
     async def _open_config(self) -> None:
+        from riftor.config import ProviderCreds  # local import: keep app import-time light
+
         result = await self.push_screen_wait(ConfigScreen(self.config))
         if not isinstance(result, dict):
             self._note("config unchanged")
@@ -457,8 +459,17 @@ class RiftorApp(App):
         self.config.temperature = result["temperature"]
         self.config.max_tokens = result["max_tokens"]
         self.config.lore = result["lore"]
-        if result.get("api_key"):
-            self.config.api_key = result["api_key"]
+
+        provider = result.get("provider")
+        if provider:
+            entry = self.config.providers.get(provider) or ProviderCreds()
+            if result.get("api_base") is not None:
+                entry.api_base = result["api_base"]
+            if result.get("api_key"):
+                entry.api_key = result["api_key"]
+            if entry.api_key or entry.api_base:
+                self.config.providers[provider] = entry
+
         self.provider = Provider(self.config)
         self.context.lore = self.config.lore
         self.status.set_lore(self.config.lore)
