@@ -156,3 +156,33 @@ def test_has_credentials_via_provider_table(monkeypatch):
     assert not cfg.has_credentials()
     cfg.providers = {"openai": cfgmod.ProviderCreds(api_key="sk-x")}
     assert cfg.has_credentials()
+
+
+def test_creds_for_env_is_model_specific(monkeypatch):
+    # The env tier must resolve the PASSED model's provider, not self.model's.
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-env")
+    cfg = Config(model="anthropic/claude-opus-4-8")  # active model is anthropic
+    # resolving an OPENAI model should find the OpenAI env key
+    assert cfg.creds_for("openai/gpt-5.5") == ("sk-openai-env", None)
+
+
+def test_creds_for_base_only_table_entry():
+    # Ollama shape: table entry has only a base, no key.
+    cfg = Config(model="ollama_chat/llama3")
+    cfg.providers = {"ollama": cfgmod.ProviderCreds(api_base="http://localhost:11434")}
+    assert cfg.creds_for("ollama_chat/llama3") == (None, "http://localhost:11434")
+    # and ollama is always "credentialed" via its prefix branch
+    assert cfg.has_credentials()
+
+
+def test_creds_for_openrouter_routed_id_is_miskeyed_known_limitation(monkeypatch):
+    # KNOWN LIMITATION (deferred to picker tasks): a slash-routed OpenRouter id like
+    # "openai/gpt-5.5" is classified by prefix as the "openai" provider, so creds stored
+    # under the "openrouter" table are NOT found. This test pins the CURRENT behavior so
+    # the wrinkle stays visible until the picker/store layer resolves it.
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    cfg = Config(model="openrouter/auto")
+    cfg.providers = {"openrouter": cfgmod.ProviderCreds(api_key="sk-or")}
+    assert cfg.creds_for("openai/gpt-5.5") == (None, None)

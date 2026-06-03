@@ -97,10 +97,11 @@ class Config(BaseModel):
             )
         return None
 
-    def provider_env(self) -> str | None:
-        """The env var name expected for this model's provider, if known."""
+    def provider_env(self, model: str | None = None) -> str | None:
+        """The env var name expected for ``model``'s provider (active model if None)."""
+        target = model if model is not None else self.model
         for prefix, env in _PROVIDER_ENV.items():
-            if self.model.startswith(prefix):
+            if target.startswith(prefix):
                 return env
         return None
 
@@ -127,13 +128,16 @@ class Config(BaseModel):
         only) → (None, None). Model-keyed so a future multi-model feature can
         resolve each model's creds without touching this layer.
         """
+        # NOTE: slash-routed OpenRouter ids (e.g. "openai/gpt-5.5") are keyed to their
+        # underlying provider ("openai"), not "openrouter". Resolved in the picker/store
+        # layer (it prefixes/stores under the chosen provider); see Task 6/7.
         key_name = provider_key_for_model(model)
         entry = self.providers.get(key_name)
         if entry and (entry.api_key or entry.api_base):
             return entry.api_key, entry.api_base
         if self.api_key or self.api_base:
             return self.api_key, self.api_base
-        env = self.provider_env()  # uses self.model; same provider as `model` in practice
+        env = self.provider_env(model)
         if env and os.environ.get(env):
             return os.environ[env], None
         return None, None
