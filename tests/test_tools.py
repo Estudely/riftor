@@ -145,3 +145,18 @@ async def test_add_scope_accepts_scalar_target(toolctx):
     )
     assert not r.is_error
     assert any(t.raw == "solo.example.com" for t in toolctx.engagement.scope.in_scope)
+
+
+def test_add_scope_blocked_headless_without_allow_rule():
+    # The headless gate (headless.py) denies a requires_permission tool unless an
+    # allow-rule exists — so the agent cannot self-scope unattended. Assert via the
+    # exact Permissions check headless.py uses:
+    #   `tool.requires_permission and not permissions.is_allowed(tool.name, preview)`
+    from riftor.safety.permissions import Permissions
+    perms = Permissions()  # empty allow-rules + safe default deny
+    tool = tools.get("add_scope")
+    preview = tool.preview({"targets": ["x.com"], "reason": "r"})
+    assert tool.requires_permission is True
+    assert not perms.is_allowed(tool.name, preview)   # no allow-rule -> headless denies
+    perms.add_allow_rule(tool.name)
+    assert perms.is_allowed(tool.name, preview)        # operator opts in -> allowed
