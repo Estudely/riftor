@@ -32,3 +32,15 @@ jobs:
         run: uv run pytest
       - name: Smoke (headless TUI integration)
         run: uv run python dev/smoke.py
+
+  docker:
+    # Builds the image and runs it once, so Dockerfile changes (and Dependabot
+    # base-image bumps) are actually verified — `test` runs on the runner's
+    # Python and never exercises the container.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build image
+        run: docker build -t riftor:ci .
+      - name: Smoke (riftor runs in the container)
+        run: docker run --rm riftor:ci --version
