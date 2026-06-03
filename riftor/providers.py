@@ -7,8 +7,8 @@ never raises into callers — failures degrade to the curated list.
 
 from __future__ import annotations
 
-import json  # noqa: F401
-import urllib.request  # noqa: F401
+import json
+import urllib.request
 from dataclasses import dataclass, field
 
 
@@ -83,3 +83,54 @@ class FetchResult:
     models: list[str] = field(default_factory=list)
     source: str = "curated"          # "live" | "curated" | "merged"
     error: str | None = None
+
+
+_FETCH_TIMEOUT = 4.0
+
+
+def _merge(curated: list[str], live: list[str]) -> list[str]:
+    """Curated favorites first, then live ids with curated removed (stable)."""
+    seen = set(curated)
+    return list(curated) + [m for m in live if m and m not in seen]
+
+
+def _http_get_json(url: str, headers: dict[str, str], timeout: float) -> dict:
+    """GET ``url`` and parse JSON. Isolated so tests can monkeypatch one seam."""
+    req = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def fetch_models(provider_key: str, api_base: str | None, api_key: str | None) -> FetchResult:
+    """Fetch the live model list for a provider, merged with curated defaults.
+
+    Never raises: any network/auth/parse failure degrades to the curated list
+    with ``error`` set to a short human hint.
+    """
+    meta = PROVIDERS.get(provider_key)
+    curated = PROVIDER_DEFAULTS.get(provider_key, [])
+    if meta is None:
+        return FetchResult(models=curated, source="curated")
+
+    if meta.list_kind == "none":
+        return FetchResult(models=curated, source="curated")
+
+    base = (api_base or meta.default_base or "").rstrip("/")
+    if not base:
+        return FetchResult(models=curated, source="curated",
+                           error="no base URL for this provider")
+
+    try:
+        if meta.list_kind == "ollama":
+            data = _http_get_json(f"{base}/api/tags", {}, _FETCH_TIMEOUT)
+            live = [m["name"] for m in data.get("models", []) if m.get("name")]
+        else:  # "openai"
+            headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+            data = _http_get_json(f"{base}/models", headers, _FETCH_TIMEOUT)
+            live = [m["id"] for m in data.get("data", []) if m.get("id")]
+    except Exception as exc:  # noqa: BLE001 — never let a fetch crash the UI
+        return FetchResult(models=curated, source="curated", error=str(exc)[:160])
+
+    if curated:
+        return FetchResult(models=_merge(curated, live), source="merged")
+    return FetchResult(models=live, source="live")

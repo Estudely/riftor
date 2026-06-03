@@ -36,3 +36,48 @@ def test_apply_prefix():
     assert pv.apply_prefix("custom", "my-model") == "my-model"
     # ollama uses ollama_chat/ prefix
     assert pv.apply_prefix("ollama", "llama3") == "ollama_chat/llama3"
+
+
+def test_merge_pins_curated_first_and_dedupes():
+    merged = pv._merge(["claude-opus-4-8", "claude-sonnet-4-6"],
+                       ["zzz-model", "claude-opus-4-8", "aaa-model"])
+    # curated first, then live with curated removed, order otherwise preserved
+    assert merged == ["claude-opus-4-8", "claude-sonnet-4-6", "zzz-model", "aaa-model"]
+
+
+def test_fetch_none_kind_returns_curated_without_network(monkeypatch):
+    def boom(*a, **k):
+        raise AssertionError("must not hit the network for list_kind=none")
+    monkeypatch.setattr(pv.urllib.request, "urlopen", boom)
+    res = pv.fetch_models("anthropic", None, None)
+    assert res.source == "curated"
+    assert res.error is None
+    assert res.models == pv.PROVIDER_DEFAULTS["anthropic"]
+
+
+def test_fetch_openai_parses_and_merges(monkeypatch):
+    payload = {"data": [{"id": "gpt-5.5"}, {"id": "gpt-9-new"}]}
+    monkeypatch.setattr(pv, "_http_get_json", lambda url, headers, timeout: payload)
+    res = pv.fetch_models("openai", "https://api.openai.com/v1", "sk-x")
+    assert res.source == "merged"
+    assert res.error is None
+    assert res.models[0] == "gpt-5.5"           # curated pinned first
+    assert "gpt-9-new" in res.models            # live id surfaced
+
+
+def test_fetch_ollama_parses_tags(monkeypatch):
+    payload = {"models": [{"name": "llama3.3"}, {"name": "qwen3"}]}
+    monkeypatch.setattr(pv, "_http_get_json", lambda url, headers, timeout: payload)
+    res = pv.fetch_models("ollama", "http://localhost:11434", None)
+    assert res.source == "live"                 # ollama has no curated list
+    assert res.models == ["llama3.3", "qwen3"]
+
+
+def test_fetch_network_error_falls_back_to_curated(monkeypatch):
+    def boom(url, headers, timeout):
+        raise OSError("connection refused")
+    monkeypatch.setattr(pv, "_http_get_json", boom)
+    res = pv.fetch_models("openai", "https://api.openai.com/v1", "sk-x")
+    assert res.error is not None
+    assert res.models == pv.PROVIDER_DEFAULTS["openai"]   # curated fallback
+    assert res.source == "curated"
