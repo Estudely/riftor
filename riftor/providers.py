@@ -54,7 +54,7 @@ PROVIDER_DEFAULTS: dict[str, list[str]] = {
     "groq": ["llama-3.3-70b-versatile", "openai/gpt-oss-120b",
              "openai/gpt-oss-20b", "llama-3.1-8b-instant"],
     "deepseek": ["deepseek-v4-pro", "deepseek-v4-flash"],
-    "xai": ["grok-3", "grok-3-mini", "grok-2"],
+    "xai": ["grok-4.3"],
     "mistral": ["mistral-large-latest", "mistral-medium-latest", "mistral-small-latest"],
     "ollama": [],
     "custom": [],
