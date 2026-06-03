@@ -146,7 +146,10 @@ tested (pytest + headless smoke), type-checked (pyright) and lint-clean.
 - uv 0.11.14, Python 3.12.3 at /usr/bin/python3
 - **Cloud-first**: default model `anthropic/claude-sonnet-4-6`; key in local
   config (`~/.config/riftor/config.toml`, perms 600, outside the repo)
-- Latest release: **0.0.4** (auto-published via trusted publishing + auto GitHub Release)
+- Latest release: **0.0.7** (auto-published via trusted publishing + auto GitHub Release).
+  0.0.5 lazy-loaded litellm (fast startup) + tighter demo; 0.0.6 synced the PyPI
+  readme; 0.0.7 adds `/doctor`, the redesigned config/permission modals, and
+  light themes + live theme preview.
 - Local Ollama is a supported fallback, not the identity
 - Reference reads: NousResearch/hermes-agent (Python analog), earendil-works/pi (minimal core)
 
