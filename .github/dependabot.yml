@@ -1,0 +1,37 @@
+# Dependabot keeps dependencies current across the repo's three ecosystems.
+# Minor/patch bumps are grouped into one PR per ecosystem to keep noise low;
+# majors come as their own PRs (they may need code changes). CI (ci.yml) runs
+# on every Dependabot PR, so a green check is the signal it's safe to merge.
+version: 2
+updates:
+  # GitHub Actions — e.g. setup-uv, checkout, upload-artifact.
+  # NB: setup-uv pins an exact version (v8.x dropped floating major tags), so
+  # Dependabot is how those action pins stay current.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:17"
+    groups:
+      actions:
+        update-types: ["minor", "patch"]
+
+  # Python deps (pyproject.toml + uv.lock).
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:17"
+    groups:
+      python-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # Dockerfile base image.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:17"
