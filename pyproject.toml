@@ -1,6 +1,6 @@
 [project]
 name = "riftor"
-version = "0.0.3"
+version = "0.0.4"
 description = "An open-source offensive-security AI agent that lives in your terminal."
 readme = "README.md"
 requires-python = ">=3.11"

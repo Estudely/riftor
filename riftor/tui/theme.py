@@ -36,33 +36,33 @@ def _theme(name: str, palette: dict[str, str]) -> Theme:
 
 
 _PALETTES: dict[str, dict[str, str]] = {
-    # The signature look: void background, violet -> cyan rift glow.
+    # Signature: deep indigo background, violet / cyan rift glow.
     "rift": {
-        "bg": "#0a0a12", "fg": "#c8c8d4", "surface": "#0e0e18", "panel": "#14141f",
+        "bg": "#08060f", "fg": "#cbd5e1", "surface": "#0f0d1a", "panel": "#141124",
         "violet": "#a855f7", "cyan": "#22d3ee", "magenta": "#f0abfc", "danger": "#fca5a5",
         "muted": "#8b8ba7", "dim": "#5a5a6a", "faint": "#3a3a4a", "border": "#2a2a3a",
         "user-bg": "#1a1426", "user-fg": "#e9d5ff", "assistant-bg": "#101019", "tool-bg": "#0c0c14",
     },
-    # Cold, minimal, cyan-forward.
+    # Cold, icy: blue-steel background, electric cyan accent.
     "void": {
-        "bg": "#07070d", "fg": "#b9c2d0", "surface": "#0b0d16", "panel": "#10131f",
+        "bg": "#0a1628", "fg": "#c4d6f0", "surface": "#102540", "panel": "#142d4a",
         "violet": "#6d8bff", "cyan": "#38e0ff", "magenta": "#7dd3fc", "danger": "#fb7185",
-        "muted": "#7a8499", "dim": "#4a5266", "faint": "#2a3040", "border": "#222838",
-        "user-bg": "#11192b", "user-fg": "#cfe3ff", "assistant-bg": "#0b0f1a", "tool-bg": "#090c14",
+        "muted": "#7a90aa", "dim": "#4a6080", "faint": "#2a4058", "border": "#1e3048",
+        "user-bg": "#102840", "user-fg": "#d4e4ff", "assistant-bg": "#0c1e34", "tool-bg": "#081828",
     },
-    # Warm, molten cracks: magenta + amber on charcoal.
+    # Warm magma: dark cherry base, magenta + hot amber accents.
     "fracture": {
-        "bg": "#0d0a0f", "fg": "#d8cdd2", "surface": "#15101a", "panel": "#1a1320",
-        "violet": "#d946ef", "cyan": "#fb923c", "magenta": "#f0abfc", "danger": "#ef4444",
-        "muted": "#9a8c93", "dim": "#5e4f57", "faint": "#3a2f37", "border": "#2e2430",
-        "user-bg": "#1f1320", "user-fg": "#fbd5ff", "assistant-bg": "#150f17", "tool-bg": "#100b12",
+        "bg": "#140a10", "fg": "#e2cfd6", "surface": "#200e19", "panel": "#261022",
+        "violet": "#e040c0", "cyan": "#f59e0b", "magenta": "#f0abfc", "danger": "#ef4444",
+        "muted": "#a88c94", "dim": "#6e505a", "faint": "#3a2830", "border": "#2e1c24",
+        "user-bg": "#281422", "user-fg": "#fce0ff", "assistant-bg": "#1a0e16", "tool-bg": "#120810",
     },
-    # Deep purple, high-contrast, intense.
+    # Deep purple: extreme contrast, intense violet-on-black.
     "singularity": {
-        "bg": "#05030a", "fg": "#e7e2f5", "surface": "#0c0817", "panel": "#120c22",
-        "violet": "#b388ff", "cyan": "#8b5cf6", "magenta": "#f5d0fe", "danger": "#fb7185",
-        "muted": "#9990b5", "dim": "#5b5276", "faint": "#322a4a", "border": "#2a2440",
-        "user-bg": "#1a1230", "user-fg": "#efe7ff", "assistant-bg": "#0f0a1d", "tool-bg": "#0b0717",
+        "bg": "#060210", "fg": "#e7dffc", "surface": "#0e0624", "panel": "#140a30",
+        "violet": "#b388ff", "cyan": "#d0bcff", "magenta": "#f5d0fe", "danger": "#fb7185",
+        "muted": "#9080bc", "dim": "#5e4a80", "faint": "#382a52", "border": "#281c3c",
+        "user-bg": "#1a0e36", "user-fg": "#efe4ff", "assistant-bg": "#0e0820", "tool-bg": "#080414",
     },
 }
 

@@ -98,6 +98,7 @@ class RiftorApp(App):
         if name not in THEMES:
             name = "rift"
         self.theme = name
+        self.refresh_css(animate=False)
         try:
             self.query_one(Banner).refresh()
             self.status.refresh_bar()
