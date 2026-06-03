@@ -29,13 +29,22 @@ def test_provider_key_for_model():
 
 def test_apply_prefix():
     assert pv.apply_prefix("anthropic", "claude-opus-4-8") == "anthropic/claude-opus-4-8"
-    # openrouter ids already contain a slash -> passed through unchanged
-    assert pv.apply_prefix("openrouter", "openrouter/auto") == "openrouter/auto"
-    assert pv.apply_prefix("openrouter", "anthropic/claude-opus-4.8") == "anthropic/claude-opus-4.8"
+    # OpenRouter: litellm needs the openrouter/ prefix prepended to the full slug.
+    assert pv.apply_prefix("openrouter", "openrouter/auto") == "openrouter/auto"  # already prefixed
+    assert pv.apply_prefix("openrouter", "anthropic/claude-opus-4.8") == "openrouter/anthropic/claude-opus-4.8"
+    assert pv.apply_prefix("openrouter", "openai/gpt-5.5") == "openrouter/openai/gpt-5.5"
     # custom -> no prefix
     assert pv.apply_prefix("custom", "my-model") == "my-model"
     # ollama uses ollama_chat/ prefix
     assert pv.apply_prefix("ollama", "llama3") == "ollama_chat/llama3"
+    # non-openrouter ids that already contain a slash still pass through unchanged
+    assert pv.apply_prefix("custom", "my-org/my-model") == "my-org/my-model"
+
+
+def test_openrouter_round_trips_to_openrouter_key():
+    full = pv.apply_prefix("openrouter", "openai/gpt-5.5")
+    assert full == "openrouter/openai/gpt-5.5"
+    assert pv.provider_key_for_model(full) == "openrouter"
 
 
 def test_merge_pins_curated_first_and_dedupes():

@@ -69,9 +69,13 @@ def provider_key_for_model(model: str) -> str:
 def apply_prefix(provider_key: str, bare_id: str) -> str:
     """Build the full litellm model id from a provider + a (possibly bare) id.
 
-    Ids that already contain a '/' (OpenRouter, or anything pre-prefixed) pass
-    through unchanged so we never double-prefix.
+    OpenRouter is special: litellm wants ``openrouter/<full-slug>`` (e.g.
+    ``openrouter/openai/gpt-5.5``), so its prefix is prepended even though the
+    slug itself contains a '/'. For every other provider, an id that already
+    contains a '/' is assumed pre-prefixed and passes through unchanged.
     """
+    if provider_key == "openrouter":
+        return bare_id if bare_id.startswith("openrouter/") else f"openrouter/{bare_id}"
     if "/" in bare_id:
         return bare_id
     prefix = PROVIDERS[provider_key].prefix if provider_key in PROVIDERS else ""
