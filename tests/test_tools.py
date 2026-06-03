@@ -77,3 +77,86 @@ async def test_record_finding_dedup_skip(toolctx):
     r = await rf.execute({"title": "Dup", "severity": "high", "host": "h"}, toolctx)
     assert "skipped" in r.content
     assert toolctx.engagement.findings_count() == 1
+
+
+@pytest.mark.asyncio
+async def test_add_scope_adds_in_scope_targets(toolctx):
+    eng = toolctx.engagement
+    r = await tools.get("add_scope").execute(
+        {"targets": ["admin.example.com", "10.0.0.0/24"],
+         "reason": "found in DNS of in-scope example.com"},
+        toolctx,
+    )
+    assert not r.is_error, r.content
+    raws = {t.raw for t in eng.scope.in_scope}
+    assert "admin.example.com" in raws
+    assert "10.0.0.0/24" in raws
+    # added in-scope only — nothing landed in out-of-scope
+    assert eng.scope.out_of_scope == []
+
+
+def test_add_scope_tool_metadata():
+    tool = tools.get("add_scope")
+    assert tool is not None
+    assert tool.requires_permission is True
+    # must NOT be scope_sensitive (it edits the scope list, doesn't touch a host)
+    assert tool.scope_sensitive is False
+    props = tool.parameters["properties"]
+    assert "targets" in props and "reason" in props
+    assert set(tool.parameters["required"]) == {"targets", "reason"}
+    prev = tool.preview({"targets": ["a.com", "b.com"], "reason": "why"})
+    assert "a.com" in prev and "why" in prev
+
+
+@pytest.mark.asyncio
+async def test_add_scope_no_engagement():
+    from riftor.tools.base import ToolContext
+    ctx = ToolContext()  # engagement defaults to None
+    r = await tools.get("add_scope").execute(
+        {"targets": ["x.com"], "reason": "r"}, ctx
+    )
+    assert r.is_error
+    assert "no active engagement" in r.content
+
+
+@pytest.mark.asyncio
+async def test_add_scope_empty_targets(toolctx):
+    r = await tools.get("add_scope").execute({"targets": [], "reason": "r"}, toolctx)
+    assert r.is_error
+    assert "no targets" in r.content
+
+
+@pytest.mark.asyncio
+async def test_add_scope_reports_already_present(toolctx):
+    eng = toolctx.engagement
+    eng.add_scope("dup.example.com", "in")
+    r = await tools.get("add_scope").execute(
+        {"targets": ["dup.example.com"], "reason": "r"}, toolctx
+    )
+    assert not r.is_error
+    assert "already in scope" in r.content
+    assert sum(t.raw == "dup.example.com" for t in eng.scope.in_scope) == 1
+
+
+@pytest.mark.asyncio
+async def test_add_scope_accepts_scalar_target(toolctx):
+    r = await tools.get("add_scope").execute(
+        {"targets": "solo.example.com", "reason": "r"}, toolctx
+    )
+    assert not r.is_error
+    assert any(t.raw == "solo.example.com" for t in toolctx.engagement.scope.in_scope)
+
+
+def test_add_scope_blocked_headless_without_allow_rule():
+    # The headless gate (headless.py) denies a requires_permission tool unless an
+    # allow-rule exists — so the agent cannot self-scope unattended. Assert via the
+    # exact Permissions check headless.py uses:
+    #   `tool.requires_permission and not permissions.is_allowed(tool.name, preview)`
+    from riftor.safety.permissions import Permissions
+    perms = Permissions()  # empty allow-rules + safe default deny
+    tool = tools.get("add_scope")
+    preview = tool.preview({"targets": ["x.com"], "reason": "r"})
+    assert tool.requires_permission is True
+    assert not perms.is_allowed(tool.name, preview)   # no allow-rule -> headless denies
+    perms.add_allow_rule(tool.name)
+    assert perms.is_allowed(tool.name, preview)        # operator opts in -> allowed

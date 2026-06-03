@@ -112,6 +112,12 @@ Manage rules live with `/permissions allow <tool> [pattern]` and
 an approval prompt. In headless mode (`--prompt`), approval-gated tools only run
 if a standing `allow` rule exists.
 
+The agent can **request** adding in-scope targets itself via the `add_scope` tool
+(e.g. a subdomain it discovered on an in-scope host). Like other privileged tools
+it is **approval-gated**: you confirm it in the prompt, and in headless mode it is
+blocked unless you add an `allow` rule for `add_scope`. The agent can only *widen*
+scope this way — removing, excluding, and clearing remain operator-only via `/scope`.
+
 ## Keybindings — `~/.config/riftor/keybindings.toml`
 
 Override the built-in hotkeys (`action = key`):

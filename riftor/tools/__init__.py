@@ -13,6 +13,7 @@ from riftor.tools.core import (
     WriteTool,
 )
 from riftor.tools.engagement import (
+    AddScopeTool,
     DeleteFindingTool,
     EditFindingTool,
     GenerateReportTool,
@@ -39,6 +40,7 @@ ALL_TOOLS: list[Tool] = [
     EditFindingTool(),
     DeleteFindingTool(),
     GenerateReportTool(),
+    AddScopeTool(),
     WriteTool(),
     EditTool(),
     BashTool(),
