@@ -9,12 +9,13 @@
 
 ![riftor demo](https://raw.githubusercontent.com/Estudely/riftor/main/demo.gif)
 
-riftor is a Python TUI pentest assistant: a full-screen [Textual](https://textual.textualize.io/)
-interface backed by [litellm](https://docs.litellm.ai/), organised around the
-**RIFT** methodology — **R**econ → **I**ntrusion → **F**oothold → **T**akeover.
-
-It's **cloud-first** (Anthropic, OpenAI, OpenRouter, …) for the strongest agent
-behaviour, with local [Ollama](https://ollama.com/) supported as an option.
+**riftor** puts an AI copilot at your terminal for offensive security. Talk to it
+like a teammate — tell it to scan a subnet, dig into a suspicious service, or
+write up findings — and it runs the tools, respects your scope, and builds the
+report as you go. Under the hood it follows a structured kill chain:
+**R**econ → **I**ntrusion → **F**oothold → **T**akeover. Powered by any major LLM
+through [litellm](https://docs.litellm.ai/) and wrapped in a full-screen
+[Textual](https://textual.textualize.io/) interface.
 
 > **Status:** fully featured (Phase 4–6). Streaming agent with retry/backoff +
 > token/cost metering, **persistent granular permissions** (allow/deny rules,
