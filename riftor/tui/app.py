@@ -77,7 +77,7 @@ _Engagement_
 - `/timeline` — engagement activity log · `/export` — archive the whole engagement
 
 _Settings & sessions_
-- `/model [name]` — show or switch the model · `/theme [name]` (rift/void/fracture/singularity)
+- `/model [name]` — show or switch the model · `/theme [name]` (dark: rift/dusk/void/fracture/singularity · light: dawn/paper)
 - `/config` — settings panel · `/permissions` — review allow/deny rules
 - `/lore` — toggle the rift persona · `/audit` — recent tool-call audit log
 - `/doctor` — check which external recon tools (nmap/httpx/…) are installed

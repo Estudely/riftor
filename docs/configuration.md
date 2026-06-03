@@ -14,7 +14,7 @@ commands — those persist your changes back to the file.
 | `api_key` | string | — | Prefer the provider's env var; only set this if you must. |
 | `temperature` | float | `0.3` | Sampling temperature, `0.0`–`2.0`. Lower = more deterministic. |
 | `max_tokens` | int | `2048` | Max tokens per model response. |
-| `theme` | string | `rift` | One of `rift`, `void`, `fracture`, `singularity`. |
+| `theme` | string | `rift` | Dark: `rift` `dusk` `void` `fracture` `singularity` · Light: `dawn` `paper`. Changing it in `/config` previews live. |
 | `lore` | bool | `true` | The subtle rift persona; off = strictly professional voice. |
 | `max_steps` | int | `16` | Tool-call steps per task before pausing (extend live with `/continue`). |
 | `max_result_chars` | int | `30000` | Cap on tool output fed back to the model. |

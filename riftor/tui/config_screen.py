@@ -14,6 +14,7 @@ from riftor.tui.theme import THEMES
 
 if TYPE_CHECKING:
     from riftor.config import Config
+    from riftor.tui.app import RiftorApp
 
 
 def _row(label: str, field: Widget) -> Horizontal:
@@ -29,6 +30,8 @@ class ConfigScreen(ModalScreen[dict | None]):
     def __init__(self, config: "Config") -> None:
         super().__init__()
         self.config = config
+        # theme active when the modal opened — to revert if the user cancels
+        self._original_theme = config.theme
 
     def compose(self) -> ComposeResult:
         theme = self.config.theme if self.config.theme in THEMES else "rift"
@@ -63,10 +66,26 @@ class ConfigScreen(ModalScreen[dict | None]):
                 yield Button("Save", id="save", variant="success")
                 yield Button("Cancel", id="cancel", variant="error")
 
+    @property
+    def _riftor_app(self) -> "RiftorApp":
+        return self.app  # type: ignore[return-value]  # always a RiftorApp at runtime
+
     def on_mount(self) -> None:
         self.query_one("#cfg-model", Input).focus()
 
+    def on_select_changed(self, event: Select.Changed) -> None:
+        """Live-preview the theme as the operator picks it in the dropdown."""
+        if event.select.id != "cfg-theme":
+            return
+        value = event.value
+        if isinstance(value, str) and value in THEMES:
+            self._riftor_app._apply_theme(value)  # reuses the /theme live-switch path
+
+    def _revert_theme(self) -> None:
+        self._riftor_app._apply_theme(self._original_theme)
+
     def action_cancel(self) -> None:
+        self._revert_theme()
         self.dismiss(None)
 
     def _fail(self, message: str) -> None:
@@ -74,6 +93,7 @@ class ConfigScreen(ModalScreen[dict | None]):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "cancel":
+            self._revert_theme()
             self.dismiss(None)
             return
         try:

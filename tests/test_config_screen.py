@@ -48,6 +48,27 @@ async def test_config_modal_renders_all_fields():
 
 
 @pytest.mark.asyncio
+async def test_theme_previews_live_and_reverts_on_cancel():
+    with tempfile.TemporaryDirectory() as d:
+        _patch_paths(Path(d))
+        cfg = Config(model="ollama_chat/x", api_base="http://localhost:11434", theme="rift")
+        app = RiftorApp(cfg, workdir=Path(d))
+        async with app.run_test() as pilot:
+            assert app.theme == "rift"
+            app.query_one("#prompt", Input).value = "/config"
+            await pilot.press("enter")
+            await pilot.pause()
+            # changing the dropdown previews instantly — before Save
+            app.screen.query_one("#cfg-theme", Select).value = "paper"
+            await pilot.pause()
+            assert app.theme == "paper", "theme should preview live"
+            # cancelling reverts to the original
+            await pilot.press("escape")
+            await pilot.pause()
+            assert app.theme == "rift", "cancel should revert the preview"
+
+
+@pytest.mark.asyncio
 async def test_config_modal_saves_changes():
     with tempfile.TemporaryDirectory() as d:
         _patch_paths(Path(d))
