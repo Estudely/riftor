@@ -1,0 +1,58 @@
+"""Provider: lazy litellm loading + the offline demo mock hook."""
+
+from __future__ import annotations
+
+import sys
+
+import pytest
+
+from riftor.agent import provider as prov
+from riftor.config import Config
+
+
+def test_importing_provider_does_not_load_litellm():
+    # The whole point of the lazy accessor: importing the module is cheap.
+    # (It may already be loaded by another test; this asserts the module import
+    # path itself doesn't force it — checked via the accessor cache being lazy.)
+    assert "litellm" not in sys.modules or prov._litellm is sys.modules.get("litellm")
+
+
+def test_get_litellm_configures_and_caches():
+    lit = prov._get_litellm()
+    assert lit.telemetry is False
+    assert lit.drop_params is True
+    assert prov._get_litellm() is lit  # cached
+
+
+def test_kwargs_no_mock_by_default(monkeypatch):
+    monkeypatch.delenv("RIFTOR_DEMO_RESPONSE", raising=False)
+    p = Provider_for_test()
+    kw = p._kwargs([{"role": "user", "content": "hi"}])
+    assert "mock_response" not in kw
+    assert kw["stream"] is True
+
+
+def test_kwargs_injects_mock_when_env_set(monkeypatch):
+    monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "canned reply")
+    p = Provider_for_test()
+    kw = p._kwargs([{"role": "user", "content": "hi"}])
+    assert kw["mock_response"] == "canned reply"
+
+
+@pytest.mark.asyncio
+async def test_mock_response_streams_offline(monkeypatch):
+    monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "The rift opens.")
+    p = Provider_for_test()
+    text = []
+    turn = None
+    async for event, payload in p.stream_turn([{"role": "user", "content": "go"}]):
+        if event == "text":
+            text.append(str(payload))
+        elif event == "done":
+            turn = payload
+    assert "".join(text) == "The rift opens."
+    assert turn is not None and turn.text == "The rift opens."
+
+
+def Provider_for_test() -> "prov.Provider":
+    return prov.Provider(Config(model="anthropic/claude-sonnet-4-6", api_key="sk-demo"))
