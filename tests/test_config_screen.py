@@ -196,3 +196,23 @@ async def test_fetch_button_repopulates_models(monkeypatch):
             sel.value = "m-two"            # only legal if the fetched option was applied
             await pilot.pause()
             assert sel.value == "m-two"
+
+
+@pytest.mark.asyncio
+async def test_openrouter_model_no_duplicate_option_on_open():
+    with tempfile.TemporaryDirectory() as d:
+        _patch_paths(Path(d))
+        cfg = Config(model="openrouter/auto")
+        app = RiftorApp(cfg, workdir=Path(d))
+        async with app.run_test() as pilot:
+            app.query_one("#prompt", Input).value = "/config"
+            await pilot.press("enter")
+            await pilot.pause()
+            sel = app.screen.query_one("#cfg-model-select", Select)
+            # _options is a list of (prompt, value) tuples; extract string values only
+            values = [v for _, v in sel._options if isinstance(v, str)]
+            assert "auto" not in values, "stripped 'auto' must not appear as a duplicate"
+            assert "openrouter/auto" in values, "full slug must be present"
+            assert sel.value == "openrouter/auto", "full slug must be selected"
+            await pilot.press("escape")
+            await pilot.pause()

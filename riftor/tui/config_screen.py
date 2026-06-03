@@ -45,13 +45,15 @@ class ConfigScreen(ModalScreen[dict | None]):
         self.config = config
         self._original_theme = config.theme
         self._provider = provider_key_for_model(config.model)
+        self._provider_initialized = False
 
     def compose(self) -> ComposeResult:
         theme = self.config.theme if self.config.theme in THEMES else "rift"
         pkey = self._provider
         meta = PROVIDERS[pkey]
         bare = (self.config.model[len(meta.prefix):]
-                if meta.prefix and self.config.model.startswith(meta.prefix)
+                if meta.prefix and pkey != "openrouter"
+                and self.config.model.startswith(meta.prefix)
                 else self.config.model)
         saved = self.config.providers.get(pkey)
         base_val = (saved.api_base if saved else None) or meta.default_base or ""
@@ -113,7 +115,10 @@ class ConfigScreen(ModalScreen[dict | None]):
             self._provider = event.value
             meta = PROVIDERS[event.value]
             self.query_one("#cfg-base", Input).value = meta.default_base or ""
-            self._set_model_options(_model_options(event.value))
+            if self._provider_initialized:
+                self._set_model_options(_model_options(event.value))
+            else:
+                self._provider_initialized = True
 
     def _set_model_options(self, options: list[tuple[str, str]]) -> None:
         sel = self.query_one("#cfg-model-select", Select)

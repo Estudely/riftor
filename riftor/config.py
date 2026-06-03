@@ -16,7 +16,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, field_validator
 
-from riftor.providers import provider_key_for_model
+from riftor.providers import PROVIDERS, provider_key_for_model
 
 
 def _config_dir() -> Path:
@@ -37,18 +37,6 @@ _KNOWN_PROVIDERS = (
     "groq/", "mistral/", "cohere/", "azure/", "bedrock/", "vertex_ai/", "together_ai/",
     "deepseek/", "xai/", "perplexity/", "fireworks_ai/", "huggingface/", "replicate/",
 )
-
-# Env var per provider, for first-run key detection / graceful onboarding.
-_PROVIDER_ENV = {
-    "anthropic/": "ANTHROPIC_API_KEY",
-    "openai/": "OPENAI_API_KEY",
-    "openrouter/": "OPENROUTER_API_KEY",
-    "gemini/": "GEMINI_API_KEY",
-    "groq/": "GROQ_API_KEY",
-    "mistral/": "MISTRAL_API_KEY",
-    "deepseek/": "DEEPSEEK_API_KEY",
-    "xai/": "XAI_API_KEY",
-}
 
 
 class ProviderCreds(BaseModel):
@@ -100,9 +88,9 @@ class Config(BaseModel):
     def provider_env(self, model: str | None = None) -> str | None:
         """The env var name expected for ``model``'s provider (active model if None)."""
         target = model if model is not None else self.model
-        for prefix, env in _PROVIDER_ENV.items():
-            if target.startswith(prefix):
-                return env
+        for meta in PROVIDERS.values():
+            if meta.prefix and meta.env and target.startswith(meta.prefix):
+                return meta.env
         return None
 
     def has_credentials(self) -> bool:
@@ -165,7 +153,7 @@ class Config(BaseModel):
         if os.environ.get("ANTHROPIC_API_KEY"):
             return cls(model="anthropic/claude-sonnet-4-6")
         if os.environ.get("OPENAI_API_KEY"):
-            return cls(model="openai/gpt-4o")
+            return cls(model="openai/gpt-5.5")
         if os.environ.get("OPENROUTER_API_KEY"):
             return cls(model="openrouter/auto")
         # Optional local fallback if an Ollama server is already running.
