@@ -97,6 +97,12 @@ class RecordFindingTool(Tool):
             "host": {"type": "string"},
             "evidence": {"type": "string"},
             "recommendation": {"type": "string"},
+            "tags": {
+                "type": "string",
+                "description": "Optional comma-separated tags, e.g. "
+                "'requires-client-approval, pending-validation'.",
+            },
+            "notes": {"type": "string", "description": "Optional free-form markdown notes."},
             "cvss_vector": {
                 "type": "string",
                 "description": "Optional CVSS v3.1 vector, e.g. "
@@ -122,16 +128,109 @@ class RecordFindingTool(Tool):
         else:
             vector = ""  # don't store an invalid vector
 
-        fid = eng.add_finding(
+        fid, action = eng.add_finding_dedup(
+            dedup="skip",
             title=str(args["title"]),
             severity=severity,
             host=str(args.get("host") or ""),
             evidence=str(args.get("evidence") or ""),
             recommendation=str(args.get("recommendation") or ""),
+            tags=str(args.get("tags") or ""),
+            notes=str(args.get("notes") or ""),
             cvss=vector,
         )
+        if action == "skipped":
+            return ToolResult(f"finding already recorded (#{fid}) — skipped duplicate")
         tag = severity + (f" · CVSS {score:.1f}" if score is not None else "")
         return ToolResult(f"recorded finding #{fid} [{tag}] {args['title']}")
+
+
+class EditFindingTool(Tool):
+    name = "edit_finding"
+    description = (
+        "Update an existing finding by id (from /findings). Pass only the fields to "
+        "change: title, severity, host, evidence, recommendation, tags, notes."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "id": {"type": "integer", "description": "Finding id to edit."},
+            "title": {"type": "string"},
+            "severity": {"type": "string", "enum": _SEVERITIES},
+            "host": {"type": "string"},
+            "evidence": {"type": "string"},
+            "recommendation": {"type": "string"},
+            "tags": {"type": "string"},
+            "notes": {"type": "string"},
+        },
+        "required": ["id"],
+    }
+
+    async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        eng = ctx.engagement
+        if eng is None:
+            return ToolResult("error: no active engagement", is_error=True)
+        try:
+            fid = int(args["id"])
+        except (KeyError, TypeError, ValueError):
+            return ToolResult("error: id must be an integer", is_error=True)
+        fields = {
+            k: str(args[k])
+            for k in ("title", "severity", "host", "evidence", "recommendation", "tags", "notes")
+            if k in args and args[k] is not None
+        }
+        if "severity" in fields and fields["severity"].lower() not in _SEVERITIES:
+            return ToolResult(f"error: severity must be one of {', '.join(_SEVERITIES)}", is_error=True)
+        if not eng.store.update_finding(fid, **fields):
+            return ToolResult(f"error: no finding #{fid}", is_error=True)
+        eng.store.log_activity("finding_edit", f"#{fid} {', '.join(fields)}")
+        return ToolResult(f"updated finding #{fid} ({', '.join(fields) or 'no changes'})")
+
+
+class DeleteFindingTool(Tool):
+    name = "delete_finding"
+    description = "Delete a finding by id (from /findings). Use to remove duplicates or false positives."
+    parameters = {
+        "type": "object",
+        "properties": {"id": {"type": "integer", "description": "Finding id to delete."}},
+        "required": ["id"],
+    }
+
+    async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        eng = ctx.engagement
+        if eng is None:
+            return ToolResult("error: no active engagement", is_error=True)
+        try:
+            fid = int(args["id"])
+        except (KeyError, TypeError, ValueError):
+            return ToolResult("error: id must be an integer", is_error=True)
+        if not eng.store.delete_finding(fid):
+            return ToolResult(f"error: no finding #{fid}", is_error=True)
+        eng.store.log_activity("finding_delete", f"#{fid}")
+        return ToolResult(f"deleted finding #{fid}")
+
+
+class ListHostsTool(Tool):
+    name = "list_hosts"
+    description = "List discovered hosts and services recorded in the engagement."
+    parameters = {"type": "object", "properties": {}}
+
+    async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        eng = ctx.engagement
+        if eng is None:
+            return ToolResult("error: no active engagement", is_error=True)
+        services = eng.store.list_services()
+        if not services:
+            hosts = eng.store.list_hosts()
+            if not hosts:
+                return ToolResult("no hosts or services recorded yet")
+            return ToolResult("hosts:\n" + "\n".join(h["host"] for h in hosts))
+        lines = [
+            f"{s['host']}:{s.get('port') or ''}/{s.get('proto', 'tcp')} "
+            f"{s.get('service', '')} {s.get('version', '')}".rstrip()
+            for s in services
+        ]
+        return ToolResult("services:\n" + "\n".join(lines)).truncated()
 
 
 class ImportScanTool(Tool):
@@ -147,6 +246,11 @@ class ImportScanTool(Tool):
         "properties": {
             "tool": {"type": "string", "enum": list(SUPPORTED)},
             "output": {"type": "string", "description": "Raw stdout from the tool."},
+            "dedup": {
+                "type": "string",
+                "enum": ["skip", "merge", "allow-all"],
+                "description": "How to handle duplicates (default skip).",
+            },
         },
         "required": ["tool", "output"],
     }
@@ -161,25 +265,52 @@ class ImportScanTool(Tool):
         tool = str(args.get("tool", "")).lower()
         if tool not in SUPPORTED:
             return ToolResult(f"error: tool must be one of {', '.join(SUPPORTED)}", is_error=True)
+        dedup = str(args.get("dedup") or "skip").lower()
+        if dedup not in ("skip", "merge", "allow-all"):
+            dedup = "skip"
         scan = parse(tool, str(args.get("output", "")))
+
+        svc_added = svc_skipped = 0
         for service in scan.services:
-            eng.add_service(**service)
+            _id, action = eng.add_service_dedup(dedup=dedup, **service)
+            svc_added += action == "added"
+            svc_skipped += action == "skipped"
+        fnd_added = fnd_skipped = fnd_merged = 0
         for finding in scan.findings:
-            eng.add_finding(**finding)
+            _id, action = eng.add_finding_dedup(dedup=dedup, **finding)
+            fnd_added += action == "added"
+            fnd_skipped += action == "skipped"
+            fnd_merged += action == "merged"
+
         if not scan.services and not scan.findings:
-            return ToolResult(f"parsed {tool}: nothing recognised (check the output format)")
-        return ToolResult(
-            f"imported {tool}: {len(scan.services)} service(s), {len(scan.findings)} finding(s)"
-        )
+            extra = f" ({scan.skipped} line(s) skipped)" if scan.skipped else ""
+            return ToolResult(f"parsed {tool}: nothing recognised{extra} (check the output format)")
+
+        msg = f"imported {tool}: {svc_added} service(s), {fnd_added} finding(s)"
+        details = []
+        if svc_skipped or fnd_skipped:
+            details.append(f"{svc_skipped + fnd_skipped} duplicate(s) skipped")
+        if fnd_merged:
+            details.append(f"{fnd_merged} merged")
+        if scan.skipped:
+            details.append(f"{scan.skipped} unparsable line(s)")
+        if scan.json_errors:
+            details.append(f"{scan.json_errors} JSON error(s)")
+        if details:
+            msg += " · " + ", ".join(details)
+        return ToolResult(msg)
 
 
 class GenerateReportTool(Tool):
     name = "generate_report"
-    description = "Write a pentest report of the current engagement to disk (markdown + HTML)."
+    description = (
+        "Write a pentest report of the current engagement to disk. Formats: md, html, "
+        "json (machine-readable), sarif (CI/defect-tracker), both (md+html), all."
+    )
     parameters = {
         "type": "object",
         "properties": {
-            "format": {"type": "string", "enum": ["md", "html", "both"]},
+            "format": {"type": "string", "enum": ["md", "html", "json", "sarif", "both", "all"]},
         },
     }
 
@@ -188,7 +319,9 @@ class GenerateReportTool(Tool):
         if eng is None:
             return ToolResult("error: no active engagement", is_error=True)
         fmt = str(args.get("format") or "both").lower()
-        if fmt not in ("md", "html", "both"):
-            fmt = "both"
-        paths = write_reports(eng, fmt)
+        try:
+            paths = write_reports(eng, fmt)
+        except ValueError:
+            paths = write_reports(eng, "both")
+        eng.store.log_activity("report", fmt)
         return ToolResult("wrote report:\n" + "\n".join(str(p) for p in paths))

@@ -1,7 +1,8 @@
-"""SQLite-backed engagement state: scope, hosts, services, findings, meta."""
+"""SQLite-backed engagement state: scope, hosts, services, findings, meta, activity."""
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import time
 from pathlib import Path
@@ -18,7 +19,18 @@ CREATE TABLE IF NOT EXISTS findings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT, severity TEXT, host TEXT, evidence TEXT, recommendation TEXT, stage TEXT, ts REAL
 );
+CREATE TABLE IF NOT EXISTS activity (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event TEXT, detail TEXT, ts REAL
+);
 """
+
+# Columns added after the original schema shipped; (table, column, type).
+_LATE_COLUMNS = (
+    ("findings", "cvss", "TEXT"),
+    ("findings", "tags", "TEXT"),
+    ("findings", "notes", "TEXT"),
+)
 
 
 class Store:
@@ -31,9 +43,15 @@ class Store:
         self._conn.commit()
 
     def _migrate(self) -> None:
-        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(findings)")}
-        if "cvss" not in cols:
-            self._conn.execute("ALTER TABLE findings ADD COLUMN cvss TEXT")
+        for table, column, ctype in _LATE_COLUMNS:
+            cols = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")}
+            if column not in cols:
+                self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ctype}")
+        # activity table is created in the base schema for new DBs; ensure for old ones.
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS activity "
+            "(id INTEGER PRIMARY KEY AUTOINCREMENT, event TEXT, detail TEXT, ts REAL)"
+        )
 
     # -- meta -------------------------------------------------------------------
     def set_meta(self, key: str, value: str) -> None:
@@ -91,6 +109,13 @@ class Store:
         self._conn.commit()
         return int(cur.lastrowid)
 
+    def service_exists(self, host: str, port: int | None, proto: str = "tcp") -> bool:
+        row = self._conn.execute(
+            "SELECT 1 FROM services WHERE host=? AND IFNULL(port,-1)=IFNULL(?,-1) AND proto=? LIMIT 1",
+            (host, port, proto),
+        ).fetchone()
+        return row is not None
+
     def list_services(self) -> list[dict]:
         return [dict(r) for r in self._conn.execute("SELECT * FROM services ORDER BY host, port")]
 
@@ -107,20 +132,89 @@ class Store:
         recommendation: str = "",
         stage: str = "",
         cvss: str = "",
+        tags: str = "",
+        notes: str = "",
     ) -> int:
         cur = self._conn.execute(
-            "INSERT INTO findings(title, severity, host, evidence, recommendation, stage, cvss, ts) "
-            "VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
-            (title, severity, host, evidence, recommendation, stage, cvss, time.time()),
+            "INSERT INTO findings"
+            "(title, severity, host, evidence, recommendation, stage, cvss, tags, notes, ts) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (title, severity, host, evidence, recommendation, stage, cvss, tags, notes, time.time()),
         )
         self._conn.commit()
         return int(cur.lastrowid)
+
+    def find_finding_id(self, title: str, host: str, severity: str, evidence: str = "") -> int | None:
+        """Return the id of an existing finding matching the natural key, else None."""
+        row = self._conn.execute(
+            "SELECT id FROM findings WHERE "
+            "LOWER(TRIM(title))=LOWER(TRIM(?)) AND LOWER(TRIM(IFNULL(host,'')))=LOWER(TRIM(?)) "
+            "AND LOWER(TRIM(severity))=LOWER(TRIM(?)) AND IFNULL(evidence,'')=? LIMIT 1",
+            (title, host, severity, evidence),
+        ).fetchone()
+        return int(row["id"]) if row else None
+
+    def get_finding(self, finding_id: int) -> dict | None:
+        row = self._conn.execute("SELECT * FROM findings WHERE id=?", (finding_id,)).fetchone()
+        return dict(row) if row else None
+
+    def update_finding(self, finding_id: int, **fields) -> bool:
+        """Update allowed fields of a finding. Returns True if the row existed."""
+        allowed = {
+            "title", "severity", "host", "evidence", "recommendation",
+            "stage", "cvss", "tags", "notes",
+        }
+        sets = {k: v for k, v in fields.items() if k in allowed and v is not None}
+        if not sets:
+            return self.get_finding(finding_id) is not None
+        cols = ", ".join(f"{k}=?" for k in sets)
+        cur = self._conn.execute(
+            f"UPDATE findings SET {cols} WHERE id=?", (*sets.values(), finding_id)
+        )
+        self._conn.commit()
+        return cur.rowcount > 0
+
+    def delete_finding(self, finding_id: int) -> bool:
+        cur = self._conn.execute("DELETE FROM findings WHERE id=?", (finding_id,))
+        self._conn.commit()
+        return cur.rowcount > 0
 
     def list_findings(self) -> list[dict]:
         return [dict(r) for r in self._conn.execute("SELECT * FROM findings ORDER BY id")]
 
     def count_findings(self) -> int:
         return int(self._conn.execute("SELECT COUNT(*) AS c FROM findings").fetchone()["c"])
+
+    # -- activity log -----------------------------------------------------------
+    def log_activity(self, event: str, detail: str = "") -> None:
+        self._conn.execute(
+            "INSERT INTO activity(event, detail, ts) VALUES(?, ?, ?)",
+            (event, detail, time.time()),
+        )
+        self._conn.commit()
+
+    def list_activity(self, limit: int = 200) -> list[dict]:
+        return [
+            dict(r)
+            for r in self._conn.execute(
+                "SELECT * FROM activity ORDER BY id DESC LIMIT ?", (limit,)
+            )
+        ][::-1]
+
+    # -- export -----------------------------------------------------------------
+    def export_dict(self) -> dict:
+        """A JSON-serializable snapshot of the whole engagement state."""
+        return {
+            "meta": {r["key"]: r["value"] for r in self._conn.execute("SELECT key, value FROM meta")},
+            "scope": [{"target": t, "mode": m} for t, m in self.list_scope()],
+            "hosts": self.list_hosts(),
+            "services": self.list_services(),
+            "findings": self.list_findings(),
+            "activity": self.list_activity(limit=10_000),
+        }
+
+    def dump_json(self) -> str:
+        return json.dumps(self.export_dict(), indent=2)
 
     def close(self) -> None:
         self._conn.close()

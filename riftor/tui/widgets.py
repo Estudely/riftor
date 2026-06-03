@@ -30,7 +30,11 @@ class StatusBar(Static):
         self.busy = False
         self.scope_count = 0
         self.enforce = True
+        self.dry_run = False
         self.findings = 0
+        self.tokens = 0
+        self.cost = 0.0
+        self.ctx_pct = 0
 
     def on_mount(self) -> None:
         self.refresh_bar()
@@ -52,13 +56,23 @@ class StatusBar(Static):
             self.stage = stage
             self.refresh_bar()
 
-    def set_scope(self, count: int, enforce: bool) -> None:
+    def set_scope(self, count: int, enforce: bool, dry_run: bool = False) -> None:
         self.scope_count = count
         self.enforce = enforce
+        self.dry_run = dry_run
         self.refresh_bar()
 
     def set_findings(self, count: int) -> None:
         self.findings = count
+        self.refresh_bar()
+
+    def set_usage(self, tokens: int, cost: float) -> None:
+        self.tokens = tokens
+        self.cost = cost
+        self.refresh_bar()
+
+    def set_context(self, pct: int) -> None:
+        self.ctx_pct = pct
         self.refresh_bar()
 
     def refresh_bar(self) -> None:
@@ -74,11 +88,23 @@ class StatusBar(Static):
         t.append("   scope:", style=p["dim"])
         if self.scope_count:
             t.append(str(self.scope_count), style=p["muted"])
-            t.append("" if self.enforce else " (off)", style=p["danger"])
+            if self.dry_run:
+                t.append(" (dry)", style=p["magenta"])
+            elif not self.enforce:
+                t.append(" (off)", style=p["danger"])
         else:
             t.append("none", style=p["danger"] if self.enforce else p["dim"])
         t.append("   finds:", style=p["dim"])
         t.append(str(self.findings), style=p["magenta"] if self.findings else p["muted"])
+        if self.tokens:
+            t.append("   tok:", style=p["dim"])
+            tok_label = f"{self.tokens / 1000:.1f}k" if self.tokens >= 1000 else str(self.tokens)
+            t.append(tok_label, style=p["muted"])
+            if self.cost:
+                t.append(f" ${self.cost:.3f}", style=p["muted"])
+        if self.ctx_pct >= 60:
+            t.append("   ctx:", style=p["dim"])
+            t.append(f"{self.ctx_pct}%", style=p["danger"] if self.ctx_pct >= 80 else p["magenta"])
         t.append("   model:", style=p["dim"])
         t.append(self.model, style=p["muted"])
         t.append("   lore:", style=p["dim"])

@@ -7,12 +7,26 @@ Read-only tools (read/grep/glob/webfetch) run without a prompt. Mutating tools
 from __future__ import annotations
 
 import asyncio
+import difflib
 import re
 import shutil
 import urllib.request
 from pathlib import Path
 
 from riftor.tools.base import Tool, ToolContext, ToolResult, resolve_path
+
+
+def _unified_diff(old: str, new: str, path: str, max_lines: int = 200) -> str:
+    diff = difflib.unified_diff(
+        old.splitlines(), new.splitlines(),
+        fromfile=f"a/{path}", tofile=f"b/{path}", lineterm="",
+    )
+    lines = list(diff)
+    if not lines:
+        return "(no changes)"
+    if len(lines) > max_lines:
+        lines = lines[:max_lines] + [f"… (+{len(lines) - max_lines} more diff lines)"]
+    return "\n".join(lines)
 
 
 class BashTool(Tool):
@@ -57,7 +71,7 @@ class BashTool(Tool):
             return ToolResult(f"error: timed out after {timeout}s", is_error=True)
         text = out.decode("utf-8", errors="replace")
         rc = proc.returncode
-        return ToolResult(f"[exit {rc}]\n{text}", is_error=(rc != 0)).truncated()
+        return ToolResult(f"[exit {rc}]\n{text}", is_error=(rc != 0)).truncated(ctx.max_result_chars)
 
 
 class ReadTool(Tool):
@@ -113,6 +127,21 @@ class WriteTool(Tool):
         content = args.get("content", "")
         return f"{args.get('path', '')}  ({len(content)} bytes)"
 
+    def confirm_detail(self, args: dict, ctx: ToolContext) -> str | None:
+        path = resolve_path(ctx, str(args.get("path", "")))
+        new = str(args.get("content", ""))
+        old = ""
+        if path.exists() and path.is_file():
+            try:
+                old = path.read_text(encoding="utf-8", errors="replace")
+            except Exception:  # noqa: BLE001
+                old = ""
+        if not old:
+            preview = "\n".join(f"+{line}" for line in new.splitlines()[:120])
+            extra = "" if new.count("\n") <= 120 else f"\n… (+{new.count(chr(10)) - 120} more lines)"
+            return f"new file {path.name}:\n{preview}{extra}"
+        return _unified_diff(old, new, path.name)
+
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         path = resolve_path(ctx, args["path"])
         try:
@@ -144,6 +173,21 @@ class EditTool(Tool):
 
     def preview(self, args: dict) -> str:
         return str(args.get("path", ""))
+
+    def confirm_detail(self, args: dict, ctx: ToolContext) -> str | None:
+        path = resolve_path(ctx, str(args.get("path", "")))
+        if not path.exists() or not path.is_file():
+            return None
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except Exception:  # noqa: BLE001
+            return None
+        old = str(args.get("old_string", ""))
+        new = str(args.get("new_string", ""))
+        if old not in text:
+            return f"⚠ old_string not found in {path.name} — edit will fail"
+        updated = text.replace(old, new) if args.get("replace_all") else text.replace(old, new, 1)
+        return _unified_diff(text, updated, path.name)
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         path = resolve_path(ctx, args["path"])

@@ -5,6 +5,10 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from riftor.engagement import Engagement
 
 MAX_RESULT_CHARS = 30_000
 
@@ -29,7 +33,9 @@ class ToolContext:
     """Shared execution context handed to every tool."""
 
     workdir: Path = field(default_factory=Path.cwd)
-    engagement: object | None = None
+    engagement: "Engagement | None" = None
+    #: per-result truncation cap fed back into the model (configurable via Config)
+    max_result_chars: int = MAX_RESULT_CHARS
 
 
 def resolve_path(ctx: ToolContext, raw: str) -> Path:
@@ -50,6 +56,13 @@ class Tool(ABC):
     def preview(self, args: dict) -> str:
         """One-line human summary for permission prompts and the audit log."""
         return ", ".join(f"{k}={v!r}" for k, v in args.items())[:300]
+
+    def confirm_detail(self, args: dict, ctx: ToolContext) -> str | None:
+        """Optional multi-line detail (e.g. a diff) shown in the approval modal.
+
+        Returning ``None`` means "no extra detail" — the default for most tools.
+        """
+        return None
 
     @abstractmethod
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult: ...

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import sys
+from pathlib import Path
 
 from riftor import __version__
 
@@ -16,6 +18,18 @@ def main() -> None:
     parser.add_argument(
         "--config", action="store_true", help="print the config file path and exit"
     )
+    parser.add_argument("--model", help="override the model for this run")
+    parser.add_argument("--api-key", dest="api_key", help="override the API key for this run")
+    parser.add_argument("--workdir", help="engagement working directory (default: cwd)")
+    parser.add_argument("--scope-file", dest="scope_file", help="load scope targets from a file")
+    parser.add_argument(
+        "-p", "--prompt",
+        help="run a single task non-interactively and exit (headless one-shot)",
+    )
+    parser.add_argument(
+        "--headless", action="store_true",
+        help="non-interactive mode; implied by --prompt. Prints the result and exits.",
+    )
     args = parser.parse_args()
 
     from riftor.config import CONFIG_PATH, Config
@@ -25,10 +39,52 @@ def main() -> None:
         return
 
     cfg = Config.load()
+    if args.model:
+        cfg.model = args.model
+    if args.api_key:
+        cfg.api_key = args.api_key
+
+    workdir = Path(args.workdir).expanduser() if args.workdir else Path.cwd()
+
+    if args.prompt or args.headless:
+        from riftor.headless import run_headless
+
+        code = run_headless(cfg, workdir, prompt=args.prompt, scope_file=args.scope_file)
+        sys.exit(code)
+
+    # Graceful first-run: if no credentials are configured, guide the operator.
+    if not cfg.has_credentials() and not cfg.onboarded:
+        _print_onboarding(cfg)
 
     from riftor.tui.app import RiftorApp
 
-    RiftorApp(cfg).run()
+    app = RiftorApp(cfg, workdir=workdir)
+    if args.scope_file:
+        _preload_scope(app, args.scope_file)
+    app.run()
+
+
+def _print_onboarding(cfg) -> None:
+    env = cfg.provider_env() or "ANTHROPIC_API_KEY"
+    print("riftor: no API key detected for the configured model.")
+    print(f"  model:    {cfg.model}")
+    print(f"  set one:  export {env}=...   (or run a local Ollama server)")
+    print("  then:     riftor   ·   change the model with /model or /config")
+    print("Launching anyway — set a key, or use /config inside the app.\n")
+    cfg.onboarded = True
+    try:
+        cfg.save()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _preload_scope(app, scope_file: str) -> None:
+    try:
+        text = Path(scope_file).expanduser().read_text(encoding="utf-8")
+    except Exception as exc:  # noqa: BLE001
+        print(f"riftor: could not read scope file {scope_file}: {exc}", file=sys.stderr)
+        return
+    app.engagement.import_scope(text)
 
 
 if __name__ == "__main__":

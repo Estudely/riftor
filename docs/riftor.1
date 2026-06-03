@@ -1,0 +1,62 @@
+.TH RIFTOR 1 "2026" "riftor" "User Commands"
+.SH NAME
+riftor \- offensive-security AI agent that lives in your terminal
+.SH SYNOPSIS
+.B riftor
+[\fIOPTIONS\fR]
+.SH DESCRIPTION
+.B riftor
+is a full-screen terminal (TUI) penetration-testing assistant organised around
+the RIFT methodology: Recon, Intrusion, Foothold, Takeover. The agent runs
+recon/scanning tools through a permission-gated shell, enforces an engagement
+scope, records services and findings, and writes CVSS-scored reports.
+.SH OPTIONS
+.TP
+.B \-\-version
+Print the version and exit.
+.TP
+.B \-\-config
+Print the path of the config file and exit.
+.TP
+.B \-\-model \fIMODEL\fR
+Override the model for this run (any litellm id, e.g. anthropic/claude-sonnet-4-6).
+.TP
+.B \-\-api\-key \fIKEY\fR
+Override the API key for this run (prefer the provider's environment variable).
+.TP
+.B \-\-workdir \fIDIR\fR
+Engagement working directory; state lives in \fIDIR\fR/.riftor/ (default: cwd).
+.TP
+.B \-\-scope\-file \fIFILE\fR
+Preload scope targets from a file (one per line; \fBout:\fR prefix for out-of-scope).
+.TP
+.B \-p, \-\-prompt \fITEXT\fR
+Run a single task non-interactively and exit (headless one-shot).
+.TP
+.B \-\-headless
+Non-interactive mode; reads the prompt from \fB\-\-prompt\fR or stdin.
+.SH IN-APP COMMANDS
+Type \fB/help\fR inside riftor for the full list, including \fB/scope\fR,
+\fB/stage\fR, \fB/findings\fR, \fB/report\fR, \fB/permissions\fR, \fB/cost\fR,
+\fB/retry\fR, \fB/continue\fR, \fB/compact\fR, \fB/timeline\fR and \fB/export\fR.
+.SH FILES
+.TP
+.I ~/.config/riftor/config.toml
+Runtime configuration (model, theme, limits). Written 0600.
+.TP
+.I ~/.config/riftor/permissions.toml
+Persistent tool allow/deny rules.
+.TP
+.I ./.riftor/
+Per-engagement state: sqlite store, sessions, reports, exports.
+.SH ENVIRONMENT
+.TP
+.B ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY
+Provider keys; the first one found selects the default model on first run.
+.SH AUTHORIZATION
+riftor is for authorized security testing only. You are responsible for having
+explicit, written permission for any system you assess.
+.SH SEE ALSO
+Project: https://github.com/Estudely/riftor
+.SH LICENSE
+GPL-3.0-or-later.

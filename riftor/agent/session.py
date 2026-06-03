@@ -31,7 +31,16 @@ def new_id() -> str:
     return time.strftime("%Y%m%d-%H%M%S")
 
 
-def save(workdir: Path, session_id: str, messages: list[dict], model: str) -> Path:
+def save(
+    workdir: Path,
+    session_id: str,
+    messages: list[dict],
+    model: str,
+    *,
+    complete: bool = True,
+) -> Path:
+    """Persist a session atomically. ``complete=False`` marks a mid-run checkpoint
+    so a crash mid-turn can be detected and offered for resume on next launch."""
     path = sessions_dir(workdir) / f"{session_id}.json"
     created = time.time()
     if path.exists():
@@ -44,10 +53,14 @@ def save(workdir: Path, session_id: str, messages: list[dict], model: str) -> Pa
         "created": created,
         "updated": time.time(),
         "model": model,
+        "complete": complete,
         "title": _title(messages),
         "messages": messages,
     }
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    # atomic write: tmp + replace, so a crash never leaves a half-written file
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    tmp.replace(path)
     return path
 
 
@@ -75,6 +88,7 @@ def list_sessions(workdir: Path) -> list[dict]:
                 "title": data.get("title", ""),
                 "updated": data.get("updated", 0),
                 "model": data.get("model", ""),
+                "complete": data.get("complete", True),
                 "messages": len(data.get("messages", [])),
             }
         )

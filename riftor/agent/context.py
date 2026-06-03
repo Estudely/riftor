@@ -1,7 +1,9 @@
-"""Conversation context: system prompt + message history.
+"""Conversation context: system prompt + message history + compaction.
 
-Phase 1 keeps the whole history in memory. Compaction / persistence arrive in
-later phases.
+History is kept in memory and persisted by the session layer. When it grows
+large we can compact it: tool results are the bulk of the tokens, so the cheap,
+lossless-enough strategy is to shrink old tool results while keeping the recent
+turns intact.
 """
 
 from __future__ import annotations
@@ -15,11 +17,22 @@ LORE_PREAMBLE = (
     "accurate, actionable work."
 )
 
+# Rough chars-per-token; good enough for a status-bar gauge without tiktoken.
+_CHARS_PER_TOKEN = 4
+
 
 def _load_system_prompt() -> str:
     return (
         resources.files("riftor.agent").joinpath("prompts/system.md").read_text(encoding="utf-8")
     )
+
+
+def _content_len(msg: dict) -> int:
+    content = msg.get("content")
+    total = len(content) if isinstance(content, str) else 0
+    for call in msg.get("tool_calls") or []:
+        total += len(str(call.get("function", {}).get("arguments", "")))
+    return total
 
 
 class Context:
@@ -50,6 +63,39 @@ class Context:
         self._messages.append(
             {"role": "tool", "tool_call_id": tool_call_id, "content": content}
         )
+
+    # -- token accounting -------------------------------------------------------
+    def estimated_tokens(self) -> int:
+        chars = len(self.system_prompt)
+        for msg in self._messages:
+            chars += _content_len(msg)
+        return chars // _CHARS_PER_TOKEN
+
+    def pop_last_user_turn(self) -> str | None:
+        """Remove everything back through (and including) the last user message.
+
+        Returns that user message's text, so the caller can resend/edit it.
+        """
+        for i in range(len(self._messages) - 1, -1, -1):
+            if self._messages[i].get("role") == "user":
+                text = self._messages[i].get("content")
+                del self._messages[i:]
+                return text if isinstance(text, str) else ""
+        return None
+
+    def compact(self, keep_recent: int = 8, clip: int = 400) -> int:
+        """Shrink old tool results to ``clip`` chars, keeping the last ``keep_recent``
+        messages untouched. Returns the number of messages compacted."""
+        cutoff = max(0, len(self._messages) - keep_recent)
+        changed = 0
+        for msg in self._messages[:cutoff]:
+            if msg.get("role") == "tool":
+                content = msg.get("content")
+                if isinstance(content, str) and len(content) > clip:
+                    dropped = len(content) - clip
+                    msg["content"] = content[:clip] + f"\n…[compacted {dropped} chars]"
+                    changed += 1
+        return changed
 
     def repair(self) -> int:
         """Ensure every assistant tool_call has a following tool result.

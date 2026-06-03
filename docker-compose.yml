@@ -1,0 +1,34 @@
+# riftor — two flavors:
+#   docker compose run --rm riftor        # minimal image (no recon tools)
+#   docker compose run --rm full          # batteries-included (nmap/curl/…)
+#
+# Mounts the current directory at /work so engagement state (.riftor/) persists
+# on the host. Pass your provider key through the environment.
+services:
+  riftor:
+    build:
+      context: .
+    image: riftor
+    stdin_open: true
+    tty: true
+    environment:
+      - ANTHROPIC_API_KEY
+      - OPENAI_API_KEY
+      - OPENROUTER_API_KEY
+    volumes:
+      - ./:/work
+
+  full:
+    build:
+      context: .
+      args:
+        INSTALL_TOOLS: "1"
+    image: riftor:full
+    stdin_open: true
+    tty: true
+    environment:
+      - ANTHROPIC_API_KEY
+      - OPENAI_API_KEY
+      - OPENROUTER_API_KEY
+    volumes:
+      - ./:/work
