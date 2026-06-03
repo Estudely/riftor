@@ -20,17 +20,13 @@ on:
     tags:
       - "v*"
 
-# Run JS actions on Node 24 (silences the Node 20 deprecation notice).
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
       - name: Verify tag matches pyproject version
@@ -41,7 +37,7 @@ jobs:
           test "$TAG" = "$VER" || { echo "::error::tag v$TAG != pyproject version $VER"; exit 1; }
       - name: Build sdist + wheel
         run: uv build
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: dist
           path: dist/
@@ -53,7 +49,7 @@ jobs:
     permissions:
       id-token: write  # required for trusted publishing
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: dist
           path: dist/
@@ -66,12 +62,12 @@ jobs:
     permissions:
       contents: write  # required to create the GitHub Release
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: dist
           path: dist/
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/*
           generate_release_notes: true
