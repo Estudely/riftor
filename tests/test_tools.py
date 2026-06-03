@@ -106,3 +106,42 @@ def test_add_scope_tool_metadata():
     assert set(tool.parameters["required"]) == {"targets", "reason"}
     prev = tool.preview({"targets": ["a.com", "b.com"], "reason": "why"})
     assert "a.com" in prev and "why" in prev
+
+
+@pytest.mark.asyncio
+async def test_add_scope_no_engagement():
+    from riftor.tools.base import ToolContext
+    ctx = ToolContext()  # engagement defaults to None
+    r = await tools.get("add_scope").execute(
+        {"targets": ["x.com"], "reason": "r"}, ctx
+    )
+    assert r.is_error
+    assert "no active engagement" in r.content
+
+
+@pytest.mark.asyncio
+async def test_add_scope_empty_targets(toolctx):
+    r = await tools.get("add_scope").execute({"targets": [], "reason": "r"}, toolctx)
+    assert r.is_error
+    assert "no targets" in r.content
+
+
+@pytest.mark.asyncio
+async def test_add_scope_reports_already_present(toolctx):
+    eng = toolctx.engagement
+    eng.add_scope("dup.example.com", "in")
+    r = await tools.get("add_scope").execute(
+        {"targets": ["dup.example.com"], "reason": "r"}, toolctx
+    )
+    assert not r.is_error
+    assert "already in scope" in r.content
+    assert sum(t.raw == "dup.example.com" for t in eng.scope.in_scope) == 1
+
+
+@pytest.mark.asyncio
+async def test_add_scope_accepts_scalar_target(toolctx):
+    r = await tools.get("add_scope").execute(
+        {"targets": "solo.example.com", "reason": "r"}, toolctx
+    )
+    assert not r.is_error
+    assert any(t.raw == "solo.example.com" for t in toolctx.engagement.scope.in_scope)
