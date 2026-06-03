@@ -14,6 +14,7 @@ from textual.widgets import Button, Input, Label, Rule, Select, Switch
 from riftor.providers import (
     PROVIDER_DEFAULTS,
     PROVIDERS,
+    FetchResult,
     apply_prefix,
     fetch_models,
     provider_key_for_model,
@@ -54,9 +55,14 @@ class ConfigScreen(ModalScreen[dict | None]):
                 else self.config.model)
         saved = self.config.providers.get(pkey)
         base_val = (saved.api_base if saved else None) or meta.default_base or ""
-        defaults = PROVIDER_DEFAULTS.get(pkey, [])
-        model_opts = _model_options(pkey) or [(bare, bare)]
-        model_val = bare if (bare in defaults or not defaults) else Select.BLANK
+        model_opts = _model_options(pkey)
+        # Guarantee the configured model is a selectable option even when it is
+        # not in PROVIDER_DEFAULTS (e.g. an older or custom id). This keeps
+        # ``model_val`` always legal — Select.BLANK does not exist in Textual
+        # 8.x and would crash on mount with InvalidSelectValueError.
+        if bare and bare not in [v for _, v in model_opts]:
+            model_opts = [(bare, bare), *model_opts]
+        model_val = bare if bare else Select.NULL
         with Vertical(id="config-box"):
             yield Label("riftor · config", id="config-title")
             with VerticalScroll(id="config-body"):
@@ -118,7 +124,9 @@ class ConfigScreen(ModalScreen[dict | None]):
         result = fetch_models(provider, base or None, key or None)
         self.app.call_from_thread(self._apply_fetch_result, result)
 
-    def _apply_fetch_result(self, result) -> None:
+    def _apply_fetch_result(self, result: FetchResult) -> None:
+        if not self.is_running:  # screen dismissed while the fetch was in flight
+            return
         self._set_model_options([(m, m) for m in result.models])
         if result.error:
             self._fail(f"fetch failed ({result.error[:60]}) — showing suggestions")

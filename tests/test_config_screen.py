@@ -125,8 +125,11 @@ async def test_provider_pick_prefills_base_and_models():
             screen.query_one("#cfg-provider", Select).value = "openai"
             await pilot.pause()
             assert screen.query_one("#cfg-base", Input).value == "https://api.openai.com/v1"
-            opts = [v for _, v in screen.query_one("#cfg-model-select", Select)._options]
-            assert "gpt-5.5" in opts
+            # public-API check: gpt-5.5 is a selectable option after picking openai
+            sel = screen.query_one("#cfg-model-select", Select)
+            sel.value = "gpt-5.5"
+            await pilot.pause()
+            assert sel.value == "gpt-5.5"
             await pilot.press("escape")
             await pilot.pause()
 
@@ -151,3 +154,45 @@ async def test_save_assembles_prefixed_model_and_writes_key():
             await pilot.pause()
             assert app.config.model == "openai/gpt-5.5"
             assert app.config.providers["openai"].api_key == "sk-openai-test"
+
+
+@pytest.mark.asyncio
+async def test_config_opens_with_non_curated_model():
+    with tempfile.TemporaryDirectory() as d:
+        _patch_paths(Path(d))
+        # a model id NOT in PROVIDER_DEFAULTS — must not crash on open
+        cfg = Config(model="anthropic/claude-some-old-model-2024")
+        app = RiftorApp(cfg, workdir=Path(d))
+        async with app.run_test() as pilot:
+            app.query_one("#prompt", Input).value = "/config"
+            await pilot.press("enter")
+            await pilot.pause()
+            assert isinstance(app.screen, ConfigScreen)
+            from textual.widgets import Select
+            assert app.screen.query_one("#cfg-model-select", Select) is not None
+            await pilot.press("escape")
+            await pilot.pause()
+
+
+@pytest.mark.asyncio
+async def test_fetch_button_repopulates_models(monkeypatch):
+    from textual.widgets import Select
+    import riftor.tui.config_screen as cs
+    fake = cs.FetchResult(models=["m-one", "m-two"], source="merged", error=None)
+    monkeypatch.setattr(cs, "fetch_models", lambda *a, **k: fake)
+    with tempfile.TemporaryDirectory() as d:
+        _patch_paths(Path(d))
+        cfg = Config(model="openai/gpt-5.5")
+        app = RiftorApp(cfg, workdir=Path(d))
+        async with app.run_test() as pilot:
+            app.query_one("#prompt", Input).value = "/config"
+            await pilot.press("enter")
+            await pilot.pause()
+            screen = app.screen
+            screen.query_one("#cfg-fetch", Button).press()
+            await pilot.pause()
+            await pilot.pause()
+            sel = screen.query_one("#cfg-model-select", Select)
+            sel.value = "m-two"            # only legal if the fetched option was applied
+            await pilot.pause()
+            assert sel.value == "m-two"
