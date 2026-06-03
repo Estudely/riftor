@@ -29,6 +29,10 @@ jobs:
       - name: Sync (locked)
         run: uv sync --frozen --extra dev --python ${{ matrix.python-version }}
       - name: Lint
-        run: uv run ruff check riftor dev
-      - name: Tests (headless TUI + units)
+        run: uv run ruff check riftor dev tests
+      - name: Type check
+        run: uv run pyright riftor
+      - name: Unit tests (pytest)
+        run: uv run pytest
+      - name: Smoke (headless TUI integration)
         run: uv run python dev/smoke.py

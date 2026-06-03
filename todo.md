@@ -102,6 +102,44 @@ The agent tracks the current stage; the TUI shows `[R·I·F·T]` in the status b
 - [ ] Docs site
 - [ ] Launch
 
+### Phase 6 — Quality of life  ✅
+Driven by a verified QoL audit of the codebase. Everything below is implemented,
+tested (pytest + headless smoke), type-checked (pyright) and lint-clean.
+
+**UX / interaction**
+- [x] Input history recall (`↑/↓`), fuzzy "did you mean" on unknown commands
+- [x] Keyboard chat navigation (`PgUp/PgDn`, `Ctrl+Home/End`) + sticky autoscroll
+- [x] `/copy` (last output) + restored clipboard; `/show <id>` expands truncated results
+- [x] Command palette (`Ctrl+P`); colored RIFT stage-transition dividers
+- [x] Expanded `/help` with examples; configurable truncation/preview limits
+
+**Trust & safety**
+- [x] Persistent granular permissions (`permissions.toml`: allow/deny + regex
+      patterns); real "allow once" vs session vs **always**/**never**
+- [x] Default deny rules for destructive bash (`rm -rf`, `dd of=/dev/…`, `mkfs`, fork bomb)
+- [x] Diff/new-file preview in the approval modal for write/edit
+- [x] Config written `0600`; `/permissions`, `/audit` (with gzip log rotation)
+- [x] Scope: `dry-run` mode, `import`/`export`, `--scope-file` preload
+
+**Agent loop**
+- [x] Provider retry/backoff + classified errors (`auth`/`rate_limit`/`context`/…); `/retry`
+- [x] Token + cost meter in the status bar; `/cost`; context-window gauge + 80% warning
+- [x] Crash-safe checkpoints (atomic save each step) + incomplete-session detection
+- [x] `/continue [N]` step extension; `/compact` shrinks old tool output
+
+**Engagement & reporting**
+- [x] Edit/delete findings (`/edit-finding`, `/delete-finding` + agent tools); tags + notes
+- [x] Import dedup (skip/merge/allow-all) + richer `import_scan` diagnostics
+- [x] `/hosts`, `/services`, `/timeline` (activity log), `/export` (zip archive)
+- [x] Reports gain JSON + **SARIF** export and an executive summary; severity-sorted `/findings`
+
+**Onboarding & contributors**
+- [x] Graceful first-run when no API key; model-id validation; configurable keybindings
+- [x] Headless one-shot mode (`-p/--prompt`, `--headless`) + `--model/--workdir/--api-key`
+- [x] `tests/` pytest suite + fixtures; pyright + pytest wired into CI
+- [x] `.pre-commit-config.yaml`, `Makefile`, shell completions, man page, `docs/configuration.md`
+- [x] Docker tool-variant (`--build-arg INSTALL_TOOLS=1`) + `docker-compose.yml`
+
 ---
 
 ## Environment notes

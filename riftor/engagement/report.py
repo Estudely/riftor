@@ -1,8 +1,9 @@
-"""Render the engagement into a pentest report (markdown + self-contained HTML)."""
+"""Render the engagement into a pentest report (markdown, HTML, JSON, SARIF)."""
 
 from __future__ import annotations
 
 import html
+import json
 import time
 from pathlib import Path
 
@@ -11,6 +12,12 @@ from riftor.engagement.cvss import base_score
 _SEV_RANK = {"critical": 5, "high": 4, "medium": 3, "low": 2, "info": 1}
 _SEV_ORDER = ["critical", "high", "medium", "low", "info"]
 _STAGE_NAMES = {"R": "Recon", "I": "Intrusion", "F": "Foothold", "T": "Takeover"}
+# SARIF maps severity onto its small enum; "warning" covers the middle band.
+_SARIF_LEVEL = {
+    "critical": "error", "high": "error", "medium": "warning",
+    "low": "note", "info": "note",
+}
+_FORMATS = ("md", "html", "json", "sarif", "both", "all")
 
 
 def report_data(engagement) -> dict:
@@ -39,10 +46,47 @@ def report_data(engagement) -> dict:
         "scope_in": [t.raw for t in engagement.scope.in_scope],
         "scope_out": [t.raw for t in engagement.scope.out_of_scope],
         "counts": counts,
+        "exec_summary": _exec_summary(counts, findings),
         "findings": findings,
         "services": store.list_services(),
         "hosts": store.list_hosts(),
     }
+
+
+def _exec_summary(counts: dict, findings: list[dict]) -> str:
+    """A short, auto-generated business-impact paragraph for stakeholders."""
+    total = len(findings)
+    if not total:
+        return "No findings were recorded during this engagement."
+    crit, high = counts.get("critical", 0), counts.get("high", 0)
+    med, low = counts.get("medium", 0), counts.get("low", 0)
+    if crit:
+        risk = "critical"
+        lede = (
+            f"This engagement uncovered {crit} critical "
+            f"{'issue' if crit == 1 else 'issues'} requiring immediate remediation."
+        )
+    elif high:
+        risk = "high"
+        lede = f"This engagement uncovered {high} high-severity {'issue' if high == 1 else 'issues'}."
+    elif med:
+        risk = "medium"
+        lede = "This engagement surfaced moderate-risk issues worth scheduled remediation."
+    else:
+        risk = "low"
+        lede = "This engagement surfaced only low-risk or informational items."
+    top = findings[0]["title"] if findings else ""
+    parts = [
+        lede,
+        f"Overall risk is assessed as **{risk}** across {total} "
+        f"total {'finding' if total == 1 else 'findings'} "
+        f"({crit} critical, {high} high, {med} medium, {low} low).",
+    ]
+    if crit or high:
+        parts.append(
+            f"Prioritise the highest-severity items first — beginning with “{top}”."
+        )
+    return " ".join(parts)
 
 
 def _cvss_label(finding: dict) -> str:
@@ -57,6 +101,11 @@ def build_markdown(data: dict) -> str:
     out.append(f"# {data['title']} — riftor report")
     out.append("")
     out.append(f"_Generated {data['generated']} · stage reached: {data['stage_name']}_")
+    out.append("")
+
+    out.append("## Executive summary")
+    out.append("")
+    out.append(data.get("exec_summary", ""))
     out.append("")
 
     out.append("## Scope")
@@ -86,12 +135,16 @@ def build_markdown(data: dict) -> str:
         out.append(f"### {idx}. [{tag}] {f['title']}")
         if f.get("host"):
             out.append(f"- **Host:** {f['host']}")
+        if f.get("tags"):
+            out.append(f"- **Tags:** {f['tags']}")
         if f.get("cvss"):
             out.append(f"- **CVSS:** {cvss} (`{f['cvss']}`)")
         if f.get("evidence"):
             out.append(f"- **Evidence:**\n\n```\n{f['evidence']}\n```")
         if f.get("recommendation"):
             out.append(f"- **Recommendation:** {f['recommendation']}")
+        if f.get("notes"):
+            out.append(f"- **Notes:** {f['notes']}")
         out.append("")
 
     if data["services"]:
@@ -150,6 +203,9 @@ def build_html(data: dict) -> str:
         f"{esc(data['stage_name'])}</p>"
     )
 
+    parts.append("<h2>Executive summary</h2>")
+    parts.append(f"<p>{esc(data.get('exec_summary', '')).replace('**', '')}</p>")
+
     parts.append("<h2>Scope</h2><ul>")
     parts.append(f"<li><b>In scope:</b> {esc(', '.join(data['scope_in']) or '(none)')}</li>")
     if data["scope_out"]:
@@ -173,12 +229,16 @@ def build_html(data: dict) -> str:
         parts.append(f"<h3>{idx}. <span class=badge>[{esc(tag)}]</span> {esc(f['title'])}</h3>")
         if f.get("host"):
             parts.append(f"<p><b>Host:</b> {esc(f['host'])}</p>")
+        if f.get("tags"):
+            parts.append(f"<p><b>Tags:</b> {esc(f['tags'])}</p>")
         if f.get("cvss"):
             parts.append(f"<p><b>CVSS:</b> {esc(cvss)} (<code>{esc(f['cvss'])}</code>)</p>")
         if f.get("evidence"):
             parts.append(f"<p><b>Evidence:</b></p><pre>{esc(f['evidence'])}</pre>")
         if f.get("recommendation"):
             parts.append(f"<p><b>Recommendation:</b> {esc(f['recommendation'])}</p>")
+        if f.get("notes"):
+            parts.append(f"<p><b>Notes:</b> {esc(f['notes'])}</p>")
         parts.append("</div>")
 
     if data["services"]:
@@ -197,20 +257,119 @@ def build_html(data: dict) -> str:
     return "".join(parts)
 
 
+def build_json(data: dict) -> str:
+    """Machine-readable report: the full structured engagement data."""
+    payload = {
+        "tool": "riftor",
+        "title": data["title"],
+        "generated": data["generated"],
+        "stage": data["stage"],
+        "scope": {"in": data["scope_in"], "out": data["scope_out"]},
+        "summary": {"counts": data["counts"], "total": len(data["findings"])},
+        "executive_summary": data.get("exec_summary", ""),
+        "findings": [
+            {
+                "id": f.get("id"),
+                "title": f.get("title"),
+                "severity": f.get("severity"),
+                "cvss_vector": f.get("cvss") or None,
+                "cvss_score": f.get("cvss_score"),
+                "host": f.get("host") or None,
+                "evidence": f.get("evidence") or None,
+                "recommendation": f.get("recommendation") or None,
+                "tags": f.get("tags") or None,
+                "notes": f.get("notes") or None,
+                "stage": f.get("stage") or None,
+            }
+            for f in data["findings"]
+        ],
+        "services": data["services"],
+        "hosts": data["hosts"],
+    }
+    return json.dumps(payload, indent=2)
+
+
+def build_sarif(data: dict) -> str:
+    """SARIF v2.1.0 — for GitHub Advanced Security, defect trackers, etc."""
+    rules: dict[str, dict] = {}
+    results: list[dict] = []
+    for f in data["findings"]:
+        rule_id = (f.get("title") or "finding").strip() or "finding"
+        rules.setdefault(
+            rule_id,
+            {
+                "id": rule_id,
+                "name": rule_id,
+                "shortDescription": {"text": rule_id},
+                "properties": {"security-severity": f"{f.get('cvss_score') or 0.0:.1f}"},
+            },
+        )
+        message = f.get("evidence") or f.get("recommendation") or rule_id
+        result = {
+            "ruleId": rule_id,
+            "level": _SARIF_LEVEL.get(f.get("severity", "info"), "note"),
+            "message": {"text": str(message)},
+            "properties": {
+                "severity": f.get("severity"),
+                "host": f.get("host") or "",
+                "tags": f.get("tags") or "",
+            },
+        }
+        if f.get("host"):
+            result["locations"] = [
+                {"physicalLocation": {"artifactLocation": {"uri": str(f["host"])}}}
+            ]
+        results.append(result)
+
+    sarif = {
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [
+            {
+                "tool": {
+                    "driver": {
+                        "name": "riftor",
+                        "informationUri": "https://github.com/Estudely/riftor",
+                        "rules": list(rules.values()),
+                    }
+                },
+                "results": results,
+            }
+        ],
+    }
+    return json.dumps(sarif, indent=2)
+
+
+_BUILDERS = {
+    "md": ("md", build_markdown),
+    "html": ("html", build_html),
+    "json": ("json", build_json),
+    "sarif": ("sarif", build_sarif),
+}
+
+
+def _formats_for(fmt: str) -> list[str]:
+    fmt = (fmt or "both").lower()
+    if fmt == "both":
+        return ["md", "html"]
+    if fmt == "all":
+        return ["md", "html", "json", "sarif"]
+    return [fmt] if fmt in _BUILDERS else []
+
+
 def write_reports(engagement, fmt: str = "both") -> list[Path]:
-    """Render and write report file(s). fmt in {md, html, both}. Returns paths."""
+    """Render and write report file(s). fmt in {md, html, json, sarif, both, all}."""
+    formats = _formats_for(fmt)
+    if not formats:
+        raise ValueError(f"unknown report format: {fmt}")
     data = report_data(engagement)
     out_dir = engagement.dir / "reports"
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S")
     written: list[Path] = []
-
-    if fmt in ("md", "both"):
-        path = out_dir / f"report-{stamp}.md"
-        path.write_text(build_markdown(data), encoding="utf-8")
-        written.append(path)
-    if fmt in ("html", "both"):
-        path = out_dir / f"report-{stamp}.html"
-        path.write_text(build_html(data), encoding="utf-8")
+    for key in formats:
+        ext, builder = _BUILDERS[key]
+        path = out_dir / f"report-{stamp}.{ext}"
+        path.write_text(builder(data), encoding="utf-8")
         written.append(path)
     return written

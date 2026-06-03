@@ -1,14 +1,15 @@
 """The riftor Textual app.
 
-Phase 3: an offensive-security agent. The model calls tools (bash/read/write/
-edit/grep/glob/webfetch + engagement tools); dangerous tools prompt for
-permission; scope-sensitive tools are blocked against out-of-scope targets
-(with an explicit per-call override); RIFT stage, scope and findings live in the
-engagement state and show in the status bar.
+An offensive-security agent. The model calls tools (bash/read/write/edit/grep/
+glob/webfetch + engagement tools); dangerous tools prompt for permission (with a
+diff preview for write/edit); scope-sensitive tools are blocked against
+out-of-scope targets (with an explicit per-call override); RIFT stage, scope and
+findings live in the engagement state and show in the status bar.
 """
 
 from __future__ import annotations
 
+import difflib
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -16,13 +17,17 @@ from typing import TYPE_CHECKING
 from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult
+from textual.binding import Binding
+from textual.command import Hit, Hits
+from textual.command import Provider as CommandProvider
 from textual.containers import VerticalScroll
 from textual.widgets import Input, Markdown, Static
 
 from riftor import tools
 from riftor.agent import session as sessions
 from riftor.agent.context import Context
-from riftor.agent.provider import Provider, ToolCall, Turn
+from riftor.agent.provider import Provider, ProviderError, ToolCall, Turn, Usage
+from riftor.config import PERMISSIONS_PATH
 from riftor.engagement import Engagement
 from riftor.engagement.report import write_reports
 from riftor.safety.audit import AuditLog
@@ -35,35 +40,105 @@ from riftor.tui.widgets import STAGE_NAMES, Banner, StatusBar
 if TYPE_CHECKING:
     from riftor.config import Config
 
+# Model-window estimates (tokens) for the context gauge, by provider prefix.
+_CONTEXT_WINDOWS = {
+    "anthropic/": 200_000, "openai/": 128_000, "openrouter/": 128_000,
+    "gemini/": 1_000_000, "groq/": 128_000, "ollama": 8_192,
+}
+_DEFAULT_WINDOW = 128_000
+
+# Commands offered for fuzzy "did you mean" suggestions.
+_COMMANDS = [
+    "/help", "/clear", "/model", "/stage", "/scope", "/findings", "/finding",
+    "/edit-finding", "/delete-finding", "/hosts", "/services", "/report",
+    "/sessions", "/resume", "/new", "/theme", "/config", "/tools", "/permissions",
+    "/lore", "/cost", "/retry", "/continue", "/compact", "/copy", "/show",
+    "/timeline", "/audit", "/export", "/exit",
+]
+
 HELP = """\
 **riftor — commands**
 
-- `/help` — show this help
-- `/clear` — clear the conversation (also `Ctrl+L`)
-- `/model [name]` — show or switch the model
-- `/stage [R|I|F|T]` — show or set the RIFT stage (Recon/Intrusion/Foothold/Takeover)
-- `/scope [add|out|rm <t>|clear|on|off]` — manage in/out-of-scope targets
-- `/findings` — list recorded findings
-- `/report [md|html|both]` — write a pentest report to `.riftor/reports/`
-- `/sessions` — list saved sessions · `/resume <id>` · `/new` — start fresh
-- `/theme [name]` — show or switch theme (rift/void/fracture/singularity)
-- `/config` — open the settings panel
-- `/tools` — list available tools
-- `/lore` — toggle the rift persona
-- `/exit` — leave riftor (also `Ctrl+C`)
+_Conversation_
+- `/help` — show this help · `/clear` — clear conversation (`Ctrl+L`)
+- `/retry` — re-run the last turn · `/continue [N]` — extend the step budget
+- `/compact` — shrink old tool output to free context
+- `/copy` — copy the last agent/tool output · `/show <id>` — expand a tool result
+- `/cost` — token + cost for this session
 
-Type anything else to task the agent. `Esc` cancels a running response.
+_Engagement_
+- `/scope` — show scope · `/scope add 10.0.0.0/24 example.com` · `/scope out <t>`
+  · `/scope rm <t>` · `/scope clear` · `/scope on|off|dry` · `/scope import <file>` · `/scope export [file]`
+- `/stage [R|I|F|T]` — show or set the RIFT stage (Recon/Intrusion/Foothold/Takeover)
+- `/findings` — list findings (severity-sorted) · `/finding <id>` — show one
+- `/edit-finding <id> sev=high tags=...` · `/delete-finding <id>`
+- `/hosts` · `/services` — discovered infrastructure
+- `/report [md|html|json|sarif|both|all]` — write a report to `.riftor/reports/`
+- `/timeline` — engagement activity log · `/export` — archive the whole engagement
+
+_Settings & sessions_
+- `/model [name]` — show or switch the model · `/theme [name]` (rift/void/fracture/singularity)
+- `/config` — settings panel · `/permissions` — review allow/deny rules
+- `/lore` — toggle the rift persona · `/audit` — recent tool-call audit log
+- `/sessions` · `/resume <id>` · `/new` — manage saved sessions
+- `/tools` — list tools · `/exit` — quit (`Ctrl+C`)
+
+Type anything else to task the agent. `↑/↓` recall input · `PgUp/PgDn` scroll ·
+`Esc` cancels a running response.
 """
+
+
+# (command, display, help) for the Ctrl+P command palette.
+_PALETTE_COMMANDS = [
+    ("/help", "Help", "Show all commands"),
+    ("/findings", "Findings", "List findings (severity-sorted)"),
+    ("/hosts", "Hosts", "List discovered hosts"),
+    ("/services", "Services", "List discovered services"),
+    ("/report both", "Report", "Write a report (md + html)"),
+    ("/report all", "Report (all formats)", "md + html + json + sarif"),
+    ("/timeline", "Timeline", "Engagement activity log"),
+    ("/export", "Export engagement", "Archive the whole engagement"),
+    ("/permissions", "Permissions", "Review allow/deny rules"),
+    ("/audit", "Audit log", "Recent tool-call audit entries"),
+    ("/cost", "Cost", "Token + cost for this session"),
+    ("/compact", "Compact context", "Shrink old tool output"),
+    ("/retry", "Retry", "Re-run the last turn"),
+    ("/config", "Config", "Open the settings panel"),
+    ("/new", "New session", "Start a fresh conversation"),
+    ("/clear", "Clear", "Clear the conversation"),
+]
+
+
+class RiftorCommands(CommandProvider):
+    """Surfaces riftor's slash commands in the Ctrl+P command palette."""
+
+    async def search(self, query: str) -> Hits:  # type: ignore[override]
+        matcher = self.matcher(query)
+        app = self.app
+        for command, display, help_text in _PALETTE_COMMANDS:
+            score = matcher.match(display)
+            if score > 0:
+                yield Hit(
+                    score,
+                    matcher.highlight(display),
+                    (lambda c=command: app._command(c)),  # type: ignore[attr-defined]
+                    help=help_text,
+                )
 
 
 class RiftorApp(App):
     CSS_PATH = "themes/rift.tcss"
     TITLE = "riftor"
+    COMMANDS = App.COMMANDS | {RiftorCommands}  # type: ignore[arg-type]
 
     BINDINGS = [
         ("ctrl+c", "quit", "Quit"),
         ("ctrl+l", "clear", "Clear"),
         ("escape", "cancel", "Cancel"),
+        Binding("pageup", "scroll_chat('pageup')", "Scroll up", show=False),
+        Binding("pagedown", "scroll_chat('pagedown')", "Scroll down", show=False),
+        Binding("ctrl+home", "scroll_chat('home')", "Top", show=False),
+        Binding("ctrl+end", "scroll_chat('end')", "Bottom", show=False),
     ]
 
     def __init__(self, config: "Config", workdir: Path | None = None) -> None:
@@ -75,11 +150,24 @@ class RiftorApp(App):
         self.tools = tools.all_tools()
         self.tool_schemas = tools.schemas()
         self.engagement = Engagement(self.workdir)
-        self.toolctx = ToolContext(workdir=self.workdir, engagement=self.engagement)
-        self.permissions = Permissions()
+        self.toolctx = ToolContext(
+            workdir=self.workdir,
+            engagement=self.engagement,
+            max_result_chars=config.max_result_chars,
+        )
+        self.permissions = Permissions.load(PERMISSIONS_PATH)
         self.audit = AuditLog()
-        self.max_steps = 16
+        self.max_steps = config.max_steps
         self.session_id = sessions.new_id()
+        # input history + last-output tracking + rate limiting
+        self._history: list[str] = []
+        self._history_idx: int | None = None
+        self._tool_results: dict[int, str] = {}
+        self._last_output: str = ""
+        self._last_user_text: str | None = None
+        self.usage = Usage()
+        self._rate_times: list[float] = []
+        self._autoscroll = True
 
     def compose(self) -> ComposeResult:
         yield Banner(id="banner")
@@ -88,11 +176,20 @@ class RiftorApp(App):
         yield Input(placeholder="task riftor — or /help", id="prompt")
 
     def get_css_variables(self) -> dict[str, str]:
-        # Ensure $violet/$user-bg/etc. always resolve, even on the first paint
-        # before our theme is active (built-in themes lack these variables).
         variables = dict(css_variable_defaults())
         variables.update(super().get_css_variables())
         return variables
+
+    def _apply_keybindings(self) -> None:
+        """Apply operator key overrides from keybindings.toml (action → key)."""
+        from riftor.config import load_keybindings
+
+        overrides = load_keybindings()
+        for action, key in overrides.items():
+            try:
+                self.bind(key, action, description=action.replace("action_", ""))
+            except Exception:  # noqa: BLE001 — a bad override must not crash startup
+                continue
 
     def _apply_theme(self, name: str) -> None:
         if name not in THEMES:
@@ -108,10 +205,14 @@ class RiftorApp(App):
     def on_mount(self) -> None:
         for theme in THEMES.values():
             self.register_theme(theme)
+        self._apply_keybindings()
         self._apply_theme(self.config.theme)
         self.query_one("#prompt", Input).focus()
         self.status.set_stage(self.engagement.stage)
         self._refresh_status()
+        warning = self.config.model_warning()
+        if warning:
+            self._note("⚠ " + warning)
         if not self._resume_latest():
             self._note(
                 "rift online · set scope with /scope add <target> before tasking the agent"
@@ -125,13 +226,29 @@ class RiftorApp(App):
         self.context.load(data["messages"])
         self.context.repair()
         self._replay_transcript(self.context.messages)
-        self._note(f"resumed session {data['id']} ({len(data['messages'])} messages) · /new for fresh")
+        note = f"resumed session {data['id']} ({len(data['messages'])} messages) · /new for fresh"
+        if not data.get("complete", True):
+            note += "  ⚠ previous run ended mid-task — /retry to resume or /continue"
+        self._note(note)
         return True
 
     def _refresh_status(self) -> None:
         self.status.set_stage(self.engagement.stage)
-        self.status.set_scope(self.engagement.scope_count(), self.engagement.enforce)
+        self.status.set_scope(
+            self.engagement.scope_count(), self.engagement.enforce, self.engagement.dry_run
+        )
         self.status.set_findings(self.engagement.findings_count())
+
+    def _context_window(self) -> int:
+        for prefix, window in _CONTEXT_WINDOWS.items():
+            if self.config.model.startswith(prefix):
+                return window
+        return _DEFAULT_WINDOW
+
+    def _refresh_usage(self) -> None:
+        self.status.set_usage(self.usage.total_tokens, self.usage.cost)
+        pct = int(self.context.estimated_tokens() / self._context_window() * 100)
+        self.status.set_context(min(pct, 999))
 
     # ---- accessors -------------------------------------------------------------
     @property
@@ -146,87 +263,160 @@ class RiftorApp(App):
     def _pal(self) -> dict[str, str]:
         return palette(self)
 
+    def _scroll_if_following(self) -> None:
+        if self._autoscroll:
+            self.chat.scroll_end(animate=False)
+
     def _note(self, text: str) -> None:
         self.chat.mount(Static(Text(text, style=f"italic {self._pal()['dim']}"), classes="note"))
-        self.chat.scroll_end(animate=False)
+        self._scroll_if_following()
 
     def _error(self, text: str) -> None:
         self.chat.mount(Static(Text(text, style=f"bold {self._pal()['danger']}"), classes="note"))
-        self.chat.scroll_end(animate=False)
+        self._scroll_if_following()
+
+    def _markdown(self, text: str) -> None:
+        self.chat.mount(Markdown(text, classes="assistant"))
+        self._scroll_if_following()
 
     def _add_user(self, text: str) -> None:
         self.chat.mount(Static(Text(text), classes="user"))
-        self.chat.scroll_end(animate=False)
+        self._scroll_if_following()
 
     async def _mount(self, widget) -> None:
         await self.chat.mount(widget)
-        self.chat.scroll_end(animate=False)
+        self._scroll_if_following()
 
     # ---- events ----------------------------------------------------------------
     def on_input_submitted(self, event: Input.Submitted) -> None:
         text = event.value.strip()
         self.query_one("#prompt", Input).clear()
+        self._history_idx = None
         if not text:
             return
+        if not text.startswith("/"):
+            self._history.append(text)
         if text.startswith("/"):
             self._command(text)
             return
         self._add_user(text)
         self._agent(text)
 
+    def on_key(self, event) -> None:
+        # ↑/↓ recall previous prompts when the input is focused and empty-ish.
+        inp = self.query_one("#prompt", Input)
+        if not inp.has_focus or event.key not in ("up", "down"):
+            return
+        if not self._history:
+            return
+        if event.key == "up":
+            self._history_idx = (
+                len(self._history) - 1 if self._history_idx is None
+                else max(0, self._history_idx - 1)
+            )
+        else:  # down
+            if self._history_idx is None:
+                return
+            self._history_idx += 1
+            if self._history_idx >= len(self._history):
+                self._history_idx = None
+                inp.value = ""
+                event.prevent_default()
+                return
+        inp.value = self._history[self._history_idx]
+        inp.cursor_position = len(inp.value)
+        event.prevent_default()
+
+    def action_scroll_chat(self, where: str) -> None:
+        chat = self.chat
+        if where == "pageup":
+            chat.scroll_page_up()
+            self._autoscroll = False
+        elif where == "pagedown":
+            chat.scroll_page_down()
+            self._autoscroll = chat.scroll_offset.y >= chat.max_scroll_y - 2
+        elif where == "home":
+            chat.scroll_home()
+            self._autoscroll = False
+        elif where == "end":
+            chat.scroll_end()
+            self._autoscroll = True
+
     def _command(self, text: str) -> None:
         parts = text.split(maxsplit=1)
         cmd = parts[0].lower()
         arg = parts[1].strip() if len(parts) > 1 else ""
 
+        handlers = {
+            "/help": lambda: self._markdown(HELP),
+            "/tools": self._tools_cmd,
+            "/clear": self.action_clear,
+            "/lore": self._lore_cmd,
+            "/model": lambda: self._model_cmd(arg),
+            "/stage": lambda: self._set_stage(arg),
+            "/scope": lambda: self._scope_cmd(arg),
+            "/findings": self._show_findings,
+            "/finding": lambda: self._show_finding(arg),
+            "/edit-finding": lambda: self._edit_finding_cmd(arg),
+            "/delete-finding": lambda: self._delete_finding_cmd(arg),
+            "/hosts": self._hosts_cmd,
+            "/services": self._services_cmd,
+            "/report": lambda: self._report_cmd(arg),
+            "/sessions": self._sessions_cmd,
+            "/resume": lambda: self._resume_cmd(arg),
+            "/new": self._new_session,
+            "/theme": lambda: self._theme_cmd(arg),
+            "/config": self._open_config,
+            "/permissions": lambda: self._permissions_cmd(arg),
+            "/cost": self._cost_cmd,
+            "/retry": self._retry_cmd,
+            "/continue": lambda: self._continue_cmd(arg),
+            "/compact": self._compact_cmd,
+            "/copy": self._copy_cmd,
+            "/show": lambda: self._show_result(arg),
+            "/timeline": self._timeline_cmd,
+            "/audit": self._audit_cmd,
+            "/export": self._export_cmd,
+        }
         if cmd in ("/exit", "/quit"):
             self._save_session()
             self.exit()
-        elif cmd == "/help":
-            self.chat.mount(Markdown(HELP, classes="assistant"))
-            self.chat.scroll_end(animate=False)
-        elif cmd == "/tools":
-            listing = "\n".join(
-                f"- `{t.name}`{'  ⚠ needs approval' if t.requires_permission else ''} — {t.description}"
-                for t in self.tools
-            )
-            self.chat.mount(Markdown(f"**tools**\n\n{listing}", classes="assistant"))
-            self.chat.scroll_end(animate=False)
-        elif cmd == "/clear":
-            self.action_clear()
-        elif cmd == "/lore":
-            self.config.lore = not self.config.lore
-            self.context.lore = self.config.lore
-            self.status.set_lore(self.config.lore)
-            self._note(f"lore {'engaged' if self.config.lore else 'disengaged'}")
-        elif cmd == "/model":
-            if arg:
-                self.config.model = arg
-                self.provider = Provider(self.config)
-                self.status.set_model(arg)
-                self._note(f"model → {arg}")
-            else:
-                self._note(f"model: {self.config.model}")
-        elif cmd == "/stage":
-            self._set_stage(arg)
-        elif cmd == "/scope":
-            self._scope_cmd(arg)
-        elif cmd == "/findings":
-            self._show_findings()
-        elif cmd == "/report":
-            self._report_cmd(arg)
-        elif cmd == "/sessions":
-            self._sessions_cmd()
-        elif cmd == "/resume":
-            self._resume_cmd(arg)
-        elif cmd == "/new":
-            self._new_session()
-        elif cmd == "/theme":
-            self._theme_cmd(arg)
-        elif cmd == "/config":
-            self._open_config()
+            return
+        handler = handlers.get(cmd)
+        if handler is not None:
+            handler()
+            return
+        # fuzzy "did you mean"
+        close = difflib.get_close_matches(cmd, _COMMANDS, n=3, cutoff=0.5)
+        if close:
+            self._note(f"unknown command: {cmd} — did you mean {', '.join(close)}?")
         else:
             self._note(f"unknown command: {cmd} — try /help")
+
+    def _tools_cmd(self) -> None:
+        listing = "\n".join(
+            f"- `{t.name}`{'  ⚠ needs approval' if t.requires_permission else ''} — {t.description}"
+            for t in self.tools
+        )
+        self._markdown(f"**tools**\n\n{listing}")
+
+    def _lore_cmd(self) -> None:
+        self.config.lore = not self.config.lore
+        self.context.lore = self.config.lore
+        self.status.set_lore(self.config.lore)
+        self._note(f"lore {'engaged' if self.config.lore else 'disengaged'}")
+
+    def _model_cmd(self, arg: str) -> None:
+        if arg:
+            self.config.model = arg
+            self.provider = Provider(self.config)
+            self.status.set_model(arg)
+            self._note(f"model → {arg}")
+            warning = self.config.model_warning()
+            if warning:
+                self._note("⚠ " + warning)
+        else:
+            self._note(f"model: {self.config.model}")
 
     def _theme_cmd(self, arg: str) -> None:
         name = arg.strip().lower()
@@ -262,6 +452,23 @@ class RiftorApp(App):
         self.config.save()
         self._note("config saved")
 
+    def _permissions_cmd(self, arg: str) -> None:
+        parts = arg.split()
+        if not parts:
+            self._markdown("**permissions**\n\n```\n" + self.permissions.describe() + "\n```")
+            return
+        sub, rest = parts[0].lower(), parts[1:]
+        if sub == "allow" and rest:
+            pattern = " ".join(rest[1:]) if len(rest) > 1 else None
+            self.permissions.add_allow_rule(rest[0], pattern)
+            self._note(f"allow rule added: {rest[0]} {pattern or ''}".strip())
+        elif sub == "deny" and rest:
+            pattern = " ".join(rest[1:]) if len(rest) > 1 else None
+            self.permissions.add_deny_rule(rest[0], pattern)
+            self._note(f"deny rule added: {rest[0]} {pattern or ''}".strip())
+        else:
+            self._note("usage: /permissions [allow <tool> [pattern] | deny <tool> [pattern]]")
+
     def _set_stage(self, arg: str) -> None:
         if not arg:
             cur = self.engagement.stage
@@ -274,16 +481,29 @@ class RiftorApp(App):
         if letter:
             self.engagement.set_stage(letter)
             self._refresh_status()
-            self._note(f"stage → {letter} ({STAGE_NAMES[letter]})")
+            self._stage_divider(letter)
         else:
             self._note(f"unknown stage: {arg} — use R/I/F/T or recon/intrusion/foothold/takeover")
+
+    def _stage_divider(self, letter: str) -> None:
+        """A scannable, color-coded divider marking a RIFT stage transition."""
+        p = self._pal()
+        colors = {"R": p["cyan"], "I": p["magenta"], "F": p["violet"], "T": p["danger"]}
+        color = colors.get(letter, p["cyan"])
+        line = Text()
+        line.append("──◢ ", style=color)
+        line.append(f"{letter} · {STAGE_NAMES[letter]}", style=f"bold {color}")
+        line.append(" ◣" + "─" * 30, style=color)
+        self.chat.mount(Static(line, classes="note"))
+        self._scroll_if_following()
 
     def _scope_cmd(self, arg: str) -> None:
         parts = arg.split()
         if not parts:
             ins = ", ".join(t.raw for t in self.engagement.scope.in_scope) or "(none)"
             outs = self.engagement.scope.out_of_scope
-            line = f"scope · enforce {'on' if self.engagement.enforce else 'off'} · in: {ins}"
+            mode = "dry-run" if self.engagement.dry_run else ("on" if self.engagement.enforce else "off")
+            line = f"scope · enforce {mode} · in: {ins}"
             if outs:
                 line += " · out: " + ", ".join(t.raw for t in outs)
             self._note(line)
@@ -306,42 +526,279 @@ class RiftorApp(App):
             self._note("scope cleared")
         elif sub == "on":
             self.engagement.set_enforce(True)
+            self.engagement.set_dry_run(False)
             self._note("scope enforcement ON")
         elif sub == "off":
             self.engagement.set_enforce(False)
             self._error("scope enforcement OFF — riftor will not block out-of-scope actions")
+        elif sub in ("dry", "dry-run"):
+            self.engagement.set_enforce(True)
+            self.engagement.set_dry_run(True)
+            self._note("scope dry-run ON — violations are warned but not blocked")
+        elif sub == "import" and rest:
+            self._scope_import(rest[0])
+        elif sub == "export":
+            self._scope_export(rest[0] if rest else None)
         else:
-            self._note("usage: /scope [add <t>|out <t>|rm <t>|clear|on|off]")
+            self._note(
+                "usage: /scope [add <t>|out <t>|rm <t>|clear|on|off|dry|import <file>|export [file]]"
+            )
         self._refresh_status()
 
+    def _scope_import(self, path: str) -> None:
+        p = Path(path).expanduser()
+        if not p.is_absolute():
+            p = self.workdir / p
+        try:
+            text = p.read_text(encoding="utf-8")
+        except Exception as exc:  # noqa: BLE001
+            self._error(f"scope import failed — {exc}")
+            return
+        added_in, added_out = self.engagement.import_scope(text)
+        self._note(f"scope imported: +{added_in} in, +{added_out} out (from {p})")
+
+    def _scope_export(self, path: str | None) -> None:
+        out = path or str(self.engagement.dir / "scope.txt")
+        p = Path(out).expanduser()
+        if not p.is_absolute():
+            p = self.workdir / p
+        try:
+            p.write_text(self.engagement.export_scope(), encoding="utf-8")
+        except Exception as exc:  # noqa: BLE001
+            self._error(f"scope export failed — {exc}")
+            return
+        self._note(f"scope exported → {p}")
+
+    # ---- findings --------------------------------------------------------------
+    def _sorted_findings(self) -> list[dict]:
+        from riftor.engagement.report import report_data
+
+        return report_data(self.engagement)["findings"]
+
     def _show_findings(self) -> None:
-        findings = self.engagement.store.list_findings()
+        findings = self._sorted_findings()
         if not findings:
             self._note("no findings recorded yet")
             return
         rows = []
-        for i, f in enumerate(findings, 1):
-            host = f" — `{f['host']}`" if f["host"] else ""
-            rows.append(f"{i}. **[{f['severity']}]** {f['title']}{host}")
-        self.chat.mount(Markdown("**findings**\n\n" + "\n".join(rows), classes="assistant"))
-        self.chat.scroll_end(animate=False)
+        for f in findings:
+            host = f" — `{f['host']}`" if f.get("host") else ""
+            cvss = f" · CVSS {f['cvss_score']:.1f}" if f.get("cvss_score") else ""
+            tags = f"  ‹{f['tags']}›" if f.get("tags") else ""
+            rows.append(f"`#{f['id']}` **[{f['severity'].upper()}{cvss}]** {f['title']}{host}{tags}")
+        self._markdown("**findings** (severity-sorted)\n\n" + "\n".join(rows))
+
+    def _show_finding(self, arg: str) -> None:
+        try:
+            fid = int(arg.strip())
+        except ValueError:
+            self._note("usage: /finding <id> — see /findings")
+            return
+        f = self.engagement.store.get_finding(fid)
+        if not f:
+            self._note(f"no finding #{fid}")
+            return
+        lines = [f"**#{fid} · [{f['severity'].upper()}] {f['title']}**", ""]
+        for label, key in (
+            ("Host", "host"), ("CVSS", "cvss"), ("Tags", "tags"),
+            ("Evidence", "evidence"), ("Recommendation", "recommendation"), ("Notes", "notes"),
+        ):
+            if f.get(key):
+                lines.append(f"- **{label}:** {f[key]}")
+        self._markdown("\n".join(lines))
+
+    def _edit_finding_cmd(self, arg: str) -> None:
+        parts = arg.split()
+        if not parts:
+            self._note("usage: /edit-finding <id> field=value … (sev/severity, host, tags, notes, title)")
+            return
+        try:
+            fid = int(parts[0])
+        except ValueError:
+            self._note("usage: /edit-finding <id> field=value …")
+            return
+        alias = {"sev": "severity", "rec": "recommendation"}
+        fields: dict[str, str] = {}
+        for token in arg.split(maxsplit=1)[1].split() if len(arg.split()) > 1 else []:
+            if "=" not in token:
+                continue
+            key, _, value = token.partition("=")
+            key = alias.get(key.lower(), key.lower())
+            if key in ("title", "severity", "host", "evidence", "recommendation", "tags", "notes"):
+                fields[key] = value
+        if not fields:
+            self._note("nothing to change — use field=value (e.g. sev=high tags=fp)")
+            return
+        if self.engagement.store.update_finding(fid, **fields):
+            self.engagement.store.log_activity("finding_edit", f"#{fid} {', '.join(fields)}")
+            self._note(f"updated finding #{fid}: {', '.join(fields)}")
+        else:
+            self._note(f"no finding #{fid}")
+
+    def _delete_finding_cmd(self, arg: str) -> None:
+        try:
+            fid = int(arg.strip())
+        except ValueError:
+            self._note("usage: /delete-finding <id>")
+            return
+        if self.engagement.store.delete_finding(fid):
+            self.engagement.store.log_activity("finding_delete", f"#{fid}")
+            self._refresh_status()
+            self._note(f"deleted finding #{fid}")
+        else:
+            self._note(f"no finding #{fid}")
+
+    def _hosts_cmd(self) -> None:
+        hosts = self.engagement.store.list_hosts()
+        if not hosts:
+            self._note("no hosts recorded yet")
+            return
+        rows = [f"- `{h['host']}`" + (f" — {h['note']}" if h.get("note") else "") for h in hosts]
+        self._markdown("**hosts**\n\n" + "\n".join(rows))
+
+    def _services_cmd(self) -> None:
+        services = self.engagement.store.list_services()
+        if not services:
+            self._note("no services recorded yet")
+            return
+        rows = ["| Host | Port | Proto | Service | Version |", "| --- | --- | --- | --- | --- |"]
+        for s in services:
+            rows.append(
+                f"| {s.get('host', '')} | {s.get('port') or ''} | {s.get('proto', '')} "
+                f"| {s.get('service', '')} | {s.get('version', '')} |"
+            )
+        self._markdown("**services**\n\n" + "\n".join(rows))
 
     def _report_cmd(self, arg: str) -> None:
         fmt = (arg or "both").strip().lower()
-        if fmt not in ("md", "html", "both"):
-            self._note("usage: /report [md|html|both]")
+        if fmt not in ("md", "html", "json", "sarif", "both", "all"):
+            self._note("usage: /report [md|html|json|sarif|both|all]")
             return
         try:
             paths = write_reports(self.engagement, fmt)
         except Exception as exc:  # noqa: BLE001
             self._error(f"report failed — {exc}")
             return
+        self.engagement.store.log_activity("report", fmt)
         self._note("report written: " + ", ".join(str(p) for p in paths))
 
-    # ---- sessions --------------------------------------------------------------
-    def _save_session(self) -> None:
+    def _timeline_cmd(self) -> None:
+        events = self.engagement.store.list_activity(limit=100)
+        if not events:
+            self._note("no activity recorded yet")
+            return
+        rows = []
+        for e in events:
+            when = time.strftime("%H:%M:%S", time.localtime(e.get("ts", 0)))
+            rows.append(f"`{when}` **{e['event']}** {e.get('detail', '')}")
+        self._markdown("**timeline**\n\n" + "\n".join(rows))
+
+    def _audit_cmd(self) -> None:
+        entries = self.audit.tail(30)
+        if not entries:
+            self._note("no audit entries yet")
+            return
+        rows = []
+        for e in entries:
+            when = time.strftime("%H:%M:%S", time.localtime(e.get("ts", 0)))
+            flag = "✓" if e.get("allowed") else "✗"
+            err = " ⚠" if e.get("is_error") else ""
+            rows.append(f"`{when}` {flag} **{e.get('tool', '?')}** {e.get('preview', '')[:80]}{err}")
+        self._markdown("**audit log** (recent)\n\n" + "\n".join(rows))
+
+    def _export_cmd(self) -> None:
+        import json
+        import shutil
+
+        out_dir = self.engagement.dir / "exports"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        stage = out_dir / f"engagement-{stamp}"
+        stage.mkdir(exist_ok=True)
         try:
-            sessions.save(self.workdir, self.session_id, self.context.dump(), self.config.model)
+            (stage / "engagement.json").write_text(self.engagement.store.dump_json(), encoding="utf-8")
+            db = self.engagement.dir / "engagement.db"
+            if db.exists():
+                shutil.copy2(db, stage / "engagement.db")
+            manifest = {
+                "tool": "riftor",
+                "exported": stamp,
+                "stage": self.engagement.stage,
+                "findings": self.engagement.findings_count(),
+                "model": self.config.model,
+            }
+            (stage / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+            archive = shutil.make_archive(str(stage), "zip", root_dir=str(stage))
+            shutil.rmtree(stage, ignore_errors=True)
+        except Exception as exc:  # noqa: BLE001
+            self._error(f"export failed — {exc}")
+            return
+        self.engagement.store.log_activity("export", archive)
+        self._note(f"engagement exported → {archive}")
+
+    # ---- conversation utilities ------------------------------------------------
+    def _cost_cmd(self) -> None:
+        u = self.usage
+        cost = f" · ${u.cost:.4f}" if u.cost else ""
+        pct = int(self.context.estimated_tokens() / self._context_window() * 100)
+        self._note(
+            f"session usage: {u.prompt_tokens} in + {u.completion_tokens} out = "
+            f"{u.total_tokens} tokens{cost} · context ~{pct}% of window"
+        )
+
+    def _retry_cmd(self) -> None:
+        last = self.context.pop_last_user_turn()
+        if last is None:
+            self._note("nothing to retry")
+            return
+        self._note("retrying last turn…")
+        self._add_user(last)
+        self._agent(last)
+
+    def _continue_cmd(self, arg: str) -> None:
+        extra = 16
+        if arg.strip().isdigit():
+            extra = int(arg.strip())
+        self._note(f"continuing — extending the step budget by {extra}")
+        self._agent("Continue from where you left off.", extra_steps=extra)
+
+    def _compact_cmd(self) -> None:
+        changed = self.context.compact()
+        self._refresh_usage()
+        self._note(f"compacted {changed} old tool result(s) to free context")
+
+    def _copy_cmd(self) -> None:
+        if not self._last_output:
+            self._note("nothing to copy yet")
+            return
+        try:
+            self.copy_to_clipboard(self._last_output)
+            self._note(f"copied {len(self._last_output)} chars to clipboard")
+        except Exception as exc:  # noqa: BLE001
+            self._error(f"copy failed — {exc}")
+
+    def _show_result(self, arg: str) -> None:
+        try:
+            rid = int(arg.strip())
+        except ValueError:
+            ids = ", ".join(f"#{i}" for i in sorted(self._tool_results)) or "(none)"
+            self._note(f"usage: /show <id> — available: {ids}")
+            return
+        content = self._tool_results.get(rid)
+        if content is None:
+            self._note(f"no stored result #{rid}")
+            return
+        self.chat.mount(Static(Text(content), classes="tool-result"))
+        self._last_output = content
+        self._scroll_if_following()
+
+    # ---- sessions --------------------------------------------------------------
+    def _save_session(self, complete: bool = True) -> None:
+        try:
+            sessions.save(
+                self.workdir, self.session_id, self.context.dump(), self.config.model,
+                complete=complete,
+            )
         except Exception:  # noqa: BLE001 — persistence must never crash the app
             pass
 
@@ -353,9 +810,9 @@ class RiftorApp(App):
         lines = []
         for s in rows:
             marker = "→ " if s["id"] == self.session_id else "  "
-            lines.append(f"{marker}`{s['id']}` · {s['messages']} msgs · {s['title']}")
-        self.chat.mount(Markdown("**sessions**\n\n" + "\n".join(lines), classes="assistant"))
-        self.chat.scroll_end(animate=False)
+            flag = "" if s.get("complete", True) else " ⚠"
+            lines.append(f"{marker}`{s['id']}`{flag} · {s['messages']} msgs · {s['title']}")
+        self._markdown("**sessions**\n\n" + "\n".join(lines))
 
     def _resume_cmd(self, arg: str) -> None:
         sid = arg.strip()
@@ -377,6 +834,8 @@ class RiftorApp(App):
         self._save_session()
         self.session_id = sessions.new_id()
         self.context.clear()
+        self.usage = Usage()
+        self._refresh_usage()
         self.chat.remove_children()
         self._note(f"new session {self.session_id}")
 
@@ -404,6 +863,8 @@ class RiftorApp(App):
 
     def action_clear(self) -> None:
         self.context.clear()
+        self.usage = Usage()
+        self._refresh_usage()
         self.chat.remove_children()
         self._note("conversation cleared")
 
@@ -422,16 +883,43 @@ class RiftorApp(App):
         while isinstance(self.screen, ConfirmScreen):
             self.pop_screen()
 
+    # ---- rate limiting ---------------------------------------------------------
+    async def _rate_gate(self) -> None:
+        limit = self.config.rate_limit_per_min
+        if limit <= 0:
+            return
+        import asyncio
+
+        now = time.monotonic()
+        self._rate_times = [t for t in self._rate_times if now - t < 60.0]
+        if len(self._rate_times) >= limit:
+            wait = 60.0 - (now - self._rate_times[0])
+            if wait > 0:
+                self._note(f"rate limit ({limit}/min) — waiting {wait:.0f}s")
+                await asyncio.sleep(wait)
+        self._rate_times.append(time.monotonic())
+
     # ---- agent loop ------------------------------------------------------------
     @work(exclusive=True)
-    async def _agent(self, user_text: str) -> None:
+    async def _agent(self, user_text: str, extra_steps: int = 0) -> None:
         self._close_modals()  # a prior run may have been cancelled mid-prompt
-        self.context.add_user(user_text)
+        self._autoscroll = True
+        if user_text != "Continue from where you left off.":
+            self.context.add_user(user_text)
+            self._last_user_text = user_text
         self.status.set_busy(True)
+        budget = self.max_steps + extra_steps
         try:
-            for _ in range(self.max_steps):
+            for step in range(budget):
+                self._save_session(complete=False)  # crash-safe checkpoint
+                await self._rate_gate()
                 turn = await self._assistant_turn()
                 self.context.add_message(turn.assistant_message)
+                self.usage.add(turn.usage)
+                self._refresh_usage()
+                pct = int(self.context.estimated_tokens() / self._context_window() * 100)
+                if pct >= 80:
+                    self._note(f"⚠ context ~{pct}% of window — /compact or /clear soon")
                 if not turn.tool_calls:
                     if not turn.text.strip():
                         self._note("(no output)")
@@ -439,17 +927,19 @@ class RiftorApp(App):
                 for call in turn.tool_calls:
                     await self._run_tool(call)
             else:
-                self._note(f"reached step limit ({self.max_steps}); stopping")
+                self._note(
+                    f"reached step limit ({budget}); stopping — /continue to extend"
+                )
+        except ProviderError as exc:
+            self._error(f"rift collapsed [{exc.kind}] — {exc}")
         except Exception as exc:  # noqa: BLE001
             self._error(f"rift collapsed — {exc}")
         finally:
             self.status.set_busy(False)
             self.chat.scroll_end(animate=False)
-            self._save_session()
+            self._save_session(complete=True)
 
     async def _assistant_turn(self) -> Turn:
-        # Guarantee a valid history: any dangling tool_use (from an interrupted
-        # or cancelled turn) gets a synthetic result before we call the model.
         self.context.repair()
 
         bubble = Markdown("", classes="assistant")
@@ -466,7 +956,7 @@ class RiftorApp(App):
                 now = time.monotonic()
                 if now - last_render > 0.08:
                     await bubble.update("".join(buffer))
-                    self.chat.scroll_end(animate=False)
+                    self._scroll_if_following()
                     last_render = now
             elif event == "done":
                 turn = payload  # type: ignore[assignment]
@@ -474,9 +964,10 @@ class RiftorApp(App):
         text = "".join(buffer).strip()
         if text:
             await bubble.update(text)
+            self._last_output = text
         else:
             await bubble.remove()
-        self.chat.scroll_end(animate=False)
+        self._scroll_if_following()
         return turn or Turn(text=text, assistant_message={"role": "assistant", "content": text})
 
     async def _run_tool(self, call: ToolCall) -> None:
@@ -497,11 +988,33 @@ class RiftorApp(App):
             probe = " ".join(str(v) for v in call.arguments.values())
             scope_warning = self.engagement.violations(probe)
 
-        if scope_warning or self.permissions.needs_prompt(tool.name, tool.requires_permission):
-            decision = await self.push_screen_wait(
-                ConfirmScreen(tool.name, preview, scope_warning=scope_warning)
+        # dry-run: warn but don't block
+        if scope_warning and self.engagement.dry_run:
+            self._note(f"⚠ dry-run: out of scope — {', '.join(scope_warning)} (allowed)")
+            scope_warning = []
+
+        # hard deny rules (e.g. bash rm -rf) — refuse without prompting
+        if self.permissions.is_denied(tool.name, preview):
+            reason = "blocked by a deny rule"
+            await self._show_tool_result(reason, is_error=True)
+            self.context.add_tool_result(
+                call.id,
+                "[blocked by policy] This action matches a deny rule and was refused. "
+                "Do not retry it; propose a safer alternative.",
             )
-            if decision == "deny":
+            self.audit.record(tool.name, preview, allowed=False)
+            return
+
+        if scope_warning or self.permissions.needs_prompt(
+            tool.name, tool.requires_permission, preview
+        ):
+            detail = tool.confirm_detail(call.arguments, self.toolctx)
+            decision = await self.push_screen_wait(
+                ConfirmScreen(tool.name, preview, scope_warning=scope_warning, detail=detail)
+            )
+            if decision in ("deny", "always_deny"):
+                if decision == "always_deny":
+                    self.permissions.add_deny_rule(tool.name)
                 reason = "blocked — out of scope" if scope_warning else "denied by operator"
                 await self._show_tool_result(reason, is_error=True)
                 if scope_warning:
@@ -519,6 +1032,9 @@ class RiftorApp(App):
                 return
             if decision == "session":
                 self.permissions.allow_for_session(tool.name)
+            elif decision == "always":
+                self.permissions.add_allow_rule(tool.name)
+            # "once" → approve this single call, remember nothing
 
         audit_preview = preview + (" [scope-override]" if scope_warning else "")
         start = time.monotonic()
@@ -526,7 +1042,7 @@ class RiftorApp(App):
             result = await tool.execute(call.arguments, self.toolctx)
         except Exception as exc:  # noqa: BLE001
             result = ToolResult(f"error: {exc}", is_error=True)
-        result = result.truncated()
+        result = result.truncated(self.config.max_result_chars)
         duration = time.monotonic() - start
 
         self.audit.record(
@@ -539,6 +1055,7 @@ class RiftorApp(App):
         )
         await self._show_tool_result(result.content, is_error=result.is_error)
         self.context.add_tool_result(call.id, result.content)
+        self._last_output = result.content
         self._refresh_status()
 
     # ---- tool rendering --------------------------------------------------------
@@ -552,10 +1069,13 @@ class RiftorApp(App):
             line.append(preview, style=p["muted"])
         await self._mount(Static(line, classes="tool"))
 
-    async def _show_tool_result(self, content: str, is_error: bool = False, max_lines: int = 25) -> None:
+    async def _show_tool_result(self, content: str, is_error: bool = False) -> None:
+        max_lines = self.config.result_preview_lines
         lines = content.splitlines() or [""]
         shown = "\n".join(lines[:max_lines])
         if len(lines) > max_lines:
-            shown += f"\n…(+{len(lines) - max_lines} more lines)"
+            rid = len(self._tool_results) + 1
+            self._tool_results[rid] = content
+            shown += f"\n…(+{len(lines) - max_lines} more lines · /show {rid})"
         classes = "tool-result error" if is_error else "tool-result"
         await self._mount(Static(Text(shown), classes=classes))

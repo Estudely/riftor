@@ -19,15 +19,19 @@ uv run riftor            # launch the TUI (needs an API key, e.g. ANTHROPIC_API_
 ```
 
 ## Before you open a PR
-Run the same checks CI runs:
+Run the same checks CI runs (or just `make check`):
 
 ```bash
-uv run ruff check riftor dev      # lint
-uv run python dev/smoke.py        # headless TUI + unit suites (must print all *_OK)
+uv run ruff check riftor dev tests   # lint
+uv run pyright riftor                # type check
+uv run pytest                        # unit suite (tests/)
+uv run python dev/smoke.py           # headless TUI integration (prints all *_OK)
 ```
 
-`dev/smoke.py` runs offline (no model/API key needed) — it exercises the TUI,
-tools, scope engine, engagement store, CVSS, reports, sessions, and themes.
+Everything runs **offline** — no model/API key needed. `tests/` holds focused
+unit tests (engagement, reports, permissions, config, agent, parsers, tools,
+sessions); `dev/smoke.py` drives the real TUI headlessly end-to-end. Install the
+pre-commit hooks to run these automatically: `make install-hooks`.
 
 ## Project layout
 ```

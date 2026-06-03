@@ -13,8 +13,11 @@ from riftor.tools.core import (
     WriteTool,
 )
 from riftor.tools.engagement import (
+    DeleteFindingTool,
+    EditFindingTool,
     GenerateReportTool,
     ImportScanTool,
+    ListHostsTool,
     RecordFindingTool,
     RecordServiceTool,
     ScopeListTool,
@@ -24,6 +27,7 @@ from riftor.tools.engagement import (
 # Order is roughly safe -> mutating; it's also the order shown to the model.
 ALL_TOOLS: list[Tool] = [
     ScopeListTool(),
+    ListHostsTool(),
     ReadTool(),
     GlobTool(),
     GrepTool(),
@@ -32,6 +36,8 @@ ALL_TOOLS: list[Tool] = [
     ImportScanTool(),
     RecordServiceTool(),
     RecordFindingTool(),
+    EditFindingTool(),
+    DeleteFindingTool(),
     GenerateReportTool(),
     WriteTool(),
     EditTool(),

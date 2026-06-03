@@ -1,0 +1,137 @@
+"""Headless / one-shot mode: run a single task without the TUI.
+
+Useful for scripting and CI. The agent streams to stdout. For safety, dangerous
+tools (bash/write/edit) only run if an explicit allow rule exists in
+``permissions.toml`` — otherwise they are auto-denied (no interactive operator to
+approve). Out-of-scope, scope-sensitive calls are always blocked.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import sys
+from pathlib import Path
+
+from riftor import tools
+from riftor.agent.context import Context
+from riftor.agent.provider import Provider, ProviderError, ToolCall
+from riftor.config import PERMISSIONS_PATH, Config
+from riftor.engagement import Engagement
+from riftor.safety.audit import AuditLog
+from riftor.safety.permissions import Permissions
+from riftor.tools import ToolContext, ToolResult
+
+
+def run_headless(
+    cfg: Config,
+    workdir: Path,
+    *,
+    prompt: str | None,
+    scope_file: str | None = None,
+) -> int:
+    if not prompt:
+        if not sys.stdin.isatty():
+            prompt = sys.stdin.read().strip()
+        if not prompt:
+            print("riftor --headless: no prompt (use --prompt or pipe stdin)", file=sys.stderr)
+            return 2
+    if not cfg.has_credentials():
+        env = cfg.provider_env() or "ANTHROPIC_API_KEY"
+        print(f"riftor: no API key for {cfg.model}; set {env}", file=sys.stderr)
+        return 3
+    try:
+        return asyncio.run(_run(cfg, workdir, prompt, scope_file))
+    except KeyboardInterrupt:
+        return 130
+
+
+async def _run(cfg: Config, workdir: Path, prompt: str, scope_file: str | None) -> int:
+    context = Context(lore=cfg.lore)
+    provider = Provider(cfg)
+    engagement = Engagement(workdir)
+    if scope_file:
+        try:
+            engagement.import_scope(Path(scope_file).expanduser().read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            print(f"riftor: scope file error: {exc}", file=sys.stderr)
+    toolctx = ToolContext(
+        workdir=workdir, engagement=engagement, max_result_chars=cfg.max_result_chars
+    )
+    permissions = Permissions.load(PERMISSIONS_PATH)
+    audit = AuditLog()
+    schemas = tools.schemas()
+
+    context.add_user(prompt)
+    for _ in range(cfg.max_steps):
+        context.repair()
+        text_parts: list[str] = []
+        turn = None
+        try:
+            async for event, payload in provider.stream_turn(context.messages, schemas):
+                if event == "text":
+                    sys.stdout.write(str(payload))
+                    sys.stdout.flush()
+                    text_parts.append(str(payload))
+                elif event == "done":
+                    turn = payload  # type: ignore[assignment]  # ("done", Turn)
+        except ProviderError as exc:
+            print(f"\nriftor: provider error [{exc.kind}] — {exc}", file=sys.stderr)
+            return 1
+        if turn is None:
+            break
+        context.add_message(turn.assistant_message)
+        if not turn.tool_calls:
+            break
+        for call in turn.tool_calls:
+            await _run_tool_headless(call, engagement, permissions, audit, toolctx, context)
+    print()  # trailing newline
+    return 0
+
+
+async def _run_tool_headless(
+    call: ToolCall,
+    engagement: Engagement,
+    permissions: Permissions,
+    audit: AuditLog,
+    toolctx: ToolContext,
+    context: Context,
+) -> None:
+    tool = tools.get(call.name)
+    if tool is None:
+        context.add_tool_result(call.id, f"error: unknown tool '{call.name}'")
+        return
+    preview = tool.preview(call.arguments)
+    print(f"\n  ⛏ {tool.name}  {preview}", file=sys.stderr)
+
+    if getattr(tool, "scope_sensitive", False):
+        violations = engagement.violations(" ".join(str(v) for v in call.arguments.values()))
+        if violations:
+            context.add_tool_result(
+                call.id,
+                f"[blocked: out of scope] {', '.join(violations)} not in scope.",
+            )
+            audit.record(tool.name, preview, allowed=False)
+            return
+
+    if permissions.is_denied(tool.name, preview):
+        context.add_tool_result(call.id, "[blocked by policy] denied by a deny rule.")
+        audit.record(tool.name, preview, allowed=False)
+        return
+
+    # No operator present: dangerous tools require a standing allow rule.
+    if tool.requires_permission and not permissions.is_allowed(tool.name, preview):
+        context.add_tool_result(
+            call.id,
+            "[denied: headless] This tool needs approval and no allow rule exists. "
+            "Add one to permissions.toml to enable it in headless mode.",
+        )
+        audit.record(tool.name, preview, allowed=False)
+        return
+
+    try:
+        result = await tool.execute(call.arguments, toolctx)
+    except Exception as exc:  # noqa: BLE001
+        result = ToolResult(f"error: {exc}", is_error=True)
+    result = result.truncated(toolctx.max_result_chars)
+    audit.record(tool.name, preview, allowed=True, is_error=result.is_error)
+    context.add_tool_result(call.id, result.content)

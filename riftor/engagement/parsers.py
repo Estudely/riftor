@@ -24,6 +24,10 @@ _SEVERITIES = {"info", "low", "medium", "high", "critical"}
 class ParsedScan:
     services: list[dict] = field(default_factory=list)
     findings: list[dict] = field(default_factory=list)
+    #: non-empty lines the parser could not turn into a service/finding
+    skipped: int = 0
+    #: lines that looked like JSON but failed to decode
+    json_errors: int = 0
 
 
 def _sev(value: str) -> str:
@@ -108,10 +112,13 @@ def parse_httpx(text: str) -> ParsedScan:
             try:
                 data = json.loads(line)
             except json.JSONDecodeError:
+                scan.json_errors += 1
+                scan.skipped += 1
                 continue
             url = data.get("url") or data.get("input") or ""
             host, port = _host_port(url)
             if not host:
+                scan.skipped += 1
                 continue
             tech = data.get("webserver") or data.get("tech") or ""
             if isinstance(tech, list):
@@ -132,10 +139,12 @@ def parse_httpx(text: str) -> ParsedScan:
 
         parts = line.split()
         if not parts or "://" not in parts[0]:
+            scan.skipped += 1
             continue
         url = parts[0]
         host, port = _host_port(url)
         if not host:
+            scan.skipped += 1
             continue
         brackets = re.findall(r"\[([^\]]*)\]", line)
         status = brackets[0] if brackets else ""
@@ -165,6 +174,8 @@ def parse_nuclei(text: str) -> ParsedScan:
             try:
                 data = json.loads(line)
             except json.JSONDecodeError:
+                scan.json_errors += 1
+                scan.skipped += 1
                 continue
             info = data.get("info", {}) if isinstance(data.get("info"), dict) else {}
             template = data.get("template-id") or data.get("templateID") or info.get("name", "finding")
@@ -181,6 +192,7 @@ def parse_nuclei(text: str) -> ParsedScan:
 
         brackets = re.findall(r"\[([^\]]*)\]", line)
         if len(brackets) < 3:
+            scan.skipped += 1
             continue
         template = brackets[0]
         severity = brackets[2]

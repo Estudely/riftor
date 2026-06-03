@@ -1,0 +1,19 @@
+#compdef riftor
+# zsh completion for riftor
+# Install: place this file in a directory on your $fpath (e.g. ~/.zfunc) and
+# ensure `autoload -U compinit && compinit` runs in your ~/.zshrc.
+
+_riftor() {
+  _arguments \
+    '--version[print version and exit]' \
+    '--config[print the config file path and exit]' \
+    '--model[override the model for this run]:model:(anthropic/claude-sonnet-4-6 openai/gpt-4o openrouter/auto ollama_chat/llama3.1)' \
+    '--api-key[override the API key for this run]:key:' \
+    '--workdir[engagement working directory]:dir:_files -/' \
+    '--scope-file[load scope targets from a file]:file:_files' \
+    '(-p --prompt)'{-p,--prompt}'[run one task non-interactively]:prompt:' \
+    '--headless[non-interactive mode]' \
+    '(-h --help)'{-h,--help}'[show help]'
+}
+
+_riftor "$@"

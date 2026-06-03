@@ -16,10 +16,13 @@ interface backed by [litellm](https://docs.litellm.ai/), organised around the
 It's **cloud-first** (Anthropic, OpenAI, OpenRouter, …) for the strongest agent
 behaviour, with local [Ollama](https://ollama.com/) supported as an option.
 
-> **Status:** fully featured (Phase 4–5). Streaming agent, tool use + permissions,
-> **scope guardrail**, RIFT stage tracking, per-engagement findings store, CVSS
-> reports, session resume, live themes, `import_scan`, Docker, and CI.
-> See [`todo.md`](./todo.md) for the roadmap.
+> **Status:** fully featured (Phase 4–6). Streaming agent with retry/backoff +
+> token/cost metering, **persistent granular permissions** (allow/deny rules,
+> diff preview before write/edit), **scope guardrail** (enforce / dry-run /
+> import-export), RIFT stage tracking, per-engagement findings store (edit/tag/
+> dedup), CVSS reports in **md/html/json/sarif**, crash-safe sessions, input
+> history + command palette, headless one-shot mode, Docker, pytest + types in CI.
+> See [`todo.md`](./todo.md) for the roadmap and [`docs/`](./docs) for configuration.
 
 ## Install
 ```bash
@@ -33,6 +36,10 @@ export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY, etc.
 riftor                                 # launch the TUI
 riftor --config                        # show the config file path
 riftor --version
+riftor --model openai/gpt-4o           # override the model for this run
+riftor --workdir ./engagement          # set the engagement directory
+riftor --scope-file scope.txt          # preload scope targets
+riftor -p "enumerate 10.0.0.5"         # headless one-shot (also reads stdin)
 ```
 
 On first launch riftor writes a config file and picks a default model from your
@@ -86,18 +93,25 @@ lives in `.riftor/` per working directory; sessions auto-save and resume.
 |---|---|
 | `/help` | show commands |
 | `/clear` | clear the conversation (`Ctrl+L`) |
-| `/model [name]` | show or switch the model |
+| `/retry` · `/continue [N]` · `/compact` | re-run last turn · extend steps · free context |
+| `/copy` · `/show <id>` · `/cost` | copy last output · expand a result · token/cost total |
+| `/model [name]` · `/theme [name]` | switch model / theme |
 | `/stage [R\|I\|F\|T]` | show or set the RIFT stage |
-| `/scope [add\|out\|rm <t>\|clear\|on\|off]` | manage in/out-of-scope targets |
-| `/findings` | list recorded findings |
-| `/report [md\|html\|both]` | write a pentest report to `.riftor/reports/` |
+| `/scope [add\|out\|rm <t>\|clear\|on\|off\|dry\|import <f>\|export [f]]` | manage scope |
+| `/findings` · `/finding <id>` | list (severity-sorted) / show one |
+| `/edit-finding <id> sev=high tags=…` · `/delete-finding <id>` | triage findings |
+| `/hosts` · `/services` | discovered infrastructure |
+| `/report [md\|html\|json\|sarif\|both\|all]` | write a report to `.riftor/reports/` |
+| `/timeline` · `/export` | engagement activity log · archive the engagement |
+| `/permissions` · `/audit` | review allow/deny rules · recent tool-call log |
 | `/sessions` · `/resume <id>` · `/new` | manage saved sessions |
-| `/tools` | list available tools |
-| `/lore` | toggle the rift persona |
-| `/exit` | quit (`Ctrl+C`) |
+| `/config` · `/tools` · `/lore` · `/exit` | settings · tools · persona · quit |
 
+`↑/↓` recall previous prompts · `PgUp/PgDn` scroll · `Ctrl+P` command palette ·
 `Esc` cancels a running response. Dangerous tools (bash/write/edit) prompt for
-approval; every tool call is written to an audit log.
+approval (with a **diff preview**); `rm -rf`/`dd` and friends are denied by
+default; every tool call is written to an audit log. See
+[`docs/configuration.md`](./docs/configuration.md) for all settings.
 
 ## Use responsibly
 riftor is for **authorized** security testing only. You are responsible for

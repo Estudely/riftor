@@ -1,6 +1,6 @@
 [project]
 name = "riftor"
-version = "0.0.4"
+version = "0.0.5"
 description = "An open-source offensive-security AI agent that lives in your terminal."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -26,6 +26,9 @@ dependencies = [
 dev = [
     "textual-dev>=1.5",
     "ruff>=0.6",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pyright>=1.1.380",
 ]
 
 [project.urls]
@@ -45,3 +48,19 @@ packages = ["riftor"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-q"
+
+[tool.pyright]
+include = ["riftor"]
+exclude = ["**/__pycache__", "dist", ".venv"]
+pythonVersion = "3.11"
+# Pragmatic: report obvious errors without drowning in strict-mode noise.
+typeCheckingMode = "basic"
+reportMissingImports = true
+reportAttributeAccessIssue = "warning"
+reportOptionalMemberAccess = "warning"
+reportArgumentType = "warning"

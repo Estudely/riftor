@@ -119,6 +119,38 @@ async def main() -> None:
         await pilot.press("enter")
         await pilot.pause()
 
+        # new QoL commands don't crash and do the right thing
+        app.engagement.add_finding(title="Test finding", severity="high", host="10.0.0.1")
+        for cmd in (
+            "/findings", "/hosts", "/services", "/timeline", "/permissions",
+            "/cost", "/audit", "/scope dry", "/scope on",
+        ):
+            inp.value = cmd
+            await pilot.press("enter")
+            await pilot.pause()
+
+        # fuzzy "did you mean" on a typo
+        inp.value = "/findngs"
+        await pilot.press("enter")
+        await pilot.pause()
+
+        # input history recall via ↑
+        inp.value = "first task"
+        await pilot.press("enter")
+        await pilot.pause()
+        app.action_cancel()
+        app.query_one("#prompt", Input).focus()
+        await pilot.press("up")
+        await pilot.pause()
+        assert app.query_one("#prompt", Input).value == "first task", app.query_one("#prompt", Input).value
+        app.query_one("#prompt", Input).clear()
+
+        # /export writes an archive
+        inp.value = "/export"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert list((Path(workdir) / ".riftor" / "exports").glob("*.zip")), "export not written"
+
         # /clear empties the chat
         inp.value = "/clear"
         await pilot.press("enter")
