@@ -117,12 +117,16 @@ class Config(BaseModel):
     @classmethod
     def load(cls) -> "Config":
         if CONFIG_PATH.exists():
-            with CONFIG_PATH.open("rb") as fh:
-                data = tomllib.load(fh)
-            section = dict(data.get("riftor", data))
-            section.pop("providers", None)  # never let a stray key shadow the table
-            providers = data.get("providers", {})
-            return cls(**section, providers=providers)
+            try:
+                with CONFIG_PATH.open("rb") as fh:
+                    data = tomllib.load(fh)
+                section = dict(data.get("riftor", data))
+                section.pop("providers", None)  # never let a stray key shadow the table
+                providers = data.get("providers", {})
+                return cls(**section, providers=providers)
+            except Exception:  # noqa: BLE001 — a bad config must never crash startup
+                # Fall through to detected defaults rather than failing to launch.
+                return cls.detect_defaults()
         cfg = cls.detect_defaults()
         cfg.save()
         return cfg

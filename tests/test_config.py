@@ -93,3 +93,34 @@ def test_providers_table_is_owner_only(tmp_path, monkeypatch):
     mode = stat.S_IMODE(os.stat(cfgmod.CONFIG_PATH).st_mode)
     assert mode == 0o600, oct(mode)
     assert "sk-secret-xyz" in cfgmod.CONFIG_PATH.read_text()
+
+
+def test_malformed_providers_table_degrades_to_defaults(tmp_path, monkeypatch):
+    # A hand-corrupted [providers] table must not crash startup; fall back to defaults.
+    monkeypatch.setattr(cfgmod, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(cfgmod, "CONFIG_PATH", tmp_path / "config.toml")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    (tmp_path / "config.toml").write_text(
+        '[riftor]\nmodel = "openai/gpt-5.5"\n\n[providers]\nanthropic = "not-a-table"\n'
+    )
+    cfg = Config.load()  # must NOT raise
+    assert isinstance(cfg, Config)
+    assert cfg.providers == {}
+
+
+def test_malformed_toml_syntax_degrades_to_defaults(tmp_path, monkeypatch):
+    monkeypatch.setattr(cfgmod, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(cfgmod, "CONFIG_PATH", tmp_path / "config.toml")
+    (tmp_path / "config.toml").write_text("this is not valid toml = = =\n")
+    cfg = Config.load()  # must NOT raise
+    assert isinstance(cfg, Config)
+
+
+def test_empty_providers_emits_no_section(tmp_path, monkeypatch):
+    monkeypatch.setattr(cfgmod, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(cfgmod, "CONFIG_PATH", tmp_path / "config.toml")
+    Config(model="anthropic/claude-opus-4-8").save()
+    text = (tmp_path / "config.toml").read_text()
+    assert "[providers" not in text
