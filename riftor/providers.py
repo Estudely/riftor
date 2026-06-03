@@ -108,7 +108,7 @@ def fetch_models(provider_key: str, api_base: str | None, api_key: str | None) -
     with ``error`` set to a short human hint.
     """
     meta = PROVIDERS.get(provider_key)
-    curated = PROVIDER_DEFAULTS.get(provider_key, [])
+    curated = list(PROVIDER_DEFAULTS.get(provider_key, []))
     if meta is None:
         return FetchResult(models=curated, source="curated")
 

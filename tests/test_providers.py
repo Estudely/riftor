@@ -81,3 +81,9 @@ def test_fetch_network_error_falls_back_to_curated(monkeypatch):
     assert res.error is not None
     assert res.models == pv.PROVIDER_DEFAULTS["openai"]   # curated fallback
     assert res.source == "curated"
+
+
+def test_fetch_curated_result_is_a_copy_not_the_module_list():
+    res = pv.fetch_models("anthropic", None, None)
+    assert res.models == pv.PROVIDER_DEFAULTS["anthropic"]
+    assert res.models is not pv.PROVIDER_DEFAULTS["anthropic"]  # defensive copy
