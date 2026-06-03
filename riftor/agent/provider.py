@@ -15,16 +15,26 @@ import os
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, AsyncIterator
 
-os.environ.setdefault("LITELLM_LOG", "ERROR")
-
-import litellm  # noqa: E402
-
-litellm.telemetry = False
-litellm.drop_params = True
-litellm.suppress_debug_info = True
-
 if TYPE_CHECKING:
     from riftor.config import Config
+
+# litellm is heavy (~2.4s to import, pulling in openai/pydantic/etc.). It is only
+# needed on the first model call, so we import + configure it lazily — keeping app
+# startup fast. The cost then hides behind the network round-trip of that call.
+_litellm = None
+
+
+def _get_litellm():
+    global _litellm
+    if _litellm is None:
+        os.environ.setdefault("LITELLM_LOG", "ERROR")
+        import litellm
+
+        litellm.telemetry = False
+        litellm.drop_params = True
+        litellm.suppress_debug_info = True
+        _litellm = litellm
+    return _litellm
 
 
 @dataclass
@@ -138,10 +148,17 @@ class Provider:
             kwargs["api_base"] = self.config.api_base
         if self.config.api_key:
             kwargs["api_key"] = self.config.api_key
+        # Offline demo hook: return canned streamed text instead of calling a model.
+        # Only active when the env var is set (used by demo.tape / CI), so normal
+        # runs are unaffected.
+        demo = os.environ.get("RIFTOR_DEMO_RESPONSE")
+        if demo:
+            kwargs["mock_response"] = demo
         return kwargs
 
     async def _acompletion(self, **kwargs):
         """litellm.acompletion with classified retry/backoff for transient errors."""
+        litellm = _get_litellm()
         last: ProviderError | None = None
         for attempt in range(self.max_retries):
             try:
