@@ -5,9 +5,9 @@
 
 [![PyPI](https://img.shields.io/pypi/v/riftor)](https://pypi.org/project/riftor/)
 [![CI](https://github.com/Estudely/riftor/actions/workflows/ci.yml/badge.svg)](https://github.com/Estudely/riftor/actions/workflows/ci.yml)
-[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)](./LICENSE)
+[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)](https://github.com/Estudely/riftor/blob/main/LICENSE)
 
-![riftor demo](./demo.gif)
+![riftor demo](https://raw.githubusercontent.com/Estudely/riftor/main/demo.gif)
 
 riftor is a Python TUI pentest assistant: a full-screen [Textual](https://textual.textualize.io/)
 interface backed by [litellm](https://docs.litellm.ai/), organised around the
@@ -22,7 +22,7 @@ behaviour, with local [Ollama](https://ollama.com/) supported as an option.
 > import-export), RIFT stage tracking, per-engagement findings store (edit/tag/
 > dedup), CVSS reports in **md/html/json/sarif**, crash-safe sessions, input
 > history + command palette, headless one-shot mode, Docker, pytest + types in CI.
-> See [`todo.md`](./todo.md) for the roadmap and [`docs/`](./docs) for configuration.
+> See [`todo.md`](https://github.com/Estudely/riftor/blob/main/todo.md) for the roadmap and [`docs/`](https://github.com/Estudely/riftor/tree/main/docs) for configuration.
 
 ## Install
 ```bash
@@ -111,11 +111,11 @@ lives in `.riftor/` per working directory; sessions auto-save and resume.
 `Esc` cancels a running response. Dangerous tools (bash/write/edit) prompt for
 approval (with a **diff preview**); `rm -rf`/`dd` and friends are denied by
 default; every tool call is written to an audit log. See
-[`docs/configuration.md`](./docs/configuration.md) for all settings.
+[`docs/configuration.md`](https://github.com/Estudely/riftor/blob/main/docs/configuration.md) for all settings.
 
 ## Use responsibly
 riftor is for **authorized** security testing only. You are responsible for
 having explicit, written permission for any system you assess.
 
 ## License
-[GPL-3.0](./LICENSE).
+[GPL-3.0](https://github.com/Estudely/riftor/blob/main/LICENSE).
