@@ -40,6 +40,7 @@ riftor --model openai/gpt-4o           # override the model for this run
 riftor --workdir ./engagement          # set the engagement directory
 riftor --scope-file scope.txt          # preload scope targets
 riftor -p "enumerate 10.0.0.5"         # headless one-shot (also reads stdin)
+riftor --doctor                        # check which recon tools are installed
 ```
 
 On first launch riftor writes a config file and picks a default model from your
@@ -57,8 +58,11 @@ uv sync && uv run riftor
 docker build -t riftor .
 docker run -it --rm -e ANTHROPIC_API_KEY -v "$PWD:/work" riftor
 ```
-The image is minimal (no `nmap`/`httpx`/etc.). For full recon tooling, run riftor
-on a host that has the tools installed, or extend the image.
+The image is minimal (no `nmap`/`httpx`/etc.). For full recon tooling, build the
+bundled variant (`docker build --build-arg INSTALL_TOOLS=1 -t riftor:full .`), run
+riftor on a host that has the tools, or extend the image. Missing tools aren't
+fatal — the agent sees the failed command and adapts; run `/doctor` (or
+`riftor --doctor`) to see which tools are on `PATH` up front.
 
 ## Configure
 `~/.config/riftor/config.toml`:
@@ -104,6 +108,7 @@ lives in `.riftor/` per working directory; sessions auto-save and resume.
 | `/report [md\|html\|json\|sarif\|both\|all]` | write a report to `.riftor/reports/` |
 | `/timeline` · `/export` | engagement activity log · archive the engagement |
 | `/permissions` · `/audit` | review allow/deny rules · recent tool-call log |
+| `/doctor` | check which external recon tools (nmap/httpx/…) are installed |
 | `/sessions` · `/resume <id>` · `/new` | manage saved sessions |
 | `/config` · `/tools` · `/lore` · `/exit` | settings · tools · persona · quit |
 

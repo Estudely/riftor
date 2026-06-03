@@ -18,6 +18,10 @@ def main() -> None:
     parser.add_argument(
         "--config", action="store_true", help="print the config file path and exit"
     )
+    parser.add_argument(
+        "--doctor", action="store_true",
+        help="check which external recon tools (nmap/httpx/…) are installed, then exit",
+    )
     parser.add_argument("--model", help="override the model for this run")
     parser.add_argument("--api-key", dest="api_key", help="override the API key for this run")
     parser.add_argument("--workdir", help="engagement working directory (default: cwd)")
@@ -36,6 +40,12 @@ def main() -> None:
 
     if args.config:
         print(CONFIG_PATH)
+        return
+
+    if args.doctor:
+        from riftor.engagement.doctor import check_toolchain, render_plain
+
+        print(render_plain(check_toolchain()))
         return
 
     cfg = Config.load()

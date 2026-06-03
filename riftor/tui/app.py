@@ -53,7 +53,7 @@ _COMMANDS = [
     "/edit-finding", "/delete-finding", "/hosts", "/services", "/report",
     "/sessions", "/resume", "/new", "/theme", "/config", "/tools", "/permissions",
     "/lore", "/cost", "/retry", "/continue", "/compact", "/copy", "/show",
-    "/timeline", "/audit", "/export", "/exit",
+    "/timeline", "/audit", "/export", "/doctor", "/exit",
 ]
 
 HELP = """\
@@ -80,6 +80,7 @@ _Settings & sessions_
 - `/model [name]` — show or switch the model · `/theme [name]` (rift/void/fracture/singularity)
 - `/config` — settings panel · `/permissions` — review allow/deny rules
 - `/lore` — toggle the rift persona · `/audit` — recent tool-call audit log
+- `/doctor` — check which external recon tools (nmap/httpx/…) are installed
 - `/sessions` · `/resume <id>` · `/new` — manage saved sessions
 - `/tools` — list tools · `/exit` — quit (`Ctrl+C`)
 
@@ -99,6 +100,7 @@ _PALETTE_COMMANDS = [
     ("/timeline", "Timeline", "Engagement activity log"),
     ("/export", "Export engagement", "Archive the whole engagement"),
     ("/permissions", "Permissions", "Review allow/deny rules"),
+    ("/doctor", "Doctor", "Check installed recon tools"),
     ("/audit", "Audit log", "Recent tool-call audit entries"),
     ("/cost", "Cost", "Token + cost for this session"),
     ("/compact", "Compact context", "Shrink old tool output"),
@@ -213,9 +215,22 @@ class RiftorApp(App):
         warning = self.config.model_warning()
         if warning:
             self._note("⚠ " + warning)
+        self._toolchain_heads_up()
         if not self._resume_latest():
             self._note(
                 "rift online · set scope with /scope add <target> before tasking the agent"
+            )
+
+    def _toolchain_heads_up(self) -> None:
+        """One-line note if recon tools are missing — surfaced up front, not mid-task."""
+        from riftor.engagement.doctor import check_toolchain, summarize
+
+        s = summarize(check_toolchain())
+        if s["missing"]:
+            self._note(
+                f"⚠ {s['missing']}/{s['total']} recon tools not on PATH "
+                f"({', '.join(s['missing_names'][:4])}{'…' if s['missing'] > 4 else ''}) "
+                "· /doctor for details"
             )
 
     def _resume_latest(self) -> bool:
@@ -377,6 +392,7 @@ class RiftorApp(App):
             "/timeline": self._timeline_cmd,
             "/audit": self._audit_cmd,
             "/export": self._export_cmd,
+            "/doctor": self._doctor_cmd,
         }
         if cmd in ("/exit", "/quit"):
             self._save_session()
@@ -705,6 +721,11 @@ class RiftorApp(App):
             err = " ⚠" if e.get("is_error") else ""
             rows.append(f"`{when}` {flag} **{e.get('tool', '?')}** {e.get('preview', '')[:80]}{err}")
         self._markdown("**audit log** (recent)\n\n" + "\n".join(rows))
+
+    def _doctor_cmd(self) -> None:
+        from riftor.engagement.doctor import check_toolchain, render_markdown
+
+        self._markdown(render_markdown(check_toolchain()))
 
     def _export_cmd(self) -> None:
         import json

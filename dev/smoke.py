@@ -123,7 +123,7 @@ async def main() -> None:
         app.engagement.add_finding(title="Test finding", severity="high", host="10.0.0.1")
         for cmd in (
             "/findings", "/hosts", "/services", "/timeline", "/permissions",
-            "/cost", "/audit", "/scope dry", "/scope on",
+            "/cost", "/audit", "/doctor", "/scope dry", "/scope on",
         ):
             inp.value = cmd
             await pilot.press("enter")
