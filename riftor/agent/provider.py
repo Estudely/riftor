@@ -144,10 +144,11 @@ class Provider:
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
-        if self.config.api_base:
-            kwargs["api_base"] = self.config.api_base
-        if self.config.api_key:
-            kwargs["api_key"] = self.config.api_key
+        api_key, api_base = self.config.creds_for(self.config.model)
+        if api_base:
+            kwargs["api_base"] = api_base
+        if api_key:
+            kwargs["api_key"] = api_key
         # Offline demo hook: return canned streamed text instead of calling a model.
         # Only active when the env var is set (used by demo.tape / CI), so normal
         # runs are unaffected.
