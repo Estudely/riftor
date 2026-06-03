@@ -143,10 +143,11 @@ class RiftorApp(App):
         Binding("ctrl+end", "scroll_chat('end')", "Bottom", show=False),
     ]
 
-    def __init__(self, config: "Config", workdir: Path | None = None) -> None:
+    def __init__(self, config: "Config", workdir: Path | None = None, yolo: bool = False) -> None:
         super().__init__()
         self.config = config
         self.workdir = workdir or Path.cwd()
+        self.yolo = yolo
         self.context = Context(lore=config.lore)
         self.provider = Provider(config)
         self.tools = tools.all_tools()
@@ -174,7 +175,7 @@ class RiftorApp(App):
     def compose(self) -> ComposeResult:
         yield Banner(id="banner")
         yield VerticalScroll(id="chat")
-        yield StatusBar(self.config.model, lore=self.config.lore)
+        yield StatusBar(self.config.model, lore=self.config.lore, yolo=self.yolo)
         yield CommandDropdown(_COMMANDS, id="cmd-dropdown")
         yield Input(placeholder="task riftor — or /help", id="prompt")
 
@@ -254,6 +255,7 @@ class RiftorApp(App):
             self.engagement.scope_count(), self.engagement.enforce, self.engagement.dry_run
         )
         self.status.set_findings(self.engagement.findings_count())
+        self.status.set_yolo(self.yolo)
 
     def _context_window(self) -> int:
         for prefix, window in _CONTEXT_WINDOWS.items():
@@ -992,7 +994,7 @@ class RiftorApp(App):
             self.context.add_user(user_text)
             self._last_user_text = user_text
         self.status.set_busy(True)
-        budget = self.max_steps + extra_steps
+        budget = 10**9 if self.yolo else self.max_steps + extra_steps
         try:
             for step in range(budget):
                 self._save_session(complete=False)  # crash-safe checkpoint
@@ -1068,17 +1070,17 @@ class RiftorApp(App):
 
         # scope enforcement for target-touching tools (bash, webfetch)
         scope_warning: list[str] = []
-        if getattr(tool, "scope_sensitive", False):
+        if not self.yolo and getattr(tool, "scope_sensitive", False):
             probe = " ".join(str(v) for v in call.arguments.values())
             scope_warning = self.engagement.violations(probe)
 
         # dry-run: warn but don't block
-        if scope_warning and self.engagement.dry_run:
+        if not self.yolo and scope_warning and self.engagement.dry_run:
             self._note(f"⚠ dry-run: out of scope — {', '.join(scope_warning)} (allowed)")
             scope_warning = []
 
         # hard deny rules (e.g. bash rm -rf) — refuse without prompting
-        if self.permissions.is_denied(tool.name, preview):
+        if not self.yolo and self.permissions.is_denied(tool.name, preview):
             reason = "blocked by a deny rule"
             await self._show_tool_result(reason, is_error=True)
             self.context.add_tool_result(
@@ -1089,9 +1091,9 @@ class RiftorApp(App):
             self.audit.record(tool.name, preview, allowed=False)
             return
 
-        if scope_warning or self.permissions.needs_prompt(
+        if not self.yolo and (scope_warning or self.permissions.needs_prompt(
             tool.name, tool.requires_permission, preview
-        ):
+        )):
             detail = tool.confirm_detail(call.arguments, self.toolctx)
             decision = await self.push_screen_wait(
                 ConfirmScreen(tool.name, preview, scope_warning=scope_warning, detail=detail)

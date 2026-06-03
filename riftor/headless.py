@@ -28,6 +28,7 @@ def run_headless(
     *,
     prompt: str | None,
     scope_file: str | None = None,
+    yolo: bool = False,
 ) -> int:
     if not prompt:
         if not sys.stdin.isatty():
@@ -40,12 +41,12 @@ def run_headless(
         print(f"riftor: no API key for {cfg.model}; set {env}", file=sys.stderr)
         return 3
     try:
-        return asyncio.run(_run(cfg, workdir, prompt, scope_file))
+        return asyncio.run(_run(cfg, workdir, prompt, scope_file, yolo=yolo))
     except KeyboardInterrupt:
         return 130
 
 
-async def _run(cfg: Config, workdir: Path, prompt: str, scope_file: str | None) -> int:
+async def _run(cfg: Config, workdir: Path, prompt: str, scope_file: str | None, yolo: bool = False) -> int:
     context = Context(lore=cfg.lore)
     provider = Provider(cfg)
     engagement = Engagement(workdir)
@@ -62,7 +63,8 @@ async def _run(cfg: Config, workdir: Path, prompt: str, scope_file: str | None) 
     schemas = tools.schemas()
 
     context.add_user(prompt)
-    for _ in range(cfg.max_steps):
+    max_steps = 10**9 if yolo else cfg.max_steps
+    for _ in range(max_steps):
         context.repair()
         text_parts: list[str] = []
         turn = None
@@ -83,7 +85,7 @@ async def _run(cfg: Config, workdir: Path, prompt: str, scope_file: str | None) 
         if not turn.tool_calls:
             break
         for call in turn.tool_calls:
-            await _run_tool_headless(call, engagement, permissions, audit, toolctx, context)
+            await _run_tool_headless(call, engagement, permissions, audit, toolctx, context, yolo=yolo)
     print()  # trailing newline
     return 0
 
@@ -95,6 +97,7 @@ async def _run_tool_headless(
     audit: AuditLog,
     toolctx: ToolContext,
     context: Context,
+    yolo: bool = False,
 ) -> None:
     tool = tools.get(call.name)
     if tool is None:
@@ -103,7 +106,7 @@ async def _run_tool_headless(
     preview = tool.preview(call.arguments)
     print(f"\n  ⛏ {tool.name}  {preview}", file=sys.stderr)
 
-    if getattr(tool, "scope_sensitive", False):
+    if not yolo and getattr(tool, "scope_sensitive", False):
         violations = engagement.violations(" ".join(str(v) for v in call.arguments.values()))
         if violations:
             context.add_tool_result(
@@ -113,13 +116,13 @@ async def _run_tool_headless(
             audit.record(tool.name, preview, allowed=False)
             return
 
-    if permissions.is_denied(tool.name, preview):
+    if not yolo and permissions.is_denied(tool.name, preview):
         context.add_tool_result(call.id, "[blocked by policy] denied by a deny rule.")
         audit.record(tool.name, preview, allowed=False)
         return
 
     # No operator present: dangerous tools require a standing allow rule.
-    if tool.requires_permission and not permissions.is_allowed(tool.name, preview):
+    if not yolo and tool.requires_permission and not permissions.is_allowed(tool.name, preview):
         context.add_tool_result(
             call.id,
             "[denied: headless] This tool needs approval and no allow rule exists. "
