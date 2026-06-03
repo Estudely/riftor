@@ -17,7 +17,7 @@ spine is the **RIFT** methodology engine.
 - **License:** GPL-3.0
 - **RIFT:** real methodology engine *and* branding
 - **Lore:** subtle, toggleable (`/lore`); professional by default
-- **Theme:** void bg `#0a0a12`, rift glow `#a855f7` -> `#22d3ee`, danger magenta
+- **Theme:** `#08060f` bg, rift glow `#a855f7` → `#22d3ee`, danger magenta
 
 ## The RIFT methodology engine
 | Stage | Meaning | Tools that live here |
@@ -46,12 +46,11 @@ The agent tracks the current stage; the TUI shows `[R·I·F·T]` in the status b
 - [x] Textual app shell
 - [x] Rift theme (themes/rift.tcss)
 - [x] Widgets: chat log, input, `[R·I·F·T]` status bar
-- [x] litellm streaming provider wrapper (default: local Ollama)
+- [x] litellm streaming provider wrapper (cloud-first with Anthropic)
 - [x] Slash commands: /help /clear /model /lore /exit
 - [x] README with run instructions
 - [x] Verify `riftor` launches and streams (headless smoke test green;
-      litellm→Ollama path confirmed — needs a usable model: a free local
-      Ollama pull, an Ollama subscription, or a cloud API key)
+      cloud-first streaming verified live on Anthropic)
 > Goal: prove TUI + provider + streaming end-to-end. No tools yet. **Done.**
 
 ### Phase 2 — Agent loop + core tools  ✅
@@ -109,8 +108,8 @@ The agent tracks the current stage; the TUI shows `[R·I·F·T]` in the status b
 - uv 0.11.14, Python 3.12.3 at /usr/bin/python3
 - **Cloud-first**: default model `anthropic/claude-sonnet-4-6`; key in local
   config (`~/.config/riftor/config.toml`, perms 600, outside the repo)
-- Local Ollama is a supported fallback, not the identity (`kimi-k2.6:cloud`
-  present locally but is subscription-gated)
+- Latest release: **0.0.4** (auto-published via trusted publishing + auto GitHub Release)
+- Local Ollama is a supported fallback, not the identity
 - Reference reads: NousResearch/hermes-agent (Python analog), earendil-works/pi (minimal core)
 
 ## Reference layout
@@ -119,14 +118,28 @@ riftor/
   __main__.py            entry point: `riftor`
   config.py              ~/.config/riftor/config.toml
   tui/
-    app.py               Textual App
-    widgets.py           chat log, input, [R·I·F·T] status bar
-    themes/rift.tcss     void bg + violet->cyan glow
+    app.py               Textual App (agent loop, commands, scope enforcement)
+    widgets.py           Banner + [R·I·F·T] status bar (palette-driven)
+    theme.py             4 themes: rift / void / fracture / singularity
+    config_screen.py     /config settings modal
+    themes/rift.tcss     $variable-driven stylesheet
   agent/
     provider.py          litellm wrapper: stream + stream_turn (tool calls)
-    context.py           conversation history (+ tool messages)
+    context.py           conversation history (+ repair, dump/load)
+    session.py           JSON session save/load/resume per workdir
     prompts/system.md    offensive persona + RIFT methodology + tools
-  tools/                 base + core + engagement (scope_list/record_*/set_stage)  ✅
-  safety/                audit log + permission modal (+ scope warning)  ✅
-  engagement/            scope.py + state.py (sqlite) + Engagement facade  ✅
+  tools/
+    base.py              Tool ABC, ToolResult, ToolContext
+    core.py              bash / read / write / edit / grep / glob / webfetch
+    engagement.py        scope_list / record_* / set_stage / import_scan / generate_report
+  safety/
+    permissions.py       permission state + ConfirmScreen modal (scope warning)
+    audit.py             JSONL audit log
+  engagement/
+    scope.py             IP/CIDR/domain/wildcard matching + host extraction
+    state.py             sqlite store (scope/hosts/services/findings/meta)
+    cvss.py              CVSS v3.1 base score + severity bands
+    report.py            markdown + self-contained HTML report
+    parsers.py           parse nmap/httpx/nuclei output → services/findings
+demo.tape                VHS script → demo.gif (auto-rendered by CI)
 ```

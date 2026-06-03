@@ -16,9 +16,9 @@ interface backed by [litellm](https://docs.litellm.ai/), organised around the
 It's **cloud-first** (Anthropic, OpenAI, OpenRouter, …) for the strongest agent
 behaviour, with local [Ollama](https://ollama.com/) supported as an option.
 
-> **Status: early (Phase 4a).** Working agent: streaming chat, tool use with
-> permission prompts + audit log, **scope enforcement**, RIFT stage tracking, a
-> per-engagement findings store, and **reports** (markdown + HTML with CVSS).
+> **Status:** fully featured (Phase 4–5). Streaming agent, tool use + permissions,
+> **scope guardrail**, RIFT stage tracking, per-engagement findings store, CVSS
+> reports, session resume, live themes, `import_scan`, Docker, and CI.
 > See [`todo.md`](./todo.md) for the roadmap.
 
 ## Install
