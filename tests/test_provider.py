@@ -56,3 +56,14 @@ async def test_mock_response_streams_offline(monkeypatch):
 
 def Provider_for_test() -> "prov.Provider":
     return prov.Provider(Config(model="anthropic/claude-sonnet-4-6", api_key="sk-demo"))
+
+
+def test_kwargs_uses_provider_table_creds(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    from riftor.config import ProviderCreds
+    cfg = Config(model="anthropic/claude-opus-4-8")
+    cfg.providers = {"anthropic": ProviderCreds(api_key="sk-table",
+                                                api_base="https://table/")}
+    kw = prov.Provider(cfg)._kwargs([{"role": "user", "content": "hi"}])
+    assert kw["api_key"] == "sk-table"
+    assert kw["api_base"] == "https://table/"

@@ -35,14 +35,16 @@ async def test_config_modal_renders_all_fields():
             screen = app.screen
             # every field is present and addressable by its stable id
             for fid, kind in [
-                ("#cfg-model", Input), ("#cfg-key", Input), ("#cfg-temp", Input),
-                ("#cfg-maxtok", Input), ("#cfg-theme", Select), ("#cfg-lore", Switch),
+                ("#cfg-provider", Select), ("#cfg-model-select", Select),
+                ("#cfg-model", Input), ("#cfg-base", Input), ("#cfg-key", Input),
+                ("#cfg-temp", Input), ("#cfg-maxtok", Input),
+                ("#cfg-theme", Select), ("#cfg-lore", Switch),
             ]:
                 assert screen.query_one(fid, kind) is not None, fid
             # three grouped section headers (MODEL / GENERATION / APPEARANCE)
             assert len(list(screen.query(".config-section"))) == 3
             # aligned label column: one .field-label per field row
-            assert len(list(screen.query(".field-label"))) == 6
+            assert len(list(screen.query(".field-label"))) == 10
             await pilot.press("escape")
             await pilot.pause()
 
@@ -104,3 +106,113 @@ async def test_config_modal_saves_changes():
             await pilot.pause()
             assert app.config.temperature == 0.7
             assert app.config.max_tokens == 4096
+
+
+@pytest.mark.asyncio
+async def test_provider_pick_prefills_base_and_models():
+    from textual.widgets import Select
+    with tempfile.TemporaryDirectory() as d:
+        _patch_paths(Path(d))
+        cfg = Config(model="anthropic/claude-opus-4-8")
+        app = RiftorApp(cfg, workdir=Path(d))
+        async with app.run_test() as pilot:
+            app.query_one("#prompt", Input).value = "/config"
+            await pilot.press("enter")
+            await pilot.pause()
+            screen = app.screen
+            for fid in ("#cfg-provider", "#cfg-model-select", "#cfg-base", "#cfg-fetch"):
+                assert screen.query_one(fid) is not None, fid
+            screen.query_one("#cfg-provider", Select).value = "openai"
+            await pilot.pause()
+            assert screen.query_one("#cfg-base", Input).value == "https://api.openai.com/v1"
+            # public-API check: gpt-5.5 is a selectable option after picking openai
+            sel = screen.query_one("#cfg-model-select", Select)
+            sel.value = "gpt-5.5"
+            await pilot.pause()
+            assert sel.value == "gpt-5.5"
+            await pilot.press("escape")
+            await pilot.pause()
+
+
+@pytest.mark.asyncio
+async def test_save_assembles_prefixed_model_and_writes_key():
+    from textual.widgets import Select
+    with tempfile.TemporaryDirectory() as d:
+        _patch_paths(Path(d))
+        cfg = Config(model="anthropic/claude-opus-4-8")
+        app = RiftorApp(cfg, workdir=Path(d))
+        async with app.run_test() as pilot:
+            app.query_one("#prompt", Input).value = "/config"
+            await pilot.press("enter")
+            await pilot.pause()
+            screen = app.screen
+            screen.query_one("#cfg-provider", Select).value = "openai"
+            await pilot.pause()
+            screen.query_one("#cfg-model-select", Select).value = "gpt-5.5"
+            screen.query_one("#cfg-key", Input).value = "sk-openai-test"
+            screen.query_one("#save").press()
+            await pilot.pause()
+            assert app.config.model == "openai/gpt-5.5"
+            assert app.config.providers["openai"].api_key == "sk-openai-test"
+
+
+@pytest.mark.asyncio
+async def test_config_opens_with_non_curated_model():
+    with tempfile.TemporaryDirectory() as d:
+        _patch_paths(Path(d))
+        # a model id NOT in PROVIDER_DEFAULTS — must not crash on open
+        cfg = Config(model="anthropic/claude-some-old-model-2024")
+        app = RiftorApp(cfg, workdir=Path(d))
+        async with app.run_test() as pilot:
+            app.query_one("#prompt", Input).value = "/config"
+            await pilot.press("enter")
+            await pilot.pause()
+            assert isinstance(app.screen, ConfigScreen)
+            from textual.widgets import Select
+            assert app.screen.query_one("#cfg-model-select", Select) is not None
+            await pilot.press("escape")
+            await pilot.pause()
+
+
+@pytest.mark.asyncio
+async def test_fetch_button_repopulates_models(monkeypatch):
+    from textual.widgets import Select
+    import riftor.tui.config_screen as cs
+    fake = cs.FetchResult(models=["m-one", "m-two"], source="merged", error=None)
+    monkeypatch.setattr(cs, "fetch_models", lambda *a, **k: fake)
+    with tempfile.TemporaryDirectory() as d:
+        _patch_paths(Path(d))
+        cfg = Config(model="openai/gpt-5.5")
+        app = RiftorApp(cfg, workdir=Path(d))
+        async with app.run_test() as pilot:
+            app.query_one("#prompt", Input).value = "/config"
+            await pilot.press("enter")
+            await pilot.pause()
+            screen = app.screen
+            screen.query_one("#cfg-fetch", Button).press()
+            await pilot.pause()
+            await pilot.pause()
+            sel = screen.query_one("#cfg-model-select", Select)
+            sel.value = "m-two"            # only legal if the fetched option was applied
+            await pilot.pause()
+            assert sel.value == "m-two"
+
+
+@pytest.mark.asyncio
+async def test_openrouter_model_no_duplicate_option_on_open():
+    with tempfile.TemporaryDirectory() as d:
+        _patch_paths(Path(d))
+        cfg = Config(model="openrouter/auto")
+        app = RiftorApp(cfg, workdir=Path(d))
+        async with app.run_test() as pilot:
+            app.query_one("#prompt", Input).value = "/config"
+            await pilot.press("enter")
+            await pilot.pause()
+            sel = app.screen.query_one("#cfg-model-select", Select)
+            # _options is a list of (prompt, value) tuples; extract string values only
+            values = [v for _, v in sel._options if isinstance(v, str)]
+            assert "auto" not in values, "stripped 'auto' must not appear as a duplicate"
+            assert "openrouter/auto" in values, "full slug must be present"
+            assert sel.value == "openrouter/auto", "full slug must be selected"
+            await pilot.press("escape")
+            await pilot.pause()

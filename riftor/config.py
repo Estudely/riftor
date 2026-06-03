@@ -16,6 +16,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, field_validator
 
+from riftor.providers import PROVIDERS, provider_key_for_model
+
 
 def _config_dir() -> Path:
     base = os.environ.get("XDG_CONFIG_HOME")
@@ -36,17 +38,12 @@ _KNOWN_PROVIDERS = (
     "deepseek/", "xai/", "perplexity/", "fireworks_ai/", "huggingface/", "replicate/",
 )
 
-# Env var per provider, for first-run key detection / graceful onboarding.
-_PROVIDER_ENV = {
-    "anthropic/": "ANTHROPIC_API_KEY",
-    "openai/": "OPENAI_API_KEY",
-    "openrouter/": "OPENROUTER_API_KEY",
-    "gemini/": "GEMINI_API_KEY",
-    "groq/": "GROQ_API_KEY",
-    "mistral/": "MISTRAL_API_KEY",
-    "deepseek/": "DEEPSEEK_API_KEY",
-    "xai/": "XAI_API_KEY",
-}
+
+class ProviderCreds(BaseModel):
+    """Per-provider credentials, stored in the [providers.<key>] TOML table."""
+
+    api_key: str | None = None
+    api_base: str | None = None
 
 
 class Config(BaseModel):
@@ -67,6 +64,8 @@ class Config(BaseModel):
     rate_limit_per_min: int = 0  # 0 = unlimited
     # Tracks whether we've shown the first-run onboarding.
     onboarded: bool = False
+    # Per-provider credentials, keyed by provider key (see riftor.providers.PROVIDERS).
+    providers: dict[str, ProviderCreds] = {}
 
     @field_validator("model")
     @classmethod
@@ -86,16 +85,21 @@ class Config(BaseModel):
             )
         return None
 
-    def provider_env(self) -> str | None:
-        """The env var name expected for this model's provider, if known."""
-        for prefix, env in _PROVIDER_ENV.items():
-            if self.model.startswith(prefix):
-                return env
+    def provider_env(self, model: str | None = None) -> str | None:
+        """The env var name expected for ``model``'s provider (active model if None)."""
+        target = model if model is not None else self.model
+        for meta in PROVIDERS.values():
+            if meta.prefix and meta.env and target.startswith(meta.prefix):
+                return meta.env
         return None
 
     def has_credentials(self) -> bool:
         """True if a key is configured (explicit, env, or local Ollama)."""
         if self.api_key:
+            return True
+        key_name = provider_key_for_model(self.model)
+        entry = self.providers.get(key_name)
+        if entry and entry.api_key:
             return True
         if self.model.startswith(("ollama/", "ollama_chat/")):
             return True
@@ -105,12 +109,40 @@ class Config(BaseModel):
         # Unknown provider: don't block; litellm may resolve it from its own env.
         return self.provider_env() is None
 
+    def creds_for(self, model: str) -> tuple[str | None, str | None]:
+        """Resolve (api_key, api_base) for ``model``.
+
+        Precedence: per-provider table → legacy global fields → env var (key
+        only) → (None, None). Model-keyed so a future multi-model feature can
+        resolve each model's creds without touching this layer.
+        """
+        # NOTE: slash-routed OpenRouter ids (e.g. "openai/gpt-5.5") are keyed to their
+        # underlying provider ("openai"), not "openrouter". Resolved in the picker/store
+        # layer (it prefixes/stores under the chosen provider); see Task 6/7.
+        key_name = provider_key_for_model(model)
+        entry = self.providers.get(key_name)
+        if entry and (entry.api_key or entry.api_base):
+            return entry.api_key, entry.api_base
+        if self.api_key or self.api_base:
+            return self.api_key, self.api_base
+        env = self.provider_env(model)
+        if env and os.environ.get(env):
+            return os.environ[env], None
+        return None, None
+
     @classmethod
     def load(cls) -> "Config":
         if CONFIG_PATH.exists():
-            with CONFIG_PATH.open("rb") as fh:
-                data = tomllib.load(fh)
-            return cls(**data.get("riftor", data))
+            try:
+                with CONFIG_PATH.open("rb") as fh:
+                    data = tomllib.load(fh)
+                section = dict(data.get("riftor", data))
+                section.pop("providers", None)  # never let a stray key shadow the table
+                providers = data.get("providers", {})
+                return cls(**section, providers=providers)
+            except Exception:  # noqa: BLE001 — a bad config must never crash startup
+                # Fall through to detected defaults rather than failing to launch.
+                return cls.detect_defaults()
         cfg = cls.detect_defaults()
         cfg.save()
         return cfg
@@ -121,7 +153,7 @@ class Config(BaseModel):
         if os.environ.get("ANTHROPIC_API_KEY"):
             return cls(model="anthropic/claude-sonnet-4-6")
         if os.environ.get("OPENAI_API_KEY"):
-            return cls(model="openai/gpt-4o")
+            return cls(model="openai/gpt-5.5")
         if os.environ.get("OPENROUTER_API_KEY"):
             return cls(model="openrouter/auto")
         # Optional local fallback if an Ollama server is already running.
@@ -171,6 +203,15 @@ class Config(BaseModel):
             f"rate_limit_per_min = {self.rate_limit_per_min}",
             f"onboarded = {str(self.onboarded).lower()}",
         ]
+        for key, creds in self.providers.items():
+            if not (creds.api_key or creds.api_base):
+                continue
+            lines.append("")
+            lines.append(f"[providers.{key}]")
+            if creds.api_key:
+                lines.append(f'api_key = "{creds.api_key}"')
+            if creds.api_base:
+                lines.append(f'api_base = "{creds.api_base}"')
         return "\n".join(lines) + "\n"
 
 
