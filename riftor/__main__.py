@@ -34,6 +34,12 @@ def main() -> None:
         "--headless", action="store_true",
         help="non-interactive mode; implied by --prompt. Prints the result and exits.",
     )
+    parser.add_argument(
+        "--i-know-what-i-am-doing-give-me-full-access",
+        action="store_true",
+        dest="yolo",
+        help="bypass all permission prompts, deny rules, scope enforcement, and step limits",
+    )
     args = parser.parse_args()
 
     from riftor.config import CONFIG_PATH, Config
@@ -59,7 +65,7 @@ def main() -> None:
     if args.prompt or args.headless:
         from riftor.headless import run_headless
 
-        code = run_headless(cfg, workdir, prompt=args.prompt, scope_file=args.scope_file)
+        code = run_headless(cfg, workdir, prompt=args.prompt, scope_file=args.scope_file, yolo=args.yolo)
         sys.exit(code)
 
     # Graceful first-run: if no credentials are configured, guide the operator.
@@ -68,7 +74,7 @@ def main() -> None:
 
     from riftor.tui.app import RiftorApp
 
-    app = RiftorApp(cfg, workdir=workdir)
+    app = RiftorApp(cfg, workdir=workdir, yolo=args.yolo)
     if args.scope_file:
         _preload_scope(app, args.scope_file)
     app.run()

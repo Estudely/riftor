@@ -24,11 +24,12 @@ class Banner(Static):
 
 
 class StatusBar(Static):
-    def __init__(self, model: str, stage: str = "R", lore: bool = True) -> None:
+    def __init__(self, model: str, stage: str = "R", lore: bool = True, yolo: bool = False) -> None:
         super().__init__()
         self.model = model
         self.stage = stage
         self.lore = lore
+        self.yolo = yolo
         self.busy = False
         self.scope_count = 0
         self.enforce = True
@@ -51,6 +52,10 @@ class StatusBar(Static):
 
     def set_lore(self, lore: bool) -> None:
         self.lore = lore
+        self.refresh_bar()
+
+    def set_yolo(self, yolo: bool) -> None:
+        self.yolo = yolo
         self.refresh_bar()
 
     def set_stage(self, stage: str) -> None:
@@ -111,6 +116,8 @@ class StatusBar(Static):
         t.append(self.model, style=p["muted"])
         t.append("   lore:", style=p["dim"])
         t.append("on" if self.lore else "off", style=p["muted"])
+        if self.yolo:
+            t.append("   ⚡ yolo", style=f"bold {p['danger']}")
         if self.busy:
             t.append("   ⟳ opening rift…", style=p["cyan"])
         self.update(t)
