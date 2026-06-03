@@ -6,6 +6,9 @@ name: demo
 on:
   workflow_dispatch:
   push:
+    # Only on branch pushes to main — NOT on tags. A tag checkout is a detached
+    # HEAD, so the "commit demo.gif back" step has no branch to push to.
+    branches: [main]
     paths:
       - "demo.tape"
       - ".github/workflows/demo.yml"
@@ -47,12 +50,20 @@ jobs:
           vhs demo.tape
       - name: Commit demo.gif if changed
         run: |
-          if [ -n "$(git status --porcelain demo.gif)" ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add demo.gif
-            git commit -m "chore: regenerate demo.gif [skip ci]"
-            git push
-          else
+          set -euo pipefail
+          if [ -z "$(git status --porcelain demo.gif)" ]; then
             echo "demo.gif unchanged"
+            exit 0
           fi
+          # Resolve the branch to push to. On a tag/detached checkout there is
+          # none — skip rather than fail (the workflow shouldn't run there anyway).
+          BRANCH="${GITHUB_REF_NAME}"
+          if [ "${GITHUB_REF_TYPE}" != "branch" ]; then
+            echo "not on a branch (ref_type=${GITHUB_REF_TYPE}); skipping commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add demo.gif
+          git commit -m "chore: regenerate demo.gif [skip ci]"
+          git push origin "HEAD:${BRANCH}"
