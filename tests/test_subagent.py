@@ -276,18 +276,78 @@ def test_statusbar_has_chakla_usage_setter():
 
 def test_config_screen_result_keys_persist():
     # Simulate the dict ConfigScreen.dismiss returns, then apply it like _open_config.
+    from riftor.config import ProviderCreds
     cfg = Config()
     result = {
         "model": cfg.model, "provider": "anthropic", "api_base": None,
         "temperature": 0.3, "max_tokens": 2048, "theme": "rift", "lore": True,
         "chakla_model": "anthropic/claude-haiku-4-5-20251001",
+        "chakla_provider": "anthropic", "api_key": "sk-anth",
         "label_main": "Hawk", "label_worker": "Finch",
     }
-    cfg.chakla_model = result["chakla_model"]
+    # Mirror _open_config: persist worker model + main provider creds.
+    cfg.chakla_model = result.get("chakla_model", cfg.chakla_model)
     cfg.label_main = result["label_main"]
     cfg.label_worker = result["label_worker"]
+    provider = result.get("provider")
+    if provider:
+        entry = cfg.providers.get(provider) or ProviderCreds()
+        if result.get("api_base") is not None:
+            entry.api_base = result["api_base"]
+        if result.get("api_key"):
+            entry.api_key = result["api_key"]
+        if entry.api_key or entry.api_base:
+            cfg.providers[provider] = entry
+    # Worker creds block (worker provider == main here, so main block covered it).
+    w_provider = result.get("chakla_provider")
+    if w_provider and w_provider != provider:
+        w_entry = cfg.providers.get(w_provider) or ProviderCreds()
+        if result.get("api_base") is not None:
+            w_entry.api_base = result["api_base"]
+        if result.get("api_key"):
+            w_entry.api_key = result["api_key"]
+        if w_entry.api_key or w_entry.api_base:
+            cfg.providers[w_provider] = w_entry
+
     assert cfg.label_main == "Hawk"
     assert 'label_main = "Hawk"' in cfg._to_toml()
+    assert cfg.chakla_model == "anthropic/claude-haiku-4-5-20251001"
+    # The worker model's creds resolve from the stored provider table.
+    assert cfg.creds_for(cfg.chakla_model)[0] == "sk-anth"
+
+
+def test_worker_picker_creds_resolve_for_different_provider():
+    # Main model on anthropic, worker pointed at a DIFFERENT provider (openai):
+    # the worker provider gets the shared key stored and creds_for resolves it.
+    from riftor.config import ProviderCreds
+    cfg = Config(model="anthropic/claude-sonnet-4-6")
+    result = {
+        "model": "anthropic/claude-sonnet-4-6", "provider": "anthropic",
+        "api_base": None, "api_key": "sk-openai-worker",
+        "chakla_model": "openai/gpt-5.5-mini", "chakla_provider": "openai",
+    }
+    cfg.chakla_model = result.get("chakla_model", cfg.chakla_model)
+    provider = result.get("provider")
+    if provider:
+        entry = cfg.providers.get(provider) or ProviderCreds()
+        if result.get("api_base") is not None:
+            entry.api_base = result["api_base"]
+        if result.get("api_key"):
+            entry.api_key = result["api_key"]
+        if entry.api_key or entry.api_base:
+            cfg.providers[provider] = entry
+    w_provider = result.get("chakla_provider")
+    if w_provider and w_provider != provider:
+        w_entry = cfg.providers.get(w_provider) or ProviderCreds()
+        if result.get("api_base") is not None:
+            w_entry.api_base = result["api_base"]
+        if result.get("api_key"):
+            w_entry.api_key = result["api_key"]
+        if w_entry.api_key or w_entry.api_base:
+            cfg.providers[w_provider] = w_entry
+
+    assert "openai" in cfg.providers
+    assert cfg.creds_for(cfg.chakla_model)[0] == "sk-openai-worker"
 
 
 def test_system_prompt_mentions_dispatch():

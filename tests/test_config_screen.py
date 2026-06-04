@@ -38,15 +38,17 @@ async def test_config_modal_renders_all_fields():
                 ("#cfg-provider", Select), ("#cfg-model-select", Select),
                 ("#cfg-model", Input), ("#cfg-base", Input), ("#cfg-key", Input),
                 ("#cfg-temp", Input), ("#cfg-maxtok", Input),
-                ("#cfg-chakla-model", Input), ("#cfg-label-main", Input),
-                ("#cfg-label-worker", Input),
+                ("#cfg-chakla-provider", Select), ("#cfg-chakla-model-select", Select),
+                ("#cfg-chakla-custom", Input),
+                ("#cfg-label-main", Input), ("#cfg-label-worker", Input),
                 ("#cfg-theme", Select), ("#cfg-lore", Switch),
             ]:
                 assert screen.query_one(fid, kind) is not None, fid
             # four grouped section headers (MODEL / GENERATION / WORKERS / APPEARANCE)
             assert len(list(screen.query(".config-section"))) == 4
-            # aligned label column: one .field-label per field row
-            assert len(list(screen.query(".field-label"))) == 13
+            # aligned label column: one .field-label per field row. WORKERS now has
+            # 3 picker rows + 2 label rows (was 1 plain input + 2 labels) => +2.
+            assert len(list(screen.query(".field-label"))) == 15
             await pilot.press("escape")
             await pilot.pause()
 
