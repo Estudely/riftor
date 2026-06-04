@@ -66,9 +66,12 @@ class Config(BaseModel):
     onboarded: bool = False
     # Per-provider credentials, keyed by provider key (see riftor.providers.PROVIDERS).
     providers: dict[str, ProviderCreds] = {}
-    # Subagents (Baaj orchestrator → Chakla workers). chakla_model is the cheap
-    # worker model; the labels are renameable terminology surfaced in the UI.
-    chakla_model: str = "anthropic/claude-haiku-4-5-20251001"
+    # Subagents (Baaj orchestrator → Chakla workers). The labels are renameable
+    # terminology surfaced in the UI.
+    # chakla_model is the worker model. Empty => reuse the main model (cfg.model),
+    # which is always credentialed. Set it explicitly (via /config WORKERS) for a
+    # cheaper/different worker — its provider's creds must be configured.
+    chakla_model: str = ""
     chakla_max_workers: int = 5
     chakla_max_steps: int = 8
     chakla_timeout_s: int = 300

@@ -6,7 +6,7 @@ import asyncio
 from riftor import tools as tools_mod
 from riftor.agent.provider import Provider, ToolCall
 from riftor.agent.subagent import ChaklaResult, run_chakla, _run_chakla_tool, worker_schemas
-from riftor.config import Config
+from riftor.config import Config, ProviderCreds
 from riftor.safety.audit import AuditLog
 from riftor.safety.permissions import Permissions
 from riftor.terminology import terminology
@@ -16,7 +16,7 @@ from riftor.tools.subagent import DispatchChaklaTool
 
 def test_config_has_chakla_defaults():
     cfg = Config()
-    assert cfg.chakla_model == "anthropic/claude-haiku-4-5-20251001"
+    assert cfg.chakla_model == ""
     assert cfg.chakla_max_workers == 5
     assert cfg.chakla_max_steps == 8
     assert cfg.chakla_timeout_s == 300
@@ -61,7 +61,7 @@ def test_toolcontext_new_fields_default_to_none(tmp_workdir, engagement):
 
 
 def _worker_provider(cfg: Config) -> Provider:
-    return Provider(cfg.model_copy(update={"model": cfg.chakla_model}))
+    return Provider(cfg.model_copy(update={"model": cfg.chakla_model or cfg.model}))
 
 
 async def _run_one(task, *, cfg, engagement, grant, yolo=False, monkeypatch_env):
@@ -189,7 +189,7 @@ def test_dispatch_requires_config(tmp_workdir, engagement):
 
 def test_dispatch_runs_workers_and_aggregates(tmp_workdir, engagement, monkeypatch):
     monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "worker done: nothing notable")
-    cfg = Config()
+    cfg = Config(api_key="test-key")  # blank worker reuses main model; needs creds
     tool = DispatchChaklaTool()
     ctx = tools_mod.ToolContext(
         workdir=tmp_workdir, engagement=engagement, config=cfg,
@@ -204,7 +204,7 @@ def test_dispatch_runs_workers_and_aggregates(tmp_workdir, engagement, monkeypat
 
 def test_dispatch_clamps_to_max_workers(tmp_workdir, engagement, monkeypatch):
     monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "ok")
-    cfg = Config(chakla_max_workers=2)
+    cfg = Config(chakla_max_workers=2, api_key="test-key")
     tool = DispatchChaklaTool()
     ctx = tools_mod.ToolContext(
         workdir=tmp_workdir, engagement=engagement, config=cfg,
@@ -224,7 +224,7 @@ def test_dispatch_tool_is_registered():
 
 def test_dispatch_timeout_is_reported(tmp_workdir, engagement, monkeypatch):
     monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "ok")
-    cfg = Config(chakla_timeout_s=1)
+    cfg = Config(chakla_timeout_s=1, api_key="test-key")
     tool = DispatchChaklaTool()
     ctx = tools_mod.ToolContext(
         workdir=tmp_workdir, engagement=engagement, config=cfg,
@@ -335,3 +335,53 @@ def test_worker_standing_allow_rule_still_binds(tmp_workdir, engagement):
                          yolo=False, db_lock=asyncio.Lock(), grant=set())
     )
     assert "[denied]" not in content  # standing allow rule authorizes it
+
+
+def test_empty_chakla_model_reuses_main():
+    cfg = Config(model="deepseek/deepseek-v4-pro", chakla_model="")
+    assert (cfg.chakla_model or cfg.model) == "deepseek/deepseek-v4-pro"
+
+
+def test_dispatch_refuses_explicit_worker_without_creds(tmp_workdir, engagement, monkeypatch):
+    # Reproduce the reported bug: deepseek main (with key), explicit anthropic
+    # worker, NO anthropic creds anywhere → must refuse clearly, not 401.
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "ok")
+    cfg = Config(model="deepseek/deepseek-v4-pro",
+                 chakla_model="anthropic/claude-haiku-4-5-20251001")
+    cfg.providers["deepseek"] = ProviderCreds(api_key="sk-deepseek-xxx")
+    ctx = tools_mod.ToolContext(
+        workdir=tmp_workdir, engagement=engagement, config=cfg,
+        permissions=Permissions(), audit=AuditLog(),
+    )
+    res = asyncio.run(DispatchChaklaTool().execute({"tasks": ["echo hi"], "tools": []}, ctx))
+    assert res.is_error
+    assert "no credentials for worker model" in res.content
+    assert "anthropic/claude-haiku" in res.content
+    assert "reuse the main model" in res.content
+
+
+def test_dispatch_blank_worker_reuses_main_creds(tmp_workdir, engagement, monkeypatch):
+    # Same deepseek setup but blank chakla_model → reuses deepseek (credentialed) →
+    # NO creds error (this is the out-of-box fix).
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "worker done")
+    cfg = Config(model="deepseek/deepseek-v4-pro", chakla_model="")
+    cfg.providers["deepseek"] = ProviderCreds(api_key="sk-deepseek-xxx")
+    ctx = tools_mod.ToolContext(
+        workdir=tmp_workdir, engagement=engagement, config=cfg,
+        permissions=Permissions(), audit=AuditLog(),
+    )
+    res = asyncio.run(DispatchChaklaTool().execute({"tasks": ["recon"], "tools": []}, ctx))
+    assert "no credentials for worker model" not in res.content
+
+
+def test_dispatch_ollama_worker_needs_no_key(tmp_workdir, engagement, monkeypatch):
+    monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "ok")
+    cfg = Config(model="ollama_chat/llama3", chakla_model="ollama_chat/llama3")
+    ctx = tools_mod.ToolContext(
+        workdir=tmp_workdir, engagement=engagement, config=cfg,
+        permissions=Permissions(), audit=AuditLog(),
+    )
+    res = asyncio.run(DispatchChaklaTool().execute({"tasks": ["x"], "tools": []}, ctx))
+    assert "no credentials for worker model" not in res.content
