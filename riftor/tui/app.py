@@ -275,6 +275,7 @@ class RiftorApp(App):
 
     def _refresh_usage(self) -> None:
         self.status.set_usage(self.usage.total_tokens, self.usage.cost)
+        self.status.set_chakla_usage(self.chakla_usage.total_tokens, self.chakla_usage.cost)
         pct = int(self.context.estimated_tokens() / self._context_window() * 100)
         self.status.set_context(min(pct, 999))
 

@@ -258,3 +258,17 @@ def test_headless_toolctx_carries_config(tmp_workdir):
     assert ctx.config is cfg
     assert ctx.permissions is not None
     assert ctx.audit is not None
+
+
+def test_statusbar_has_chakla_usage_setter():
+    from riftor.tui.widgets import StatusBar
+    bar = StatusBar("anthropic/claude-sonnet-4-6")
+    # refresh_bar() raises NoActiveAppError when the widget is not mounted;
+    # the setter must set the fields BEFORE calling refresh_bar so the values
+    # are visible even if the render fails.
+    try:
+        bar.set_chakla_usage(1500, 0.012)
+    except Exception:
+        pass  # NoActiveAppError is expected on an unmounted widget
+    assert bar.chakla_tokens == 1500
+    assert bar.chakla_cost == 0.012

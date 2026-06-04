@@ -38,6 +38,8 @@ class StatusBar(Static):
         self.tokens = 0
         self.cost = 0.0
         self.ctx_pct = 0
+        self.chakla_tokens = 0
+        self.chakla_cost = 0.0
 
     def on_mount(self) -> None:
         self.refresh_bar()
@@ -82,6 +84,11 @@ class StatusBar(Static):
         self.ctx_pct = pct
         self.refresh_bar()
 
+    def set_chakla_usage(self, tokens: int, cost: float) -> None:
+        self.chakla_tokens = tokens
+        self.chakla_cost = cost
+        self.refresh_bar()
+
     def refresh_bar(self) -> None:
         p = palette(self.app)
         t = Text()
@@ -109,6 +116,13 @@ class StatusBar(Static):
             t.append(tok_label, style=p["muted"])
             if self.cost:
                 t.append(f" ${self.cost:.3f}", style=p["muted"])
+        if self.chakla_tokens:
+            t.append("   🐦", style=p["dim"])
+            ch_label = (f"{self.chakla_tokens / 1000:.1f}k"
+                        if self.chakla_tokens >= 1000 else str(self.chakla_tokens))
+            t.append(ch_label, style=p["muted"])
+            if self.chakla_cost:
+                t.append(f" ${self.chakla_cost:.3f}", style=p["muted"])
         if self.ctx_pct >= 60:
             t.append("   ctx:", style=p["dim"])
             t.append(f"{self.ctx_pct}%", style=p["danger"] if self.ctx_pct >= 80 else p["magenta"])
