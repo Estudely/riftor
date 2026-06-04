@@ -53,7 +53,7 @@ _COMMANDS = [
     "/edit-finding", "/delete-finding", "/hosts", "/services", "/report",
     "/sessions", "/resume", "/new", "/theme", "/config", "/tools", "/permissions",
     "/lore", "/cost", "/retry", "/continue", "/compact", "/copy", "/show",
-    "/timeline", "/audit", "/export", "/doctor", "/exit",
+    "/timeline", "/audit", "/export", "/doctor", "/review", "/hypotheses", "/lesson", "/lessons", "/exit",
 ]
 
 HELP = """\
@@ -81,6 +81,10 @@ _Settings & sessions_
 - `/config` — settings panel · `/permissions` — review allow/deny rules
 - `/lore` — toggle the rift persona · `/audit` — recent tool-call audit log
 - `/doctor` — check which external recon tools (nmap/httpx/…) are installed
+- `/review` — self-critique findings for false positives before reporting
+- `/hypotheses` — list tracked hypotheses (open leads)
+- `/lesson <text>` — teach a durable lesson (persists across sessions)
+- `/lessons` — list all saved lessons
 - `/sessions` · `/resume <id>` · `/new` — manage saved sessions
 - `/tools` — list tools · `/exit` — quit (`Ctrl+C`)
 
@@ -447,6 +451,10 @@ class RiftorApp(App):
             "/audit": self._audit_cmd,
             "/export": self._export_cmd,
             "/doctor": self._doctor_cmd,
+            "/review": self._review_cmd,
+            "/hypotheses": self._hypotheses_cmd,
+            "/lesson": lambda: self._lesson_cmd(arg),
+            "/lessons": self._lessons_cmd,
         }
         if cmd in ("/exit", "/quit"):
             self._save_session()
@@ -787,6 +795,96 @@ class RiftorApp(App):
             rows.append(f"`{when}` {flag} **{e.get('tool', '?')}** {e.get('preview', '')[:80]}{err}")
         self._markdown("**audit log** (recent)\n\n" + "\n".join(rows))
 
+    def _review_cmd(self) -> None:
+        """Self-critique: check all findings for false-positive signals."""
+        findings = self.engagement.store.list_findings()
+        if not findings:
+            self._note("no findings to review")
+            return
+        lines = ["## Self-Critique Review"]
+        issues = 0
+        for f in findings:
+            fid = f["id"]
+            title = f.get("title", "untitled")
+            severity = f.get("severity", "info")
+            evidence = f.get("evidence", "")
+            confidence = f.get("confidence") or 0
+            verification = f.get("verification_method", "")
+            problems = []
+            if not evidence or len(evidence.strip()) < 20:
+                problems.append("no/thin evidence")
+            if severity in ("high", "critical") and confidence < 7:
+                problems.append(f"high severity but low confidence ({confidence})")
+            if confidence >= 8 and not verification:
+                problems.append("high confidence but no verification method")
+            status_only = any(w in (evidence or "").lower()
+                              for w in ["status code", "http 500", "http 403", "returned 200"])
+            if status_only and len(evidence.strip()) < 100:
+                problems.append("evidence looks like status-code-only (not concrete proof)")
+            if problems:
+                issues += 1
+                lines.append(f"- **#{fid}** [{severity}] {title}")
+                for p in problems:
+                    lines.append(f"  - ⚠ {p}")
+            else:
+                lines.append(f"- ✅ **#{fid}** [{severity}] {title} — looks solid")
+        lines.append(f"\n_{len(findings)} findings reviewed, {issues} with issues_")
+        self._markdown("\n".join(lines))
+
+    def _hypotheses_cmd(self) -> None:
+        rows = self.engagement.store.list_hypotheses()
+        if not rows:
+            self._note("no hypotheses recorded. The agent uses record_hypothesis to track leads.")
+            return
+        lines = ["## Hypotheses"]
+        for r in rows:
+            status = r.get("status", "open")
+            marker = {"open": "🔵", "confirmed": "✅", "refuted": "❌", "inconclusive": "⚪"}.get(status, "?")
+            lines.append(f"{marker} **#{r['id']}** [{status}] {r['statement']}")
+            if r.get("rationale"):
+                lines.append(f"   _{r['rationale'][:150]}_")
+        open_count = sum(1 for r in rows if r.get("status") == "open")
+        lines.append(f"\n_{len(rows)} total, {open_count} open_")
+        self._markdown("\n".join(lines))
+
+    def _lesson_cmd(self, arg: str) -> None:
+        if not arg.strip():
+            self._note("usage: /lesson <text>  — e.g. /lesson WHEN testing JWT → check alg=none first")
+            return
+        from riftor.engagement.lessons import LessonStore
+        text = arg.strip()
+        trigger, lesson = "", text
+        if "→" in text or "->" in text:
+            sep = "→" if "→" in text else "->"
+            parts = text.split(sep, 1)
+            trigger = parts[0].strip().removeprefix("WHEN").removeprefix("when").strip()
+            lesson = parts[1].strip()
+        elif text.upper().startswith("WHEN "):
+            trigger = text[5:].strip()
+            lesson = trigger
+        try:
+            entry = LessonStore().add(trigger, lesson, source="operator")
+            self._note(f"lesson saved: WHEN {entry.trigger} → {entry.lesson}")
+        except Exception as e:
+            self._note(f"error: {e}")
+
+    def _lessons_cmd(self) -> None:
+        from riftor.engagement.lessons import LessonStore
+        rows = LessonStore().list()
+        if not rows:
+            self._note("no lessons saved yet. Use /lesson <text> to teach me.")
+            return
+        lines = ["## Lessons"]
+        for r in rows:
+            trigger = r.get("trigger", "")
+            lesson = r.get("lesson", "")
+            source = r.get("source", "operator")
+            if trigger:
+                lines.append(f"- **WHEN** {trigger} → {lesson} *({source})*")
+            else:
+                lines.append(f"- {lesson} *({source})*")
+        self._markdown("\n".join(lines))
+
     def _doctor_cmd(self) -> None:
         from riftor.engagement.doctor import check_toolchain, render_markdown
 
@@ -995,6 +1093,9 @@ class RiftorApp(App):
             self._last_user_text = user_text
         self.status.set_busy(True)
         budget = 10**9 if self.yolo else self.max_steps + extra_steps
+        _recent_cmds: list[str] = []
+        _barren_rounds = 0
+        _findings_before = self.engagement.findings_count() if self.engagement else 0
         try:
             for step in range(budget):
                 self._save_session(complete=False)  # crash-safe checkpoint
@@ -1010,8 +1111,38 @@ class RiftorApp(App):
                     if not turn.text.strip():
                         self._note("(no output)")
                     break
+                # anti-loop: detect repeated tool calls
                 for call in turn.tool_calls:
+                    sig = f"{call.name}:{' '.join(str(v) for v in call.arguments.values())}"
+                    sig = " ".join(sig.split()).strip()[:200]
+                    _recent_cmds.append(sig)
+                    if len(_recent_cmds) > 20:
+                        _recent_cmds.pop(0)
+                    repeat_count = _recent_cmds.count(sig)
+                    if repeat_count >= 5:
+                        self._note("⚠ anti-loop: same tool call repeated 5+ times — stopping. Try a different approach.")
+                        self.context.add_tool_result(call.id,
+                            "[anti-loop] You have repeated this exact call 5 times. "
+                            "STOP and try a completely different approach.")
+                        break
+                    elif repeat_count >= 3:
+                        self.context.add_tool_result(call.id,
+                            f"[anti-loop warning] You've run this same call {repeat_count} times. "
+                            "Try a different approach instead of repeating.")
                     await self._run_tool(call)
+                else:
+                    # no break = all tools ran normally; check barren rounds
+                    current_findings = self.engagement.findings_count() if self.engagement else 0
+                    if current_findings > _findings_before:
+                        _barren_rounds = 0
+                        _findings_before = current_findings
+                    else:
+                        _barren_rounds += 1
+                    if _barren_rounds >= 8:
+                        self._note("⚠ circuit breaker: 8 rounds with no new findings — consider pivoting or stopping.")
+                        _barren_rounds = 0
+                    continue
+                break  # break from anti-loop hit
             else:
                 self._note(
                     f"reached step limit ({budget}); stopping — /continue to extend"
