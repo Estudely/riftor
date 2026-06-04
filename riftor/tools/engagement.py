@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from riftor.engagement.cvss import base_score, severity_from_score
 from riftor.engagement.parsers import SUPPORTED, parse
 from riftor.engagement.report import write_reports

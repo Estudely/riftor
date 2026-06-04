@@ -214,7 +214,7 @@ class Store:
         )
         self._conn.commit()
         self.log_activity("hypothesis_add", f"#{cur.lastrowid} [{status}] {statement[:80]}")
-        return cur.lastrowid
+        return int(cur.lastrowid or 0)
 
     def resolve_hypothesis(self, hyp_id: int, status: str, rationale: str = "") -> bool:
         if status not in self._HYP_STATUSES:
