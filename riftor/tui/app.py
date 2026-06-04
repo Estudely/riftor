@@ -675,7 +675,7 @@ class RiftorApp(App):
             host = f" — `{f['host']}`" if f.get("host") else ""
             cvss = f" · CVSS {f['cvss_score']:.1f}" if f.get("cvss_score") else ""
             tags = f"  ‹{f['tags']}›" if f.get("tags") else ""
-            rows.append(f"`#{f['id']}` **[{f['severity'].upper()}{cvss}]** {f['title']}{host}{tags}")
+            rows.append(f"- `#{f['id']}` **[{f['severity'].upper()}{cvss}]** {f['title']}{host}{tags}")
         self._markdown("**findings** (severity-sorted)\n\n" + "\n".join(rows))
 
     def _show_finding(self, arg: str) -> None:
@@ -780,7 +780,7 @@ class RiftorApp(App):
         rows = []
         for e in events:
             when = time.strftime("%H:%M:%S", time.localtime(e.get("ts", 0)))
-            rows.append(f"`{when}` **{e['event']}** {e.get('detail', '')}")
+            rows.append(f"- `{when}` **{e['event']}** {e.get('detail', '')}")
         self._markdown("**timeline**\n\n" + "\n".join(rows))
 
     def _audit_cmd(self) -> None:
@@ -793,7 +793,7 @@ class RiftorApp(App):
             when = time.strftime("%H:%M:%S", time.localtime(e.get("ts", 0)))
             flag = "✓" if e.get("allowed") else "✗"
             err = " ⚠" if e.get("is_error") else ""
-            rows.append(f"`{when}` {flag} **{e.get('tool', '?')}** {e.get('preview', '')[:80]}{err}")
+            rows.append(f"- `{when}` {flag} **{e.get('tool', '?')}** {e.get('preview', '')[:80]}{err}")
         self._markdown("**audit log** (recent)\n\n" + "\n".join(rows))
 
     def _review_cmd(self) -> None:
@@ -841,9 +841,9 @@ class RiftorApp(App):
         for r in rows:
             status = r.get("status", "open")
             marker = {"open": "🔵", "confirmed": "✅", "refuted": "❌", "inconclusive": "⚪"}.get(status, "?")
-            lines.append(f"{marker} **#{r['id']}** [{status}] {r['statement']}")
+            lines.append(f"- {marker} **#{r['id']}** [{status}] {r['statement']}")
             if r.get("rationale"):
-                lines.append(f"   _{r['rationale'][:150]}_")
+                lines.append(f"  - _{r['rationale'][:150]}_")
         open_count = sum(1 for r in rows if r.get("status") == "open")
         lines.append(f"\n_{len(rows)} total, {open_count} open_")
         self._markdown("\n".join(lines))
@@ -994,9 +994,9 @@ class RiftorApp(App):
             return
         lines = []
         for s in rows:
-            marker = "→ " if s["id"] == self.session_id else "  "
+            marker = "→ " if s["id"] == self.session_id else ""
             flag = "" if s.get("complete", True) else " ⚠"
-            lines.append(f"{marker}`{s['id']}`{flag} · {s['messages']} msgs · {s['title']}")
+            lines.append(f"- {marker}`{s['id']}`{flag} · {s['messages']} msgs · {s['title']}")
         self._markdown("**sessions**\n\n" + "\n".join(lines))
 
     def _resume_cmd(self, arg: str) -> None:
