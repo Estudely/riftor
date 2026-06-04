@@ -17,13 +17,18 @@ report as you go. Under the hood it follows a structured kill chain:
 through [litellm](https://docs.litellm.ai/) and wrapped in a full-screen
 [Textual](https://textual.textualize.io/) interface.
 
-> **Status:** fully featured (Phase 4–6). Streaming agent with retry/backoff +
-> token/cost metering, **persistent granular permissions** (allow/deny rules,
-> diff preview before write/edit), **scope guardrail** (enforce / dry-run /
-> import-export), RIFT stage tracking, per-engagement findings store (edit/tag/
-> dedup), CVSS reports in **md/html/json/sarif**, crash-safe sessions, input
-> history + command palette, headless one-shot mode, Docker, pytest + types in CI.
-> See [`todo.md`](https://github.com/Estudely/riftor/blob/main/todo.md) for the roadmap and [`docs/`](https://github.com/Estudely/riftor/tree/main/docs) for configuration.
+> **What's inside:** a streaming agent with retry/backoff + token/cost metering,
+> **persistent granular permissions** (allow/deny rules, diff preview before
+> write/edit), a **scope guardrail** (enforce / dry-run / import-export), RIFT
+> stage tracking, a per-engagement findings store (edit/tag/dedup/CVSS) with
+> reports in **md/html/json/sarif**, and crash-safe sessions. It also keeps
+> **cross-session memory** (lessons it carries between engagements), tracks
+> **hypotheses** (open leads, so it never re-tests a refuted one), runs a
+> **self-critique pass** over findings before you report, and has an
+> **anti-loop circuit breaker** that stops it spinning on a repeated call.
+> Plus input history + command palette, headless one-shot mode, Docker, and
+> pytest + types in CI. See [`todo.md`](https://github.com/Estudely/riftor/blob/main/todo.md)
+> for the roadmap and [`docs/`](https://github.com/Estudely/riftor/tree/main/docs) for configuration.
 
 ## Install
 ```bash
@@ -105,6 +110,9 @@ lives in `.riftor/` per working directory; sessions auto-save and resume.
 | `/scope [add\|out\|rm <t>\|clear\|on\|off\|dry\|import <f>\|export [f]]` | manage scope |
 | `/findings` · `/finding <id>` | list (severity-sorted) / show one |
 | `/edit-finding <id> sev=high tags=…` · `/delete-finding <id>` | triage findings |
+| `/review` | self-critique findings for false-positive signals before reporting |
+| `/hypotheses` | list tracked hypotheses (open leads the agent is chasing) |
+| `/lesson <text>` · `/lessons` | teach a durable cross-session lesson · list them |
 | `/hosts` · `/services` | discovered infrastructure |
 | `/report [md\|html\|json\|sarif\|both\|all]` | write a report to `.riftor/reports/` |
 | `/timeline` · `/export` | engagement activity log · archive the engagement |
@@ -118,6 +126,11 @@ lives in `.riftor/` per working directory; sessions auto-save and resume.
 approval (with a **diff preview**); `rm -rf`/`dd` and friends are denied by
 default; every tool call is written to an audit log. See
 [`docs/configuration.md`](https://github.com/Estudely/riftor/blob/main/docs/configuration.md) for all settings.
+
+> ⚠️ **`--i-know-what-i-am-doing-give-me-full-access`** (YOLO mode) bypasses
+> *every* guardrail — no permission prompts, no scope enforcement, no step
+> limit. Only use it on a target you fully control and have explicit
+> authorization for.
 
 ## Use responsibly
 riftor is for **authorized** security testing only. You are responsible for
