@@ -66,6 +66,14 @@ class Config(BaseModel):
     onboarded: bool = False
     # Per-provider credentials, keyed by provider key (see riftor.providers.PROVIDERS).
     providers: dict[str, ProviderCreds] = {}
+    # Subagents (Baaj orchestrator → Chakla workers). chakla_model is the cheap
+    # worker model; the labels are renameable terminology surfaced in the UI.
+    chakla_model: str = "anthropic/claude-haiku-4-5-20251001"
+    chakla_max_workers: int = 5
+    chakla_max_steps: int = 8
+    chakla_timeout_s: int = 300
+    label_main: str = "Baaj"
+    label_worker: str = "Chakla"
 
     @field_validator("model")
     @classmethod
@@ -202,6 +210,12 @@ class Config(BaseModel):
             f"result_preview_lines = {self.result_preview_lines}",
             f"rate_limit_per_min = {self.rate_limit_per_min}",
             f"onboarded = {str(self.onboarded).lower()}",
+            f'chakla_model = "{self.chakla_model}"',
+            f"chakla_max_workers = {self.chakla_max_workers}",
+            f"chakla_max_steps = {self.chakla_max_steps}",
+            f"chakla_timeout_s = {self.chakla_timeout_s}",
+            f'label_main = "{self.label_main}"',
+            f'label_worker = "{self.label_worker}"',
         ]
         for key, creds in self.providers.items():
             if not (creds.api_key or creds.api_base):
