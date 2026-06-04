@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
     from riftor.config import Config
@@ -45,6 +45,14 @@ class ToolContext:
     permissions: "Permissions | None" = None
     audit: "AuditLog | None" = None
     yolo: bool = False
+    #: Optional UI/progress channel for tools that report incremental progress
+    #: (DispatchChaklaTool / run_chakla). The callback takes one event dict and
+    #: returns None. None in headless tests and ordinary tools — a no-op.
+    #: INVARIANT: invoked on the caller's event loop. In the TUI the agent loop
+    #: is @work(exclusive=True) (async, NOT thread=True), so the callback runs on
+    #: the UI task and may mutate widgets directly. If the agent loop ever moves
+    #: to a thread, the callback must marshal via call_from_thread.
+    progress: "Callable[[dict], None] | None" = None
 
 
 def resolve_path(ctx: ToolContext, raw: str) -> Path:

@@ -447,6 +447,20 @@ def test_dispatch_ollama_worker_needs_no_key(tmp_workdir, engagement, monkeypatc
     assert "no credentials for worker model" not in res.content
 
 
+def test_toolcontext_progress_defaults_to_none(tmp_workdir, engagement):
+    ctx = ToolContext(workdir=tmp_workdir, engagement=engagement)
+    assert ctx.progress is None
+
+
+def test_toolcontext_progress_is_callable_when_set(tmp_workdir, engagement):
+    seen = []
+    ctx = ToolContext(workdir=tmp_workdir, engagement=engagement,
+                      progress=lambda e: seen.append(e))
+    assert ctx.progress is not None
+    ctx.progress({"worker": 0, "state": "running"})
+    assert seen == [{"worker": 0, "state": "running"}]
+
+
 def test_worker_provider_does_not_clobber_main_base():
     # Reproduce the review footgun: main=openai (real base+key), worker=deepseek.
     # The worker store must NOT overwrite the main openai entry's base, and must
