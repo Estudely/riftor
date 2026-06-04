@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from riftor.config import Config
 from riftor.terminology import terminology
+from riftor.tools.base import ToolContext
 
 
 def test_config_has_chakla_defaults():
@@ -41,3 +42,11 @@ def test_terminology_respects_renamed_labels():
     # emoji are fixed branding; only the text labels are renameable
     assert t["main_emoji"] == "🦅"
     assert t["worker_emoji"] == "🐦"
+
+
+def test_toolcontext_new_fields_default_to_none(tmp_workdir, engagement):
+    ctx = ToolContext(workdir=tmp_workdir, engagement=engagement)
+    assert ctx.config is None
+    assert ctx.permissions is None
+    assert ctx.audit is None
+    assert ctx.yolo is False
