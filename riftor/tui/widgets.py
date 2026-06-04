@@ -173,8 +173,14 @@ class FlockPane(DataTable):
         self._state: dict[int, str] = {}
         self._cols: list = []
 
-    def on_mount(self) -> None:
-        self._cols = list(self.add_columns("#", "state", "task", "detail", "tok"))
+    def _ensure_columns(self) -> None:
+        # Columns must exist before any add_row/update_cell. Textual's DataTable
+        # allows add_columns before on_mount, and the app's progress callback
+        # mounts this widget and calls update_worker synchronously (before
+        # on_mount would fire), so we create columns lazily on first use rather
+        # than in on_mount. Idempotent.
+        if not self._cols:
+            self._cols = list(self.add_columns("#", "state", "task", "detail", "tok"))
 
     @property
     def worker_indices(self) -> set[int]:
@@ -186,6 +192,7 @@ class FlockPane(DataTable):
         return self._state.get(idx, "")
 
     def update_worker(self, event: dict) -> None:
+        self._ensure_columns()
         idx = int(event["worker"])
         state = str(event.get("state", ""))
         glyph, word = _FLOCK_STATE.get(state, ("?", "?"))

@@ -718,3 +718,37 @@ def test_flockpane_creates_and_updates_rows():
             assert any("run" in str(c) for c in row)
 
     _asyncio.run(_drive())
+
+
+def test_dispatch_through_app_mounts_flock_without_error(monkeypatch, tmp_path):
+    # Regression: the app's progress callback mounts FlockPane and synchronously
+    # calls update_worker before on_mount fires. Columns must already exist or
+    # add_row raises "More values provided than there are columns" and the whole
+    # dispatch errors. Drive the REAL dispatch->progress path through the app.
+    import asyncio as _asyncio
+    from riftor.config import Config
+    from riftor.tui.app import RiftorApp
+    from riftor.agent.provider import ToolCall
+
+    monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "worker done: nothing notable")
+
+    async def _drive():
+        cfg = Config(model="ollama_chat/x", api_base="http://localhost:11434", api_key="k")
+        cfg.chakla_model = ""  # reuse main (ollama => no creds needed)
+        app = RiftorApp(cfg, workdir=tmp_path)
+        async with app.run_test() as pilot:
+            app.engagement.add_scope("10.0.0.0/24", "in")
+            app.permissions.allow_for_session("dispatch_chakla")
+            await app._run_tool(ToolCall(
+                id="d1", name="dispatch_chakla",
+                arguments={"tasks": ["recon 10.0.0.5", "recon 10.0.0.6"], "tools": []}))
+            await pilot.pause()
+        return app
+
+    app = _asyncio.run(_drive())
+    # The dispatch must have produced a non-error result fed to the model.
+    tool_msgs = [m for m in app.context._messages if m.get("role") == "tool"]
+    assert tool_msgs, "expected a tool result message"
+    last = tool_msgs[-1].get("content") or ""
+    assert "More values provided" not in last, last
+    assert "error:" not in last.lower() or "workers" in last.lower(), last
