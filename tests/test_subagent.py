@@ -686,3 +686,35 @@ def test_dispatch_timeout_emits_timeout_event(tmp_workdir, engagement, monkeypat
     assert not res.is_error
     states = [e["state"] for e in events if e["worker"] == 0]
     assert "timeout" in states, states
+
+
+def test_flockpane_creates_and_updates_rows():
+    import asyncio as _asyncio
+    from textual.app import App
+    from riftor.tui.widgets import FlockPane
+
+    class _Harness(App):
+        def compose(self):
+            yield FlockPane()
+
+    async def _drive():
+        app = _Harness()
+        async with app.run_test() as pilot:
+            pane = app.query_one(FlockPane)
+            pane.update_worker({"worker": 0, "task": "nmap A", "state": "queued",
+                                "detail": "", "usage": None, "n_recorded": 0})
+            pane.update_worker({"worker": 1, "task": "httpx B", "state": "queued",
+                                "detail": "", "usage": None, "n_recorded": 0})
+            await pilot.pause()
+            assert pane.row_count == 2
+            pane.update_worker({"worker": 0, "task": "nmap A", "state": "running",
+                                "detail": "running nmap…", "usage": None, "n_recorded": 0})
+            await pilot.pause()
+            assert pane.row_count == 2  # still 2 rows — updated, not appended
+            assert pane.worker_indices == {0, 1}
+            assert pane.worker_state(0) == "running"
+            row = pane.get_row("0")
+            assert any("nmap A" in str(c) for c in row)
+            assert any("run" in str(c) for c in row)
+
+    _asyncio.run(_drive())
