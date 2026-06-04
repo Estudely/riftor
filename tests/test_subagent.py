@@ -510,6 +510,58 @@ def test_run_chakla_emits_detail_events(tmp_workdir, engagement):
     assert "usage" in detail_events[0]
 
 
+def test_run_chakla_detail_usage_is_snapshot(tmp_workdir, engagement):
+    # The usage on a detail event must be a point-in-time snapshot, not the live
+    # accumulator (which keeps growing across turns).
+    from riftor.agent.provider import ToolCall, Turn, Usage
+
+    class _StubProvider:
+        def __init__(self):
+            self._calls = 0
+
+        async def stream_turn(self, messages, schemas):
+            self._calls += 1
+            if self._calls == 1:
+                tc = ToolCall(id="t1", name="scope_list", arguments={})
+                yield ("done", Turn(
+                    text="", tool_calls=[tc],
+                    assistant_message={"role": "assistant", "content": None,
+                                       "tool_calls": [{"id": "t1", "type": "function",
+                                                       "function": {"name": "scope_list",
+                                                                    "arguments": "{}"}}]},
+                    usage=Usage(prompt_tokens=10, completion_tokens=5),
+                ))
+            else:
+                yield ("done", Turn(
+                    text="done.", tool_calls=[],
+                    assistant_message={"role": "assistant", "content": "done."},
+                    usage=Usage(prompt_tokens=100, completion_tokens=200),
+                ))
+
+    import asyncio as _aio
+    captured = {}
+    cfg = Config()
+    toolctx = tools_mod.ToolContext(
+        workdir=engagement.dir.parent, engagement=engagement, config=cfg,
+        permissions=Permissions(), audit=AuditLog(),
+    )
+
+    def _grab(e):
+        if e["state"] == "detail":
+            captured["usage_tokens"] = e["usage"].total_tokens
+
+    result = _aio.run(run_chakla(
+        "recon", worker_provider=_StubProvider(),  # type: ignore[arg-type]
+        toolctx=toolctx, permissions=toolctx.permissions, audit=toolctx.audit,
+        max_steps=cfg.chakla_max_steps, yolo=False,
+        db_lock=_aio.Lock(), grant=set(), progress=_grab,
+    ))
+    # At emission time, only turn-1 usage (15) had accumulated. After the run,
+    # result.usage has grown to 15+300=315. The snapshot must still read 15.
+    assert captured["usage_tokens"] == 15, captured
+    assert result.usage.total_tokens == 315
+
+
 def test_worker_provider_does_not_clobber_main_base():
     # Reproduce the review footgun: main=openai (real base+key), worker=deepseek.
     # The worker store must NOT overwrite the main openai entry's base, and must

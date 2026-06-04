@@ -10,7 +10,7 @@ operator's interactive trust.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Callable, Literal
 
 from riftor.agent.context import Context
@@ -85,7 +85,7 @@ async def run_chakla(
                     progress({
                         "state": "detail",
                         "detail": _detail_label(call),
-                        "usage": result.usage,
+                        "usage": replace(result.usage),
                     })
                 content = await _run_chakla_tool(
                     call, toolctx, permissions, audit, yolo=yolo, db_lock=db_lock, grant=grant
@@ -115,7 +115,7 @@ def _findings_count(toolctx: ToolContext) -> int:
 def _detail_label(call: ToolCall) -> str:
     """A short live-activity label for a worker tool call, e.g. 'running nmap…'."""
     if call.name == "bash":
-        cmd = str(call.arguments.get("command", "")).strip().split() if call.arguments else []
+        cmd = str(call.arguments.get("command", "")).strip().split()
         head = cmd[0] if cmd else "bash"
         return f"running {head}…"
     if call.name in ("record_service", "record_finding", "import_scan"):
