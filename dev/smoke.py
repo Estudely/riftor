@@ -93,6 +93,35 @@ async def main() -> None:
             for m in app.context._messages
         ), "expected out-of-scope block fed back to model"
 
+        # Phase 7b: a dispatch mounts the live flock pane, updates it during
+        # flight, then clears it; the 🐦 status segment reflects worker usage.
+        # Offline via RIFTOR_DEMO_RESPONSE. Capture max rows seen mid-flight by
+        # spying on the progress callback.
+        import os
+        os.environ["RIFTOR_DEMO_RESPONSE"] = "worker reporting: recon complete"
+        app.engagement.add_scope("10.0.0.0/24", "in")
+        app.permissions.allow_for_session("dispatch_chakla")
+        app.config.api_key = "smoke-key"  # blank worker model reuses main; needs creds
+        app.config.chakla_model = ""
+        seen_rows = {"max": 0}
+        orig_progress = app._on_chakla_progress
+
+        def _spy(event):
+            orig_progress(event)
+            if app._flock is not None:
+                seen_rows["max"] = max(seen_rows["max"], app._flock[1].row_count)
+
+        app.toolctx.progress = _spy
+        await app._run_tool(
+            ToolCall(id="d1", name="dispatch_chakla",
+                     arguments={"tasks": ["recon 10.0.0.5", "recon 10.0.0.6"], "tools": []})
+        )
+        await pilot.pause()
+        assert seen_rows["max"] >= 2, f"expected >=2 flock rows during flight, saw {seen_rows['max']}"
+        assert app._flock is None, "flock pane should be cleared after the dispatch"
+        assert app.status.chakla_tokens >= 0  # 🐦 usage segment fed (0 ok for demo)
+        app.toolctx.progress = app._on_chakla_progress  # restore
+
         # /theme switches the live theme
         inp.value = "/theme void"
         await pilot.press("enter")
