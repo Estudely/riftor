@@ -88,7 +88,29 @@ class DispatchChaklaTool(Tool):
             grant_list = list(_DEFAULT_GRANT)
         grant = {t for t in grant_list}
 
-        worker_cfg = cfg.model_copy(update={"model": cfg.chakla_model})
+        # Resolve the worker model: empty chakla_model => reuse the main model,
+        # which is always credentialed (the user configured cfg.model). Primary
+        # defense against the "worker has no creds" auth-failure bug.
+        worker_model = cfg.chakla_model or cfg.model
+
+        # Defense-in-depth: if an explicit worker model has no resolvable creds —
+        # and it isn't a local/Ollama model that needs none — refuse to dispatch
+        # with a clear, actionable error instead of fanning out N workers that all
+        # fail "authentication failed" (and possibly leak the wrong provider's key).
+        # We gate on api_key only: the reported failure mode is a missing/mismatched
+        # key. A keyless custom endpoint (api_base but no key) is the rare exception
+        # and is refused here; set any placeholder key or use the blank-reuse path.
+        is_local = worker_model.startswith(("ollama/", "ollama_chat/"))
+        api_key, _api_base = cfg.creds_for(worker_model)
+        if not is_local and api_key is None:
+            return ToolResult(
+                f"no credentials for worker model {worker_model!r}; set them in "
+                f"/config WORKERS (provider + key), or leave the worker model blank "
+                f"to reuse the main model ({cfg.model}).",
+                is_error=True,
+            )
+
+        worker_cfg = cfg.model_copy(update={"model": worker_model})
         worker_provider = Provider(worker_cfg)
         db_lock = asyncio.Lock()
         timeout = max(1, cfg.chakla_timeout_s)

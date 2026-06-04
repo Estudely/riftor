@@ -46,6 +46,11 @@ class ConfigScreen(ModalScreen[dict | None]):
         self._original_theme = config.theme
         self._provider = provider_key_for_model(config.model)
         self._provider_initialized = False
+        # Worker (Chakla) picker mirrors the main one. Empty chakla_model =>
+        # reuse main model, so seed the worker provider from the main model then.
+        self._worker_provider = provider_key_for_model(
+            self.config.chakla_model or self.config.model)
+        self._worker_provider_initialized = False
 
     def compose(self) -> ComposeResult:
         theme = self.config.theme if self.config.theme in THEMES else "rift"
@@ -65,6 +70,19 @@ class ConfigScreen(ModalScreen[dict | None]):
         if bare and bare not in [v for _, v in model_opts]:
             model_opts = [(bare, bare), *model_opts]
         model_val = bare if bare else Select.NULL
+        # --- worker (Chakla) picker display values, mirroring the main model ---
+        wkey = self._worker_provider
+        wmeta = PROVIDERS[wkey]
+        wsrc = self.config.chakla_model or self.config.model
+        wbare = (wsrc[len(wmeta.prefix):]
+                 if wmeta.prefix and wkey != "openrouter"
+                 and wsrc.startswith(wmeta.prefix)
+                 else wsrc)
+        w_model_opts = _model_options(wkey)
+        if wbare and wbare not in [v for _, v in w_model_opts]:
+            w_model_opts = [(wbare, wbare), *w_model_opts]
+        # Empty chakla_model => "reuse main" => show nothing selected.
+        w_model_val = wbare if self.config.chakla_model and wbare else Select.NULL
         with Vertical(id="config-box"):
             yield Label("riftor · config", id="config-title")
             with VerticalScroll(id="config-body"):
@@ -91,13 +109,21 @@ class ConfigScreen(ModalScreen[dict | None]):
 
                 yield Rule()
                 yield Label("WORKERS", classes="config-section")
-                yield _row("Chakla model", Input(
-                    value=self.config.chakla_model,
-                    placeholder="cheap worker model id", id="cfg-chakla-model"))
+                yield _row("Provider", Select(
+                    [(m.label, k) for k, m in PROVIDERS.items()],
+                    value=wkey, allow_blank=False, id="cfg-chakla-provider"))
+                yield _row("Model", Select(
+                    w_model_opts, value=w_model_val, allow_blank=True,
+                    id="cfg-chakla-model-select"))
+                yield _row("Custom id", Input(
+                    value="", placeholder="blank = reuse main model",
+                    id="cfg-chakla-custom"))
                 yield _row("Main label", Input(
-                    value=self.config.label_main, placeholder="e.g. Baaj", id="cfg-label-main"))
+                    value=self.config.label_main, placeholder="e.g. Baaj",
+                    id="cfg-label-main"))
                 yield _row("Worker label", Input(
-                    value=self.config.label_worker, placeholder="e.g. Chakla", id="cfg-label-worker"))
+                    value=self.config.label_worker, placeholder="e.g. Chakla",
+                    id="cfg-label-worker"))
 
                 yield Rule()
                 yield Label("APPEARANCE", classes="config-section")
@@ -129,9 +155,23 @@ class ConfigScreen(ModalScreen[dict | None]):
                 self._set_model_options(_model_options(event.value))
             else:
                 self._provider_initialized = True
+        elif event.select.id == "cfg-chakla-provider" and isinstance(event.value, str):
+            self._worker_provider = event.value
+            # NOTE: do NOT touch #cfg-base/#cfg-key here — those belong to the MAIN
+            # provider. Switching the worker provider must not mutate the main
+            # provider's fields. The worker's base/key are resolved at save time
+            # in _open_config from the worker provider's stored creds / default base.
+            if self._worker_provider_initialized:
+                self._set_chakla_model_options(_model_options(event.value))
+            else:
+                self._worker_provider_initialized = True
 
     def _set_model_options(self, options: list[tuple[str, str]]) -> None:
         sel = self.query_one("#cfg-model-select", Select)
+        sel.set_options(options or [("(type a custom id below)", "")])
+
+    def _set_chakla_model_options(self, options: list[tuple[str, str]]) -> None:
+        sel = self.query_one("#cfg-chakla-model-select", Select)
         sel.set_options(options or [("(type a custom id below)", "")])
 
     @work(thread=True, exclusive=True, group="fetch")
@@ -190,6 +230,14 @@ class ConfigScreen(ModalScreen[dict | None]):
         chosen = custom or (sel_val if isinstance(sel_val, str) and sel_val else "")
         model = apply_prefix(provider, chosen) if chosen else self.config.model
 
+        # --- worker (Chakla) model ---
+        w_provider = self._worker_provider
+        w_custom = self.query_one("#cfg-chakla-custom", Input).value.strip()
+        w_sel = self.query_one("#cfg-chakla-model-select", Select).value
+        w_chosen = w_custom or (w_sel if isinstance(w_sel, str) and w_sel else "")
+        # Blank => "" => reuse main model at dispatch time.
+        chakla_model = apply_prefix(w_provider, w_chosen) if w_chosen else ""
+
         result: dict = {
             "model": model,
             "provider": provider,
@@ -198,8 +246,8 @@ class ConfigScreen(ModalScreen[dict | None]):
             "max_tokens": max_tokens,
             "theme": self.query_one("#cfg-theme", Select).value,
             "lore": self.query_one("#cfg-lore", Switch).value,
-            "chakla_model": self.query_one("#cfg-chakla-model", Input).value.strip()
-                or self.config.chakla_model,
+            "chakla_model": chakla_model,
+            "chakla_provider": w_provider if w_chosen else None,
             "label_main": self.query_one("#cfg-label-main", Input).value.strip()
                 or self.config.label_main,
             "label_worker": self.query_one("#cfg-label-worker", Input).value.strip()
