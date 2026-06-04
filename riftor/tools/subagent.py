@@ -64,6 +64,9 @@ class DispatchChaklaTool(Tool):
         if ctx.config is None or ctx.permissions is None or ctx.audit is None:
             return ToolResult("subagents unavailable (no config in this context)", is_error=True)
 
+        perms = ctx.permissions
+        audit = ctx.audit
+
         tasks = args.get("tasks") or []
         if not isinstance(tasks, list) or not all(isinstance(t, str) for t in tasks):
             return ToolResult("error: 'tasks' must be a list of strings", is_error=True)
@@ -80,9 +83,10 @@ class DispatchChaklaTool(Tool):
             clamped = True
 
         grant_list = args.get("tools")
-        if not isinstance(grant_list, list) or not grant_list:
+        if (not isinstance(grant_list, list) or not grant_list
+                or not all(isinstance(t, str) for t in grant_list)):
             grant_list = list(_DEFAULT_GRANT)
-        grant = {str(t) for t in grant_list}
+        grant = {t for t in grant_list}
 
         worker_cfg = cfg.model_copy(update={"model": cfg.chakla_model})
         worker_provider = Provider(worker_cfg)
@@ -96,8 +100,8 @@ class DispatchChaklaTool(Tool):
                         task,
                         worker_provider=worker_provider,
                         toolctx=ctx,
-                        permissions=ctx.permissions,
-                        audit=ctx.audit,
+                        permissions=perms,
+                        audit=audit,
                         max_steps=cfg.chakla_max_steps,
                         yolo=ctx.yolo,
                         db_lock=db_lock,
@@ -136,8 +140,9 @@ def _format(results: list[ChaklaResult], labels: dict, model: str, clamped: bool
 
     lines = [header]
     for i, r in enumerate(results, 1):
+        task1 = r.task.replace("\n", " ").strip()[:120]
         mark = {"done": "✓", "timeout": "✗", "error": "✗"}.get(r.status, "?")
         recorded = f" → {r.n_recorded} recorded" if r.n_recorded else ""
         detail = r.error if r.error else (r.text.strip().splitlines()[0] if r.text.strip() else "")
-        lines.append(f"[{i}] {mark} {r.task}{recorded}" + (f" — {detail}"[:200] if detail else ""))
+        lines.append(f"[{i}] {mark} {task1}{recorded}" + (f" — {detail}"[:200] if detail else ""))
     return "\n".join(lines)
