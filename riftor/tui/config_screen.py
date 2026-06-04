@@ -95,9 +95,9 @@ class ConfigScreen(ModalScreen[dict | None]):
                     value=self.config.chakla_model,
                     placeholder="cheap worker model id", id="cfg-chakla-model"))
                 yield _row("Main label", Input(
-                    value=self.config.label_main, id="cfg-label-main"))
+                    value=self.config.label_main, placeholder="e.g. Baaj", id="cfg-label-main"))
                 yield _row("Worker label", Input(
-                    value=self.config.label_worker, id="cfg-label-worker"))
+                    value=self.config.label_worker, placeholder="e.g. Chakla", id="cfg-label-worker"))
 
                 yield Rule()
                 yield Label("APPEARANCE", classes="config-section")
