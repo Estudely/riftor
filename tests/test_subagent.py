@@ -4,8 +4,8 @@ from __future__ import annotations
 import asyncio
 
 from riftor import tools as tools_mod
-from riftor.agent.provider import Provider
-from riftor.agent.subagent import ChaklaResult, run_chakla
+from riftor.agent.provider import Provider, ToolCall
+from riftor.agent.subagent import ChaklaResult, run_chakla, _run_chakla_tool, worker_schemas
 from riftor.config import Config
 from riftor.safety.audit import AuditLog
 from riftor.safety.permissions import Permissions
@@ -102,3 +102,77 @@ def test_run_chakla_returns_result_with_text(tmp_workdir, engagement, monkeypatc
     assert result.status == "done"
     assert "recon complete" in result.text
     assert result.error is None
+
+
+def _ctx(cfg, engagement):
+    return tools_mod.ToolContext(
+        workdir=engagement.dir.parent, engagement=engagement, config=cfg,
+        permissions=Permissions(), audit=AuditLog(),
+    )
+
+
+def test_worker_schemas_exclude_dispatch():
+    names = [s["function"]["name"] for s in worker_schemas()]
+    assert "dispatch_chakla" not in names
+
+
+def test_worker_readonly_tool_runs_without_grant(tmp_workdir, engagement):
+    cfg = Config()
+    ctx = _ctx(cfg, engagement)
+    call = ToolCall(id="c1", name="scope_list", arguments={})
+    content = asyncio.run(
+        _run_chakla_tool(call, ctx, ctx.permissions, ctx.audit,
+                         yolo=False, db_lock=asyncio.Lock(), grant=set())
+    )
+    assert "[denied]" not in content
+
+
+def test_worker_bash_denied_without_grant(tmp_workdir, engagement):
+    cfg = Config()
+    ctx = _ctx(cfg, engagement)
+    call = ToolCall(id="c2", name="bash", arguments={"command": "echo hi"})
+    content = asyncio.run(
+        _run_chakla_tool(call, ctx, ctx.permissions, ctx.audit,
+                         yolo=False, db_lock=asyncio.Lock(), grant=set())
+    )
+    assert "[denied]" in content
+
+
+def test_worker_bash_allowed_with_grant(tmp_workdir, engagement):
+    cfg = Config()
+    ctx = _ctx(cfg, engagement)
+    call = ToolCall(id="c3", name="bash", arguments={"command": "echo hi"})
+    content = asyncio.run(
+        _run_chakla_tool(call, ctx, ctx.permissions, ctx.audit,
+                         yolo=False, db_lock=asyncio.Lock(), grant={"bash"})
+    )
+    assert "[denied]" not in content
+    assert "hi" in content
+
+
+def test_worker_deny_rule_wins_over_grant(tmp_workdir, engagement):
+    cfg = Config()
+    perms = Permissions(deny=[{"tool": "bash"}])
+    ctx = tools_mod.ToolContext(
+        workdir=engagement.dir.parent, engagement=engagement, config=cfg,
+        permissions=perms, audit=AuditLog(),
+    )
+    call = ToolCall(id="c4", name="bash", arguments={"command": "echo hi"})
+    content = asyncio.run(
+        _run_chakla_tool(call, ctx, perms, ctx.audit,
+                         yolo=False, db_lock=asyncio.Lock(), grant={"bash"})
+    )
+    assert "[blocked by policy]" in content
+
+
+def test_worker_out_of_scope_hard_blocked(tmp_workdir, engagement):
+    cfg = Config()
+    engagement.scope.add("10.0.0.0/24", "in")
+    engagement.enforce = True
+    ctx = _ctx(cfg, engagement)
+    call = ToolCall(id="c5", name="bash", arguments={"command": "nmap 8.8.8.8"})
+    content = asyncio.run(
+        _run_chakla_tool(call, ctx, ctx.permissions, ctx.audit,
+                         yolo=False, db_lock=asyncio.Lock(), grant={"bash"})
+    )
+    assert "[blocked: out of scope]" in content
