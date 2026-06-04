@@ -177,7 +177,7 @@ A small module-level helper (e.g. `terminology(config) -> {main, worker, main_em
 ```
 
 - `tasks` (required): list of discrete task strings; one worker per task.
-- `tools` (optional, default `["bash"]`): privileged tools to grant workers beyond the always-free read-only set.
+- `tools` (optional, default `["bash"]`): the privileged tools (those with `requires_permission=True` — `add_scope`/`write`/`edit`/`bash`) to grant workers. All other tools are non-privileged and run without a grant; the grant gate is reached only for permissioned tools.
 - Permission preview shows: *"{label_main} dispatches N {label_worker} workers (model: <chakla_model>) — granting [bash] within scope. Tasks: …"* so the operator sees exactly what is authorized.
 
 ## Result aggregation
