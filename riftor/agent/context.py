@@ -27,6 +27,15 @@ def _load_system_prompt() -> str:
     )
 
 
+def _load_lessons() -> str:
+    """Load persistent lessons for injection into the system prompt."""
+    try:
+        from riftor.engagement.lessons import LessonStore
+        return LessonStore().format_for_prompt()
+    except Exception:
+        return ""
+
+
 def _content_len(msg: dict) -> int:
     content = msg.get("content")
     total = len(content) if isinstance(content, str) else 0
@@ -43,7 +52,13 @@ class Context:
 
     @property
     def system_prompt(self) -> str:
-        return self._base + (LORE_PREAMBLE if self.lore else "")
+        parts = [self._base]
+        lessons = _load_lessons()
+        if lessons:
+            parts.append(lessons)
+        if self.lore:
+            parts.append(LORE_PREAMBLE)
+        return "\n\n".join(parts)
 
     @property
     def messages(self) -> list[dict]:

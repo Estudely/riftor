@@ -2,12 +2,28 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from riftor.engagement.cvss import base_score, severity_from_score
 from riftor.engagement.parsers import SUPPORTED, parse
 from riftor.engagement.report import write_reports
 from riftor.tools.base import Tool, ToolContext, ToolResult
 
 _SEVERITIES = ["info", "low", "medium", "high", "critical"]
+
+
+def _parse_confidence(value: object) -> int | None:
+    """Coerce a confidence arg to an int clamped to 0-10, or None if unset/invalid.
+
+    None (rather than 0) keeps the column NULL so callers can tell "not scored"
+    apart from "scored zero".
+    """
+    if value is None or value == "":
+        return None
+    try:
+        return max(0, min(10, int(value)))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
 
 
 class SetStageTool(Tool):
@@ -175,6 +191,18 @@ class RecordFindingTool(Tool):
                 "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H. If given, severity is "
                 "derived from the computed score.",
             },
+            "confidence": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 10,
+                "description": "How sure you are (0-10). 8+ requires a complete "
+                "source→sink chain AND an attacker model; otherwise cap at 6.",
+            },
+            "verification_method": {
+                "type": "string",
+                "description": "How the finding was confirmed, e.g. 'OOB callback', "
+                "'reflected canary', 'timing delta'. Status codes alone are not proof.",
+            },
         },
         "required": ["title", "severity"],
     }
@@ -194,6 +222,8 @@ class RecordFindingTool(Tool):
         else:
             vector = ""  # don't store an invalid vector
 
+        confidence = _parse_confidence(args.get("confidence"))
+
         fid, action = eng.add_finding_dedup(
             dedup="skip",
             title=str(args["title"]),
@@ -204,6 +234,8 @@ class RecordFindingTool(Tool):
             tags=str(args.get("tags") or ""),
             notes=str(args.get("notes") or ""),
             cvss=vector,
+            confidence=confidence,
+            verification_method=str(args.get("verification_method") or ""),
         )
         if action == "skipped":
             return ToolResult(f"finding already recorded (#{fid}) — skipped duplicate")
@@ -215,7 +247,8 @@ class EditFindingTool(Tool):
     name = "edit_finding"
     description = (
         "Update an existing finding by id (from /findings). Pass only the fields to "
-        "change: title, severity, host, evidence, recommendation, tags, notes."
+        "change: title, severity, host, evidence, recommendation, tags, notes, "
+        "confidence, verification_method."
     )
     parameters = {
         "type": "object",
@@ -228,6 +261,8 @@ class EditFindingTool(Tool):
             "recommendation": {"type": "string"},
             "tags": {"type": "string"},
             "notes": {"type": "string"},
+            "confidence": {"type": "integer", "minimum": 0, "maximum": 10},
+            "verification_method": {"type": "string"},
         },
         "required": ["id"],
     }
@@ -240,11 +275,14 @@ class EditFindingTool(Tool):
             fid = int(args["id"])
         except (KeyError, TypeError, ValueError):
             return ToolResult("error: id must be an integer", is_error=True)
-        fields = {
+        fields: dict = {
             k: str(args[k])
-            for k in ("title", "severity", "host", "evidence", "recommendation", "tags", "notes")
+            for k in ("title", "severity", "host", "evidence", "recommendation",
+                      "tags", "notes", "verification_method")
             if k in args and args[k] is not None
         }
+        if args.get("confidence") is not None:
+            fields["confidence"] = _parse_confidence(args.get("confidence"))
         if "severity" in fields and fields["severity"].lower() not in _SEVERITIES:
             return ToolResult(f"error: severity must be one of {', '.join(_SEVERITIES)}", is_error=True)
         if not eng.store.update_finding(fid, **fields):
@@ -391,3 +429,209 @@ class GenerateReportTool(Tool):
             paths = write_reports(eng, "both")
         eng.store.log_activity("report", fmt)
         return ToolResult("wrote report:\n" + "\n".join(str(p) for p in paths))
+
+
+class LoadSkillTool(Tool):
+    name = "load_skill"
+    description = (
+        "Load an operator-provided methodology skill for a domain, if one exists. "
+        "Skills carry checklists, payloads, tool commands, and evidence standards "
+        "(e.g. recon, exploitation, payloads, reporting). When a matching skill is "
+        "available, prefer it; if none is found this returns the list of available "
+        "skills (which may be empty) — just proceed with your own judgment."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "description": "Skill name (e.g. 'recon', 'exploitation', 'payloads', 'reporting')",
+            },
+        },
+        "required": ["name"],
+    }
+
+    async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        import os
+        skill_name = str(args.get("name", "")).strip().lower()
+        if not skill_name:
+            return ToolResult("error: skill name is required", is_error=True)
+        if not skill_name.endswith(".md"):
+            skill_name += ".md"
+
+        # Search in XDG config skills dir, then engagement dir
+        search_paths = []
+        base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+        search_paths.append(Path(base) / "riftor" / "skills" / skill_name)
+        if ctx.engagement:
+            search_paths.append(ctx.engagement.dir / "skills" / skill_name)
+
+        for p in search_paths:
+            if p.exists():
+                try:
+                    content = p.read_text()[:24000]
+                    return ToolResult(f"# SKILL: {skill_name}\n\n{content}")
+                except OSError as e:
+                    return ToolResult(f"error reading skill: {e}", is_error=True)
+
+        available = []
+        for sp in search_paths:
+            if sp.parent.exists():
+                available.extend(f.stem for f in sp.parent.glob("*.md"))
+        avail_str = ", ".join(sorted(set(available))) if available else "(none found)"
+        return ToolResult(
+            f"skill '{skill_name}' not found. Available: {avail_str}. "
+            f"Searched: {', '.join(str(p.parent) for p in search_paths)}"
+        )
+
+
+class RecordHypothesisTool(Tool):
+    name = "record_hypothesis"
+    description = (
+        "Record a hypothesis — something you suspect but haven't confirmed yet. "
+        "Track open leads so you never forget to test them and never re-test refuted ones."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "statement": {"type": "string", "description": "What you suspect, e.g. 'SSRF in /webhook can reach internal metadata'"},
+            "rationale": {"type": "string", "description": "Why you suspect this (evidence so far)"},
+        },
+        "required": ["statement"],
+    }
+
+    async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        eng = ctx.engagement
+        if eng is None:
+            return ToolResult("error: no active engagement", is_error=True)
+        statement = str(args.get("statement", "")).strip()
+        if not statement:
+            return ToolResult("error: statement is required", is_error=True)
+        rationale = str(args.get("rationale") or "")
+        hid = eng.store.add_hypothesis(statement, rationale=rationale)
+        return ToolResult(f"hypothesis #{hid} recorded [open]: {statement}")
+
+
+class ResolveHypothesisTool(Tool):
+    name = "resolve_hypothesis"
+    description = (
+        "Resolve a hypothesis: confirmed (evidence proves it), refuted (evidence disproves it), "
+        "or inconclusive. Never re-test a refuted hypothesis."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "id": {"type": "integer", "description": "Hypothesis id (from list_hypotheses)"},
+            "status": {"type": "string", "enum": ["confirmed", "refuted", "inconclusive"]},
+            "rationale": {"type": "string", "description": "Why this resolution (evidence)"},
+        },
+        "required": ["id", "status"],
+    }
+
+    async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        eng = ctx.engagement
+        if eng is None:
+            return ToolResult("error: no active engagement", is_error=True)
+        try:
+            hid = int(args["id"])
+        except (KeyError, TypeError, ValueError):
+            return ToolResult("error: id must be an integer", is_error=True)
+        status = str(args.get("status", "")).lower()
+        rationale = str(args.get("rationale") or "")
+        if eng.store.resolve_hypothesis(hid, status, rationale):
+            return ToolResult(f"hypothesis #{hid} → {status}")
+        return ToolResult(f"error: no hypothesis #{hid} or invalid status", is_error=True)
+
+
+class ListHypothesesTool(Tool):
+    name = "list_hypotheses"
+    description = "List hypotheses (open leads, confirmed, refuted). Check before testing to avoid re-work."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string", "enum": ["open", "confirmed", "refuted", "inconclusive", "all"],
+                       "description": "Filter by status (default: all)"},
+        },
+    }
+
+    async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        eng = ctx.engagement
+        if eng is None:
+            return ToolResult("error: no active engagement", is_error=True)
+        status = str(args.get("status") or "").lower()
+        rows = eng.store.list_hypotheses(status if status and status != "all" else None)
+        if not rows:
+            return ToolResult("no hypotheses recorded yet")
+        lines = []
+        for r in rows:
+            lines.append(f"#{r['id']} [{r['status']}] {r['statement']}")
+            if r.get("rationale"):
+                lines.append(f"   rationale: {r['rationale'][:150]}")
+        return ToolResult("\n".join(lines))
+
+
+class RecordLessonTool(Tool):
+    name = "record_lesson"
+    description = (
+        "Save a durable lesson that persists across sessions. Use after learning "
+        "something important — a correction from the operator, a pattern that worked, "
+        "a mistake to avoid. Format: WHEN <trigger> → <what to do>."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "trigger": {
+                "type": "string",
+                "description": "When this lesson applies, e.g. 'testing JWT' or 'scanning ports'.",
+            },
+            "lesson": {
+                "type": "string",
+                "description": "What to do or avoid, e.g. 'always check alg=none first'.",
+            },
+            "source": {
+                "type": "string",
+                "enum": ["operator", "agent"],
+                "description": "Who taught it (default: operator).",
+            },
+        },
+        "required": ["lesson"],
+    }
+
+    async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        from riftor.engagement.lessons import LessonStore
+        trigger = str(args.get("trigger") or "").strip()
+        lesson_text = str(args.get("lesson") or "").strip()
+        source = str(args.get("source") or "operator")
+        if not lesson_text:
+            return ToolResult("error: lesson text is required", is_error=True)
+        try:
+            store = LessonStore()
+            entry = store.add(trigger, lesson_text, source)
+            display = f"WHEN {entry.trigger} → {entry.lesson}" if entry.trigger else entry.lesson
+            return ToolResult(f"lesson saved (#{entry.id}): {display}")
+        except Exception as e:
+            return ToolResult(f"error saving lesson: {e}", is_error=True)
+
+
+class ListLessonsTool(Tool):
+    name = "list_lessons"
+    description = "List all saved lessons (cross-session memory)."
+    parameters = {"type": "object", "properties": {}}
+
+    async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        from riftor.engagement.lessons import LessonStore
+        store = LessonStore()
+        rows = store.list()
+        if not rows:
+            return ToolResult("no lessons saved yet")
+        lines = []
+        for r in rows:
+            trigger = r.get("trigger", "")
+            lesson = r.get("lesson", "")
+            source = r.get("source", "operator")
+            lid = r.get("id", "?")
+            if trigger:
+                lines.append(f"#{lid} [{source}] WHEN {trigger} → {lesson}")
+            else:
+                lines.append(f"#{lid} [{source}] {lesson}")
+        return ToolResult("\n".join(lines))

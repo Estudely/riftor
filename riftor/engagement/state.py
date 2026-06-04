@@ -30,7 +30,21 @@ _LATE_COLUMNS = (
     ("findings", "cvss", "TEXT"),
     ("findings", "tags", "TEXT"),
     ("findings", "notes", "TEXT"),
+    ("findings", "confidence", "INTEGER"),
+    ("findings", "verification_method", "TEXT"),
 )
+
+_LATE_TABLES = """
+CREATE TABLE IF NOT EXISTS hypotheses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    statement TEXT NOT NULL,
+    status TEXT DEFAULT 'open',
+    rationale TEXT DEFAULT '',
+    evidence_ref TEXT DEFAULT '',
+    created REAL,
+    updated REAL
+);
+"""
 
 
 class Store:
@@ -52,6 +66,7 @@ class Store:
             "CREATE TABLE IF NOT EXISTS activity "
             "(id INTEGER PRIMARY KEY AUTOINCREMENT, event TEXT, detail TEXT, ts REAL)"
         )
+        self._conn.executescript(_LATE_TABLES)
 
     # -- meta -------------------------------------------------------------------
     def set_meta(self, key: str, value: str) -> None:
@@ -134,15 +149,19 @@ class Store:
         cvss: str = "",
         tags: str = "",
         notes: str = "",
+        confidence: int | None = None,
+        verification_method: str = "",
     ) -> int:
         cur = self._conn.execute(
             "INSERT INTO findings"
-            "(title, severity, host, evidence, recommendation, stage, cvss, tags, notes, ts) "
-            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (title, severity, host, evidence, recommendation, stage, cvss, tags, notes, time.time()),
+            "(title, severity, host, evidence, recommendation, stage, cvss, tags, notes, "
+            "confidence, verification_method, ts) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (title, severity, host, evidence, recommendation, stage, cvss, tags, notes,
+             confidence, verification_method, time.time()),
         )
         self._conn.commit()
-        return int(cur.lastrowid)
+        return int(cur.lastrowid or 0)
 
     def find_finding_id(self, title: str, host: str, severity: str, evidence: str = "") -> int | None:
         """Return the id of an existing finding matching the natural key, else None."""
@@ -162,7 +181,7 @@ class Store:
         """Update allowed fields of a finding. Returns True if the row existed."""
         allowed = {
             "title", "severity", "host", "evidence", "recommendation",
-            "stage", "cvss", "tags", "notes",
+            "stage", "cvss", "tags", "notes", "confidence", "verification_method",
         }
         sets = {k: v for k, v in fields.items() if k in allowed and v is not None}
         if not sets:
@@ -184,6 +203,45 @@ class Store:
 
     def count_findings(self) -> int:
         return int(self._conn.execute("SELECT COUNT(*) AS c FROM findings").fetchone()["c"])
+
+    # -- hypotheses -------------------------------------------------------------
+    _HYP_STATUSES = {"open", "confirmed", "refuted", "inconclusive"}
+
+    def add_hypothesis(self, statement: str, *, status: str = "open",
+                       rationale: str = "", evidence_ref: str = "") -> int:
+        status = status if status in self._HYP_STATUSES else "open"
+        now = time.time()
+        cur = self._conn.execute(
+            "INSERT INTO hypotheses(statement, status, rationale, evidence_ref, created, updated) "
+            "VALUES(?, ?, ?, ?, ?, ?)",
+            (statement, status, rationale, evidence_ref, now, now),
+        )
+        self._conn.commit()
+        self.log_activity("hypothesis_add", f"#{cur.lastrowid} [{status}] {statement[:80]}")
+        return int(cur.lastrowid or 0)
+
+    def resolve_hypothesis(self, hyp_id: int, status: str, rationale: str = "") -> bool:
+        if status not in self._HYP_STATUSES:
+            return False
+        cur = self._conn.execute(
+            "UPDATE hypotheses SET status=?, rationale=?, updated=? WHERE id=?",
+            (status, rationale, time.time(), hyp_id),
+        )
+        self._conn.commit()
+        if cur.rowcount:
+            self.log_activity("hypothesis_resolve", f"#{hyp_id} → {status}")
+        return cur.rowcount > 0
+
+    def list_hypotheses(self, status: str | None = None) -> list[dict]:
+        if status:
+            return [dict(r) for r in self._conn.execute(
+                "SELECT * FROM hypotheses WHERE status=? ORDER BY id", (status,))]
+        return [dict(r) for r in self._conn.execute("SELECT * FROM hypotheses ORDER BY id")]
+
+    def count_hypotheses(self, status: str = "open") -> int:
+        return int(self._conn.execute(
+            "SELECT COUNT(*) AS c FROM hypotheses WHERE status=?", (status,)
+        ).fetchone()["c"])
 
     # -- activity log -----------------------------------------------------------
     def log_activity(self, event: str, detail: str = "") -> None:
