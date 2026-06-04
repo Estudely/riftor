@@ -157,9 +157,10 @@ class ConfigScreen(ModalScreen[dict | None]):
                 self._provider_initialized = True
         elif event.select.id == "cfg-chakla-provider" and isinstance(event.value, str):
             self._worker_provider = event.value
-            # Worker reuses the shared Base URL/API key fields; reflect the worker
-            # provider's default base there for fetch/save.
-            self.query_one("#cfg-base", Input).value = PROVIDERS[event.value].default_base or ""
+            # NOTE: do NOT touch #cfg-base/#cfg-key here — those belong to the MAIN
+            # provider. Switching the worker provider must not mutate the main
+            # provider's fields. The worker's base/key are resolved at save time
+            # in _open_config from the worker provider's stored creds / default base.
             if self._worker_provider_initialized:
                 self._set_chakla_model_options(_model_options(event.value))
             else:

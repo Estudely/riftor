@@ -445,3 +445,31 @@ def test_dispatch_ollama_worker_needs_no_key(tmp_workdir, engagement, monkeypatc
     )
     res = asyncio.run(DispatchChaklaTool().execute({"tasks": ["x"], "tools": []}, ctx))
     assert "no credentials for worker model" not in res.content
+
+
+def test_worker_provider_does_not_clobber_main_base():
+    # Reproduce the review footgun: main=openai (real base+key), worker=deepseek.
+    # The worker store must NOT overwrite the main openai entry's base, and must
+    # give deepseek ITS OWN default base — not openai's and not a leaked one.
+    from riftor.providers import PROVIDERS
+    cfg = Config(model="openai/gpt-5.5")
+    # main provider stored first (as _open_config's main block does)
+    cfg.providers["openai"] = ProviderCreds(
+        api_key="sk-openai", api_base=PROVIDERS["openai"].default_base)
+    # Simulate _open_config's WORKER block for a different provider (deepseek),
+    # using the FIXED logic (never copies the shared/main base):
+    w_provider = "deepseek"
+    provider = "openai"
+    result = {"api_key": "sk-openai", "api_base": PROVIDERS["openai"].default_base}
+    if w_provider and w_provider != provider:
+        w_entry = cfg.providers.get(w_provider) or ProviderCreds()
+        if not w_entry.api_key and result.get("api_key"):
+            w_entry.api_key = result["api_key"]
+        if not w_entry.api_base:
+            w_entry.api_base = PROVIDERS[w_provider].default_base
+        if w_entry.api_key or w_entry.api_base:
+            cfg.providers[w_provider] = w_entry
+    # INVARIANT: main openai base is intact (NOT deepseek's base)
+    assert cfg.providers["openai"].api_base == PROVIDERS["openai"].default_base
+    # worker deepseek got ITS OWN default base, not openai's
+    assert cfg.providers["deepseek"].api_base == PROVIDERS["deepseek"].default_base

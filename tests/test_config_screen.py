@@ -203,6 +203,42 @@ async def test_fetch_button_repopulates_models(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_worker_provider_switch_does_not_clobber_main_base():
+    # Regression: switching the WORKER provider Select used to rewrite the shared
+    # #cfg-base field, so saving corrupted the MAIN provider's stored base. Drive
+    # the REAL ConfigScreen + _open_config and assert the clobber invariant.
+    from riftor.providers import PROVIDERS
+    with tempfile.TemporaryDirectory() as d:
+        _patch_paths(Path(d))
+        cfg = Config(model="openai/gpt-5.5")
+        app = RiftorApp(cfg, workdir=Path(d))
+        async with app.run_test() as pilot:
+            app.query_one("#prompt", Input).value = "/config"
+            await pilot.press("enter")
+            await pilot.pause()
+            screen = app.screen
+            assert isinstance(screen, ConfigScreen)
+            # main = openai + key; base auto-fills to openai's default
+            screen.query_one("#cfg-provider", Select).value = "openai"
+            await pilot.pause()
+            screen.query_one("#cfg-key", Input).value = "sk-openai"
+            # switch the WORKER provider to a DIFFERENT provider (deepseek) and
+            # pick a worker model, so a distinct worker provider is actually saved
+            screen.query_one("#cfg-chakla-provider", Select).value = "deepseek"
+            await pilot.pause()
+            screen.query_one("#cfg-chakla-custom", Input).value = "deepseek-chat"
+            # save WITHOUT re-touching the base field
+            screen.query_one("#save").press()
+            await pilot.pause()
+        # INVARIANT: the main openai base is untouched (NOT deepseek's base)
+        assert app.config.providers["openai"].api_base == PROVIDERS["openai"].default_base
+        assert app.config.providers["openai"].api_key == "sk-openai"
+        # the worker provider got ITS OWN default base, and reused the shared key
+        assert app.config.providers["deepseek"].api_base == PROVIDERS["deepseek"].default_base
+        assert app.config.providers["deepseek"].api_key == "sk-openai"
+
+
+@pytest.mark.asyncio
 async def test_openrouter_model_no_duplicate_option_on_open():
     with tempfile.TemporaryDirectory() as d:
         _patch_paths(Path(d))

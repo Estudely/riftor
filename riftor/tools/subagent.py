@@ -97,6 +97,9 @@ class DispatchChaklaTool(Tool):
         # and it isn't a local/Ollama model that needs none — refuse to dispatch
         # with a clear, actionable error instead of fanning out N workers that all
         # fail "authentication failed" (and possibly leak the wrong provider's key).
+        # We gate on api_key only: the reported failure mode is a missing/mismatched
+        # key. A keyless custom endpoint (api_base but no key) is the rare exception
+        # and is refused here; set any placeholder key or use the blank-reuse path.
         is_local = worker_model.startswith(("ollama/", "ollama_chat/"))
         api_key, _api_base = cfg.creds_for(worker_model)
         if not is_local and api_key is None:

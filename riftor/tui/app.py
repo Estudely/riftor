@@ -542,15 +542,19 @@ class RiftorApp(App):
             if entry.api_key or entry.api_base:
                 self.config.providers[provider] = entry
 
-        # Worker may use a different provider than the main model. Store the shared
-        # key/base under the worker provider too, so creds_for(chakla_model) resolves.
+        # Worker may use a different provider than the main model. Ensure that
+        # provider has resolvable creds WITHOUT corrupting the main provider's
+        # entry: never copy the shared (main) base here — use the worker
+        # provider's own default base. Reuse the shared key only if one was
+        # entered this session and the worker provider has no key yet.
+        from riftor.providers import PROVIDERS as _PROVIDERS  # local: keep import-time light
         w_provider = result.get("chakla_provider")
         if w_provider and w_provider != provider:
             w_entry = self.config.providers.get(w_provider) or ProviderCreds()
-            if result.get("api_base") is not None:
-                w_entry.api_base = result["api_base"]
-            if result.get("api_key"):
+            if not w_entry.api_key and result.get("api_key"):
                 w_entry.api_key = result["api_key"]
+            if not w_entry.api_base:
+                w_entry.api_base = _PROVIDERS[w_provider].default_base
             if w_entry.api_key or w_entry.api_base:
                 self.config.providers[w_provider] = w_entry
 
