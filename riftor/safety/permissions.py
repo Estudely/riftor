@@ -133,6 +133,19 @@ class Permissions:
             return False
         return True
 
+    def without_session_grants(self) -> "Permissions":
+        """A view safe to hand to subagents: standing allow/deny rules and
+        session *denials* still bind, but the operator's interactive
+        'allow for session' grants do NOT carry over (workers have no operator).
+        """
+        view = Permissions.__new__(Permissions)
+        view.allow_rules = self.allow_rules
+        view.deny_rules = self.deny_rules
+        view.session_allowed = set()  # the whole point: do not inherit session allows
+        view.session_denied = set(self.session_denied)
+        view._path = None
+        return view
+
     def allow_for_session(self, tool_name: str) -> None:
         self.session_allowed.add(tool_name)
 

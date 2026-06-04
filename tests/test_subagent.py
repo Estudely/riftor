@@ -294,3 +294,44 @@ def test_system_prompt_mentions_dispatch():
     from riftor.agent.context import _load_system_prompt
     prompt = _load_system_prompt()
     assert "dispatch_chakla" in prompt
+
+
+def test_worker_does_not_inherit_session_grant(tmp_workdir, engagement):
+    # Operator allowed `edit` for the session on the PARENT permissions. A worker
+    # granted only `bash` must NOT be able to run `edit` via that session grant.
+    cfg = Config()
+    parent = Permissions()
+    parent.allow_for_session("edit")
+    worker_perms = parent.without_session_grants()
+    ctx = tools_mod.ToolContext(
+        workdir=engagement.dir.parent, engagement=engagement, config=cfg,
+        permissions=worker_perms, audit=AuditLog(),
+    )
+    call = ToolCall(id="c9", name="edit",
+                    arguments={"path": "x.txt", "old_string": "a", "new_string": "b"})
+    content = asyncio.run(
+        _run_chakla_tool(call, ctx, worker_perms, ctx.audit,
+                         yolo=False, db_lock=asyncio.Lock(), grant={"bash"})
+    )
+    assert "[denied]" in content  # edit was NOT granted and session-allow must not leak
+
+
+def test_worker_standing_allow_rule_still_binds(tmp_workdir, engagement):
+    # A STANDING allow rule (from permissions.toml) DOES still authorize a worker.
+    cfg = Config()
+    perms = Permissions(allow=[{"tool": "edit"}])
+    worker_perms = perms.without_session_grants()
+    # edit a real file so execute succeeds past the gate
+    target = engagement.dir.parent / "note.txt"
+    target.write_text("hello world\n")
+    ctx = tools_mod.ToolContext(
+        workdir=engagement.dir.parent, engagement=engagement, config=cfg,
+        permissions=worker_perms, audit=AuditLog(),
+    )
+    call = ToolCall(id="c10", name="edit",
+                    arguments={"path": "note.txt", "old_string": "hello", "new_string": "hi"})
+    content = asyncio.run(
+        _run_chakla_tool(call, ctx, worker_perms, ctx.audit,
+                         yolo=False, db_lock=asyncio.Lock(), grant=set())
+    )
+    assert "[denied]" not in content  # standing allow rule authorizes it

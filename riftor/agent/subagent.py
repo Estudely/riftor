@@ -13,14 +13,13 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
-from riftor import tools
 from riftor.agent.context import Context
 from riftor.agent.provider import Provider, ProviderError, ToolCall, Turn, Usage
-from riftor.tools import ToolContext, ToolResult
 
 if TYPE_CHECKING:
     from riftor.safety.audit import AuditLog
     from riftor.safety.permissions import Permissions
+    from riftor.tools.base import ToolContext
 
 #: The dispatch tool is excluded from the worker tool set so a Chakla can never
 #: spawn its own Chaklas (no recursion).
@@ -41,6 +40,8 @@ class ChaklaResult:
 
 def worker_schemas() -> list[dict]:
     """Tool schemas for a worker — everything except the dispatch tool."""
+    from riftor import tools
+
     return [t.schema() for t in tools.all_tools() if t.name != DISPATCH_TOOL_NAME]
 
 
@@ -115,6 +116,8 @@ async def _run_chakla_tool(
     grant: set[str],
 ) -> str:
     """Headless-style gating for a worker tool call. Returns the result content."""
+    from riftor import tools
+
     tool = tools.get(call.name)
     if tool is None:
         return f"error: unknown tool '{call.name}'"
@@ -153,7 +156,7 @@ async def _run_chakla_tool(
         try:
             res = await tool.execute(call.arguments, toolctx)
         except Exception as exc:  # noqa: BLE001
-            res = ToolResult(f"error: {exc}", is_error=True)
+            res = tools.ToolResult(f"error: {exc}", is_error=True)
     res = res.truncated(toolctx.max_result_chars)
     audit.record(tool.name, preview, allowed=True, is_error=res.is_error)
     return res.content

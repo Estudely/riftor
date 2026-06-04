@@ -64,7 +64,7 @@ class DispatchChaklaTool(Tool):
         if ctx.config is None or ctx.permissions is None or ctx.audit is None:
             return ToolResult("subagents unavailable (no config in this context)", is_error=True)
 
-        perms = ctx.permissions
+        perms = ctx.permissions.without_session_grants()
         audit = ctx.audit
 
         tasks = args.get("tasks") or []
