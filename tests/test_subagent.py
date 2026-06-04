@@ -720,6 +720,30 @@ def test_flockpane_creates_and_updates_rows():
     _asyncio.run(_drive())
 
 
+def test_headless_progress_printer_writes_terminal_events(capsys):
+    # Build the headless progress callback in isolation and confirm it prints
+    # only terminal events, to stderr.
+    from riftor.headless import _make_progress_printer
+
+    printer = _make_progress_printer(total=3)
+    printer({"worker": 0, "task": "nmap A", "state": "queued", "usage": None})
+    printer({"worker": 0, "task": "nmap A", "state": "running", "usage": None})
+    printer({"worker": 0, "task": "nmap A", "state": "detail",
+             "detail": "running nmap…", "usage": None})
+    from riftor.agent.provider import Usage
+    printer({"worker": 0, "task": "nmap A", "state": "done",
+             "detail": "4 services", "usage": Usage(completion_tokens=900), "n_recorded": 4})
+    printer({"worker": 2, "task": "subfinder", "state": "timeout",
+             "detail": "timed out", "usage": Usage()})
+    captured = capsys.readouterr()
+    assert captured.out == ""  # nothing on stdout
+    assert "[1/3]" in captured.err and "nmap A" in captured.err and "done" in captured.err
+    assert "[3/3]" in captured.err and "timeout" in captured.err
+    # queued/running/detail produced no lines
+    assert "running nmap" not in captured.err
+    assert captured.err.count("🐦") == 2  # only the two terminal events
+
+
 def test_dispatch_through_app_mounts_flock_without_error(monkeypatch, tmp_path):
     # Regression: the app's progress callback mounts FlockPane and synchronously
     # calls update_worker before on_mount fires. Columns must already exist or
