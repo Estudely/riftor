@@ -140,6 +140,33 @@ tested (pytest + headless smoke), type-checked (pyright) and lint-clean.
 - [x] `.pre-commit-config.yaml`, `Makefile`, shell completions, man page, `docs/configuration.md`
 - [x] Docker tool-variant (`--build-arg INSTALL_TOOLS=1`) + `docker-compose.yml`
 
+### Phase 7 — Subagents (Baaj / Chakla)
+Orchestrator/worker delegation: a powerful main agent **Baaj** (🦅 eagle) dispatches
+multiple lightweight, cheap workers **Chakla** (🐦 sparrows) to run batches of
+low-effort parallel tasks (e.g. recon). Naming terminology is config-renameable
+(`label_main` / `label_worker`).
+
+**7a — core dispatch (Approach A)**
+- [ ] `DispatchChaklaTool` (`tools/subagent.py`): explicit `tasks` list → one worker per task
+- [ ] `run_chakla()` worker loop (`agent/subagent.py`): stripped headless loop, isolated
+      Context, `lore=False`, own Usage accumulator
+- [ ] Second cheap Provider via `config.model_copy(update={"model": chakla_model})`
+- [ ] Config fields: `chakla_model` (cheap default), `label_main`/`label_worker`,
+      `chakla_max_workers` (~5), worker step budget (~8)
+- [ ] Extend `ToolContext` with optional `config`/`permissions`/`audit`/`yolo` (guard None)
+- [ ] Permission bridge: approving the dispatch grants workers scoped, ephemeral
+      tool access (bash) — scope still hard-enforced per-command
+- [ ] Concurrency: `asyncio.gather` + per-worker `asyncio.wait_for` timeout;
+      shared `asyncio.Lock` around engagement-DB writes
+- [ ] CLI `--chakla-model` + completions + docs; offline test via `RIFTOR_DEMO_RESPONSE`
+
+**7b — live worker visibility (Approach B, follow-up)**
+- [ ] Tool→UI progress channel (none exists today): thread a progress callback into
+      `run_chakla` so workers emit status events
+- [ ] TUI "flock" panel: per-Chakla live status (running / done / N findings / error)
+- [ ] Status bar: separate worker-cost/token segment (set when non-zero)
+- [ ] Decide headless equivalent (e.g. periodic stderr progress lines)
+
 ---
 
 ## Environment notes
