@@ -10,10 +10,13 @@ name: release
 #     Workflow:     release.yml
 #     Environment:  pypi
 #
-# Release flow:
-#   1. bump `version` in pyproject.toml
-#   2. commit, then: git tag vX.Y.Z && git push origin vX.Y.Z
-#   3. this workflow builds + publishes; PyPI rejects duplicate versions.
+# Release flow (main is protected, so land the bump first, THEN tag):
+#   1. uv version X.Y.Z   (bumps pyproject.toml + uv.lock)
+#   2. open a PR with the bump, get CI green, and merge it to main
+#   3. tag the merged commit: git checkout main && git pull
+#                             git tag vX.Y.Z && git push origin vX.Y.Z
+#   4. this workflow builds + publishes; PyPI rejects duplicate versions.
+# See CONTRIBUTING.md "Releases" for why tagging before the merge is unsafe.
 
 on:
   push:

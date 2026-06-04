@@ -54,9 +54,28 @@ A high-level roadmap lives in [`todo.md`](./todo.md).
 - Conventional-ish commit messages (`fix:`, `docs:`, `Phase N: …`).
 
 ## Releases (maintainers)
-1. Bump `version` in `pyproject.toml` (and `riftor/__init__.py`).
-2. Commit, then `git tag vX.Y.Z && git push origin main --tags`.
-3. The `release` workflow builds and publishes to PyPI via trusted publishing.
+`pyproject.toml` is the single source of truth for the version — `riftor
+--version` reads it from the installed package metadata, so there's nothing to
+bump in `riftor/__init__.py`.
+
+`main` is protected (changes land via PR), and the `release` workflow fires on a
+`v*` tag and **verifies the tag matches the `pyproject.toml` version**. So land
+the bump on `main` *first*, then tag the merged commit:
+
+1. `uv version X.Y.Z` — bumps `pyproject.toml` and `uv.lock` together.
+2. Open a PR with that bump, get CI green, and merge it to `main`.
+3. Tag the merged commit on `main` and push **only the tag**:
+   ```bash
+   git checkout main && git pull
+   git tag vX.Y.Z && git push origin vX.Y.Z
+   ```
+4. The `release` workflow then builds, publishes to PyPI via trusted publishing,
+   and creates the GitHub Release. PyPI rejects duplicate versions, so a given
+   `X.Y.Z` can only be published once.
+
+> Do **not** push the tag before the bump is merged to `main`: the workflow
+> would publish to PyPI from a commit that isn't on `main`, leaving `main`'s
+> version out of sync with what's on PyPI.
 
 ## License
 By contributing, you agree your contributions are licensed under the project's
