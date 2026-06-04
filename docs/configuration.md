@@ -23,6 +23,12 @@ falls back to detected defaults (it won't overwrite your file) and launches.
 | `max_result_chars` | int | `30000` | Cap on tool output fed back to the model. |
 | `result_preview_lines` | int | `25` | Lines of a tool result shown before `…/show <id>`. |
 | `rate_limit_per_min` | int | `0` | Cap model calls per minute (`0` = unlimited). |
+| `chakla_model` | string | `anthropic/claude-haiku-4-5-20251001` | The cheap worker model used by dispatched Chakla subagents. |
+| `chakla_max_workers` | int | `5` | Max number of Chakla workers per dispatch batch. |
+| `chakla_max_steps` | int | `8` | Per-worker agent-loop step budget. |
+| `chakla_timeout_s` | int | `300` | Per-worker wall-clock timeout in seconds. |
+| `label_main` | string | `Baaj` | Display name for the orchestrator agent. |
+| `label_worker` | string | `Chakla` | Display name for the worker subagents. |
 
 ### Example
 ```toml
@@ -39,6 +45,40 @@ rate_limit_per_min = 0
 # model = "ollama_chat/llama3.1"
 # api_base = "http://localhost:11434"
 ```
+
+### Subagents (Baaj / Chakla)
+
+The main agent (Baaj) can dispatch a batch of lightweight Chakla workers via the
+`dispatch_chakla` tool to run independent tasks (e.g. parallel recon) on a cheaper
+model. When the agent proposes a dispatch, the TUI shows an approval prompt that
+lists the tasks and grants the workers the tools they need (default: `bash`).
+
+Key properties of the worker fleet:
+
+- **Scope and deny rules always bind workers.** A worker cannot call a
+  scope-sensitive tool on an out-of-scope target, and all deny rules from
+  `permissions.toml` apply identically.
+- **Findings land in the shared engagement database.** Worker tool calls to
+  `record_service`, `record_finding`, etc. write to the same `.riftor/engagement.db`
+  as the main agent.
+- **Concurrency is bounded.** `chakla_max_workers` caps parallel workers;
+  `chakla_max_steps` caps the per-worker step budget; `chakla_timeout_s` sets the
+  wall-clock ceiling. Tune these to stay within rate limits.
+- **Worker model defaults to Haiku.** `chakla_model` defaults to
+  `anthropic/claude-haiku-4-5-20251001` — a cheap, fast model well-suited to
+  bounded recon tasks. Override it with `--chakla-model` at the CLI or by editing
+  the config file.
+
+### CLI flags
+
+The following flags are runtime-only overrides (they apply for the current
+invocation and are not persisted to config.toml):
+
+| Flag | Mirrors field | Notes |
+|---|---|---|
+| `--model MODEL` | `model` | Override the main-agent model. |
+| `--chakla-model MODEL` | `chakla_model` | Override the Chakla worker model. |
+| `--api-key KEY` | `api_key` | Override the API key. |
 
 ## Providers & models
 

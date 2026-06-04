@@ -23,6 +23,10 @@ def main() -> None:
         help="check which external recon tools (nmap/httpx/…) are installed, then exit",
     )
     parser.add_argument("--model", help="override the model for this run")
+    parser.add_argument(
+        "--chakla-model", dest="chakla_model",
+        help="override the Chakla (worker) model for this run",
+    )
     parser.add_argument("--api-key", dest="api_key", help="override the API key for this run")
     parser.add_argument("--workdir", help="engagement working directory (default: cwd)")
     parser.add_argument("--scope-file", dest="scope_file", help="load scope targets from a file")
@@ -57,6 +61,8 @@ def main() -> None:
     cfg = Config.load()
     if args.model:
         cfg.model = args.model
+    if args.chakla_model:
+        cfg.chakla_model = args.chakla_model
     if args.api_key:
         cfg.api_key = args.api_key
 

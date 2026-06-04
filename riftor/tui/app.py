@@ -158,11 +158,6 @@ class RiftorApp(App):
         self.tools = tools.all_tools()
         self.tool_schemas = tools.schemas()
         self.engagement = Engagement(self.workdir)
-        self.toolctx = ToolContext(
-            workdir=self.workdir,
-            engagement=self.engagement,
-            max_result_chars=config.max_result_chars,
-        )
         self.permissions = Permissions.load(PERMISSIONS_PATH)
         self.audit = AuditLog()
         self.max_steps = config.max_steps
@@ -174,6 +169,16 @@ class RiftorApp(App):
         self._last_output: str = ""
         self._last_user_text: str | None = None
         self.usage = Usage()
+        self.chakla_usage = Usage()
+        self.toolctx = ToolContext(
+            workdir=self.workdir,
+            engagement=self.engagement,
+            max_result_chars=config.max_result_chars,
+            config=self.config,
+            permissions=self.permissions,
+            audit=self.audit,
+            yolo=self.yolo,
+        )
         self._rate_times: list[float] = []
         self._autoscroll = True
 
@@ -270,6 +275,7 @@ class RiftorApp(App):
 
     def _refresh_usage(self) -> None:
         self.status.set_usage(self.usage.total_tokens, self.usage.cost)
+        self.status.set_chakla_usage(self.chakla_usage.total_tokens, self.chakla_usage.cost)
         pct = int(self.context.estimated_tokens() / self._context_window() * 100)
         self.status.set_context(min(pct, 999))
 
@@ -522,6 +528,9 @@ class RiftorApp(App):
         self.config.temperature = result["temperature"]
         self.config.max_tokens = result["max_tokens"]
         self.config.lore = result["lore"]
+        self.config.chakla_model = result.get("chakla_model", self.config.chakla_model)
+        self.config.label_main = result.get("label_main", self.config.label_main)
+        self.config.label_worker = result.get("label_worker", self.config.label_worker)
 
         provider = result.get("provider")
         if provider:

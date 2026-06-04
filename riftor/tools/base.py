@@ -8,7 +8,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from riftor.config import Config
     from riftor.engagement import Engagement
+    from riftor.safety.audit import AuditLog
+    from riftor.safety.permissions import Permissions
 
 MAX_RESULT_CHARS = 30_000
 
@@ -36,6 +39,12 @@ class ToolContext:
     engagement: "Engagement | None" = None
     #: per-result truncation cap fed back into the model (configurable via Config)
     max_result_chars: int = MAX_RESULT_CHARS
+    #: Optional plumbing for tools that spawn subagents (DispatchChaklaTool).
+    #: Kept optional so ordinary tools and tests build a bare ToolContext.
+    config: "Config | None" = None
+    permissions: "Permissions | None" = None
+    audit: "AuditLog | None" = None
+    yolo: bool = False
 
 
 def resolve_path(ctx: ToolContext, raw: str) -> Path:

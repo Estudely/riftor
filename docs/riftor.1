@@ -21,6 +21,9 @@ Print the path of the config file and exit.
 .B \-\-model \fIMODEL\fR
 Override the model for this run (any litellm id, e.g. anthropic/claude-sonnet-4-6).
 .TP
+.B \-\-chakla\-model \fIMODEL\fR
+Override the Chakla (worker) model for this run.
+.TP
 .B \-\-api\-key \fIKEY\fR
 Override the API key for this run (prefer the provider's environment variable).
 .TP
@@ -49,6 +52,29 @@ Persistent tool allow/deny rules.
 .TP
 .I ./.riftor/
 Per-engagement state: sqlite store, sessions, reports, exports.
+.SH CONFIGURATION
+Selected keys from \fB~/.config/riftor/config.toml\fR (\fB[riftor]\fR table):
+.TP
+.B model
+Main-agent litellm model id (default: \fIanthropic/claude-sonnet-4-6\fR).
+.TP
+.B chakla_model
+Chakla worker model id (default: \fIanthropic/claude-haiku-4-5-20251001\fR).
+.TP
+.B chakla_max_workers
+Maximum number of Chakla workers per dispatch batch (default: \fI5\fR).
+.TP
+.B chakla_max_steps
+Per-worker agent-loop step budget (default: \fI8\fR).
+.TP
+.B chakla_timeout_s
+Per-worker wall-clock timeout in seconds (default: \fI300\fR).
+.TP
+.B label_main
+Display name for the orchestrator agent (default: \fIBaaj\fR).
+.TP
+.B label_worker
+Display name for worker subagents (default: \fIChakla\fR).
 .SH ENVIRONMENT
 .TP
 .B ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY

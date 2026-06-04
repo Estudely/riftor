@@ -30,6 +30,7 @@ from riftor.tools.engagement import (
     ScopeListTool,
     SetStageTool,
 )
+from riftor.tools.subagent import DispatchChaklaTool
 
 # Order is roughly safe -> mutating; it's also the order shown to the model.
 ALL_TOOLS: list[Tool] = [
@@ -47,6 +48,7 @@ ALL_TOOLS: list[Tool] = [
     DeleteFindingTool(),
     GenerateReportTool(),
     LoadSkillTool(),
+    DispatchChaklaTool(),
     RecordHypothesisTool(),
     ResolveHypothesisTool(),
     ListHypothesesTool(),
