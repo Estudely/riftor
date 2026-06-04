@@ -149,15 +149,19 @@ class Store:
         cvss: str = "",
         tags: str = "",
         notes: str = "",
+        confidence: int | None = None,
+        verification_method: str = "",
     ) -> int:
         cur = self._conn.execute(
             "INSERT INTO findings"
-            "(title, severity, host, evidence, recommendation, stage, cvss, tags, notes, ts) "
-            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (title, severity, host, evidence, recommendation, stage, cvss, tags, notes, time.time()),
+            "(title, severity, host, evidence, recommendation, stage, cvss, tags, notes, "
+            "confidence, verification_method, ts) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (title, severity, host, evidence, recommendation, stage, cvss, tags, notes,
+             confidence, verification_method, time.time()),
         )
         self._conn.commit()
-        return int(cur.lastrowid)
+        return int(cur.lastrowid or 0)
 
     def find_finding_id(self, title: str, host: str, severity: str, evidence: str = "") -> int | None:
         """Return the id of an existing finding matching the natural key, else None."""
@@ -177,7 +181,7 @@ class Store:
         """Update allowed fields of a finding. Returns True if the row existed."""
         allowed = {
             "title", "severity", "host", "evidence", "recommendation",
-            "stage", "cvss", "tags", "notes",
+            "stage", "cvss", "tags", "notes", "confidence", "verification_method",
         }
         sets = {k: v for k, v in fields.items() if k in allowed and v is not None}
         if not sets:

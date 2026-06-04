@@ -24,6 +24,7 @@ from textual.containers import VerticalScroll
 from textual.widgets import Input, Markdown, Static
 
 from riftor import tools
+from riftor.agent import antiloop
 from riftor.agent import session as sessions
 from riftor.agent.context import Context
 from riftor.agent.provider import Provider, ProviderError, ToolCall, Turn, Usage
@@ -1111,38 +1112,55 @@ class RiftorApp(App):
                     if not turn.text.strip():
                         self._note("(no output)")
                     break
-                # anti-loop: detect repeated tool calls
+                # anti-loop: detect repeated tool calls. Each call gets exactly
+                # one tool result — either from _run_tool or a synthetic one here,
+                # never both, or the turn becomes malformed (duplicate tool_call_id).
+                anti_loop_stop = False
                 for call in turn.tool_calls:
-                    sig = f"{call.name}:{' '.join(str(v) for v in call.arguments.values())}"
-                    sig = " ".join(sig.split()).strip()[:200]
-                    _recent_cmds.append(sig)
-                    if len(_recent_cmds) > 20:
-                        _recent_cmds.pop(0)
-                    repeat_count = _recent_cmds.count(sig)
-                    if repeat_count >= 5:
-                        self._note("⚠ anti-loop: same tool call repeated 5+ times — stopping. Try a different approach.")
-                        self.context.add_tool_result(call.id,
-                            "[anti-loop] You have repeated this exact call 5 times. "
-                            "STOP and try a completely different approach.")
-                        break
-                    elif repeat_count >= 3:
-                        self.context.add_tool_result(call.id,
-                            f"[anti-loop warning] You've run this same call {repeat_count} times. "
-                            "Try a different approach instead of repeating.")
+                    if anti_loop_stop:
+                        # A prior call this turn tripped the hard stop. Don't run the
+                        # rest, but still answer every tool_call id so none are left
+                        # orphaned (an orphan only gets repaired on the next turn).
+                        self.context.add_tool_result(
+                            call.id, "[anti-loop] skipped — stopping this turn."
+                        )
+                        continue
+                    sig = antiloop.call_signature(call.name, call.arguments)
+                    decision = antiloop.classify(_recent_cmds, sig)
+                    if decision.stop:
+                        # Hard stop: inject this call's single result and skip running
+                        # it. Remaining calls are answered by the guard above.
+                        self._note(
+                            "⚠ anti-loop: same tool call repeated "
+                            f"{antiloop.STOP_AT}+ times — stopping. Try a different approach."
+                        )
+                        self.context.add_tool_result(
+                            call.id,
+                            f"[anti-loop] You have repeated this exact call {decision.repeat_count} "
+                            "times. STOP and try a completely different approach.",
+                        )
+                        anti_loop_stop = True
+                        continue
+                    if decision.warn:
+                        # Operator-only notice; still run the tool so the call gets
+                        # its one real result. No second tool message.
+                        self._note(
+                            f"⚠ anti-loop: same tool call repeated {decision.repeat_count}× — "
+                            "nudging the agent to change approach."
+                        )
                     await self._run_tool(call)
+                if anti_loop_stop:
+                    break
+                # all tools ran normally; check barren rounds
+                current_findings = self.engagement.findings_count() if self.engagement else 0
+                if current_findings > _findings_before:
+                    _barren_rounds = 0
+                    _findings_before = current_findings
                 else:
-                    # no break = all tools ran normally; check barren rounds
-                    current_findings = self.engagement.findings_count() if self.engagement else 0
-                    if current_findings > _findings_before:
-                        _barren_rounds = 0
-                        _findings_before = current_findings
-                    else:
-                        _barren_rounds += 1
-                    if _barren_rounds >= 8:
-                        self._note("⚠ circuit breaker: 8 rounds with no new findings — consider pivoting or stopping.")
-                        _barren_rounds = 0
-                    continue
-                break  # break from anti-loop hit
+                    _barren_rounds += 1
+                if _barren_rounds >= 8:
+                    self._note("⚠ circuit breaker: 8 rounds with no new findings — consider pivoting or stopping.")
+                    _barren_rounds = 0
             else:
                 self._note(
                     f"reached step limit ({budget}); stopping — /continue to extend"

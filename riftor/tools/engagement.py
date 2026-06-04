@@ -12,6 +12,20 @@ from riftor.tools.base import Tool, ToolContext, ToolResult
 _SEVERITIES = ["info", "low", "medium", "high", "critical"]
 
 
+def _parse_confidence(value: object) -> int | None:
+    """Coerce a confidence arg to an int clamped to 0-10, or None if unset/invalid.
+
+    None (rather than 0) keeps the column NULL so callers can tell "not scored"
+    apart from "scored zero".
+    """
+    if value is None or value == "":
+        return None
+    try:
+        return max(0, min(10, int(value)))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
 class SetStageTool(Tool):
     name = "set_stage"
     description = (
@@ -177,6 +191,18 @@ class RecordFindingTool(Tool):
                 "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H. If given, severity is "
                 "derived from the computed score.",
             },
+            "confidence": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 10,
+                "description": "How sure you are (0-10). 8+ requires a complete "
+                "source→sink chain AND an attacker model; otherwise cap at 6.",
+            },
+            "verification_method": {
+                "type": "string",
+                "description": "How the finding was confirmed, e.g. 'OOB callback', "
+                "'reflected canary', 'timing delta'. Status codes alone are not proof.",
+            },
         },
         "required": ["title", "severity"],
     }
@@ -196,6 +222,8 @@ class RecordFindingTool(Tool):
         else:
             vector = ""  # don't store an invalid vector
 
+        confidence = _parse_confidence(args.get("confidence"))
+
         fid, action = eng.add_finding_dedup(
             dedup="skip",
             title=str(args["title"]),
@@ -206,6 +234,8 @@ class RecordFindingTool(Tool):
             tags=str(args.get("tags") or ""),
             notes=str(args.get("notes") or ""),
             cvss=vector,
+            confidence=confidence,
+            verification_method=str(args.get("verification_method") or ""),
         )
         if action == "skipped":
             return ToolResult(f"finding already recorded (#{fid}) — skipped duplicate")
@@ -217,7 +247,8 @@ class EditFindingTool(Tool):
     name = "edit_finding"
     description = (
         "Update an existing finding by id (from /findings). Pass only the fields to "
-        "change: title, severity, host, evidence, recommendation, tags, notes."
+        "change: title, severity, host, evidence, recommendation, tags, notes, "
+        "confidence, verification_method."
     )
     parameters = {
         "type": "object",
@@ -230,6 +261,8 @@ class EditFindingTool(Tool):
             "recommendation": {"type": "string"},
             "tags": {"type": "string"},
             "notes": {"type": "string"},
+            "confidence": {"type": "integer", "minimum": 0, "maximum": 10},
+            "verification_method": {"type": "string"},
         },
         "required": ["id"],
     }
@@ -242,11 +275,14 @@ class EditFindingTool(Tool):
             fid = int(args["id"])
         except (KeyError, TypeError, ValueError):
             return ToolResult("error: id must be an integer", is_error=True)
-        fields = {
+        fields: dict = {
             k: str(args[k])
-            for k in ("title", "severity", "host", "evidence", "recommendation", "tags", "notes")
+            for k in ("title", "severity", "host", "evidence", "recommendation",
+                      "tags", "notes", "verification_method")
             if k in args and args[k] is not None
         }
+        if args.get("confidence") is not None:
+            fields["confidence"] = _parse_confidence(args.get("confidence"))
         if "severity" in fields and fields["severity"].lower() not in _SEVERITIES:
             return ToolResult(f"error: severity must be one of {', '.join(_SEVERITIES)}", is_error=True)
         if not eng.store.update_finding(fid, **fields):
@@ -398,10 +434,11 @@ class GenerateReportTool(Tool):
 class LoadSkillTool(Tool):
     name = "load_skill"
     description = (
-        "Load a methodology/knowledge skill before acting in that domain. "
-        "Skills carry checklists, payloads, tool commands, and evidence standards. "
-        "Available: recon, recon-dorking, exploitation, payloads, reporting, lessons-learned. "
-        "Load the matching skill BEFORE each RIFT stage — operating from memory is a defect."
+        "Load an operator-provided methodology skill for a domain, if one exists. "
+        "Skills carry checklists, payloads, tool commands, and evidence standards "
+        "(e.g. recon, exploitation, payloads, reporting). When a matching skill is "
+        "available, prefer it; if none is found this returns the list of available "
+        "skills (which may be empty) — just proceed with your own judgment."
     )
     parameters = {
         "type": "object",
