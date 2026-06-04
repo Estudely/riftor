@@ -11,6 +11,7 @@ from riftor.safety.audit import AuditLog
 from riftor.safety.permissions import Permissions
 from riftor.terminology import terminology
 from riftor.tools.base import ToolContext
+from riftor.tools.subagent import DispatchChaklaTool
 
 
 def test_config_has_chakla_defaults():
@@ -176,3 +177,39 @@ def test_worker_out_of_scope_hard_blocked(tmp_workdir, engagement):
                          yolo=False, db_lock=asyncio.Lock(), grant={"bash"})
     )
     assert "[blocked: out of scope]" in content
+
+
+def test_dispatch_requires_config(tmp_workdir, engagement):
+    tool = DispatchChaklaTool()
+    bare = tools_mod.ToolContext(workdir=tmp_workdir, engagement=engagement)
+    res = asyncio.run(tool.execute({"tasks": ["recon"]}, bare))
+    assert res.is_error
+    assert "unavailable" in res.content
+
+
+def test_dispatch_runs_workers_and_aggregates(tmp_workdir, engagement, monkeypatch):
+    monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "worker done: nothing notable")
+    cfg = Config()
+    tool = DispatchChaklaTool()
+    ctx = tools_mod.ToolContext(
+        workdir=tmp_workdir, engagement=engagement, config=cfg,
+        permissions=Permissions(), audit=AuditLog(), yolo=False,
+    )
+    res = asyncio.run(tool.execute({"tasks": ["recon A", "recon B"]}, ctx))
+    assert not res.is_error
+    assert "2" in res.content  # mentions 2 workers
+    assert "recon A" in res.content
+    assert "recon B" in res.content
+
+
+def test_dispatch_clamps_to_max_workers(tmp_workdir, engagement, monkeypatch):
+    monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "ok")
+    cfg = Config(chakla_max_workers=2)
+    tool = DispatchChaklaTool()
+    ctx = tools_mod.ToolContext(
+        workdir=tmp_workdir, engagement=engagement, config=cfg,
+        permissions=Permissions(), audit=AuditLog(),
+    )
+    res = asyncio.run(tool.execute({"tasks": ["a", "b", "c", "d"]}, ctx))
+    assert not res.is_error
+    assert "clamped" in res.content.lower() or "capped" in res.content.lower()
