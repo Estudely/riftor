@@ -38,13 +38,15 @@ async def test_config_modal_renders_all_fields():
                 ("#cfg-provider", Select), ("#cfg-model-select", Select),
                 ("#cfg-model", Input), ("#cfg-base", Input), ("#cfg-key", Input),
                 ("#cfg-temp", Input), ("#cfg-maxtok", Input),
+                ("#cfg-chakla-model", Input), ("#cfg-label-main", Input),
+                ("#cfg-label-worker", Input),
                 ("#cfg-theme", Select), ("#cfg-lore", Switch),
             ]:
                 assert screen.query_one(fid, kind) is not None, fid
-            # three grouped section headers (MODEL / GENERATION / APPEARANCE)
-            assert len(list(screen.query(".config-section"))) == 3
+            # four grouped section headers (MODEL / GENERATION / WORKERS / APPEARANCE)
+            assert len(list(screen.query(".config-section"))) == 4
             # aligned label column: one .field-label per field row
-            assert len(list(screen.query(".field-label"))) == 10
+            assert len(list(screen.query(".field-label"))) == 13
             await pilot.press("escape")
             await pilot.pause()
 

@@ -90,6 +90,16 @@ class ConfigScreen(ModalScreen[dict | None]):
                 yield _row("Max tokens", Input(value=str(self.config.max_tokens), id="cfg-maxtok"))
 
                 yield Rule()
+                yield Label("WORKERS", classes="config-section")
+                yield _row("Chakla model", Input(
+                    value=self.config.chakla_model,
+                    placeholder="cheap worker model id", id="cfg-chakla-model"))
+                yield _row("Main label", Input(
+                    value=self.config.label_main, id="cfg-label-main"))
+                yield _row("Worker label", Input(
+                    value=self.config.label_worker, id="cfg-label-worker"))
+
+                yield Rule()
                 yield Label("APPEARANCE", classes="config-section")
                 yield _row("Theme", Select([(n, n) for n in THEMES], value=theme,
                                            allow_blank=False, id="cfg-theme"))
@@ -188,6 +198,12 @@ class ConfigScreen(ModalScreen[dict | None]):
             "max_tokens": max_tokens,
             "theme": self.query_one("#cfg-theme", Select).value,
             "lore": self.query_one("#cfg-lore", Switch).value,
+            "chakla_model": self.query_one("#cfg-chakla-model", Input).value.strip()
+                or self.config.chakla_model,
+            "label_main": self.query_one("#cfg-label-main", Input).value.strip()
+                or self.config.label_main,
+            "label_worker": self.query_one("#cfg-label-worker", Input).value.strip()
+                or self.config.label_worker,
         }
         key = self.query_one("#cfg-key", Input).value.strip()
         if key:

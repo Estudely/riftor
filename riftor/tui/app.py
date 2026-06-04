@@ -528,6 +528,9 @@ class RiftorApp(App):
         self.config.temperature = result["temperature"]
         self.config.max_tokens = result["max_tokens"]
         self.config.lore = result["lore"]
+        self.config.chakla_model = result.get("chakla_model", self.config.chakla_model)
+        self.config.label_main = result.get("label_main", self.config.label_main)
+        self.config.label_worker = result.get("label_worker", self.config.label_worker)
 
         provider = result.get("provider")
         if provider:

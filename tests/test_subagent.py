@@ -272,3 +272,19 @@ def test_statusbar_has_chakla_usage_setter():
         pass  # NoActiveAppError is expected on an unmounted widget
     assert bar.chakla_tokens == 1500
     assert bar.chakla_cost == 0.012
+
+
+def test_config_screen_result_keys_persist():
+    # Simulate the dict ConfigScreen.dismiss returns, then apply it like _open_config.
+    cfg = Config()
+    result = {
+        "model": cfg.model, "provider": "anthropic", "api_base": None,
+        "temperature": 0.3, "max_tokens": 2048, "theme": "rift", "lore": True,
+        "chakla_model": "anthropic/claude-haiku-4-5-20251001",
+        "label_main": "Hawk", "label_worker": "Finch",
+    }
+    cfg.chakla_model = result["chakla_model"]
+    cfg.label_main = result["label_main"]
+    cfg.label_worker = result["label_worker"]
+    assert cfg.label_main == "Hawk"
+    assert 'label_main = "Hawk"' in cfg._to_toml()
