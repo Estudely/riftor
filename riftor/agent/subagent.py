@@ -11,11 +11,11 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from riftor import tools
 from riftor.agent.context import Context
-from riftor.agent.provider import Provider, ProviderError, ToolCall, Usage
+from riftor.agent.provider import Provider, ProviderError, ToolCall, Turn, Usage
 from riftor.tools import ToolContext, ToolResult
 
 if TYPE_CHECKING:
@@ -35,7 +35,7 @@ class ChaklaResult:
     text: str = ""
     usage: Usage = field(default_factory=Usage)
     n_recorded: int = 0
-    status: str = "done"  # "done" | "timeout" | "error"
+    status: Literal["done", "timeout", "error"] = "done"
     error: str | None = None
 
 
@@ -66,12 +66,12 @@ async def run_chakla(
     try:
         for _ in range(max_steps):
             ctx.repair()
-            turn = None
+            turn: Turn | None = None
             async for kind, payload in worker_provider.stream_turn(ctx.messages, schemas):
                 if kind == "text":
                     result.text += str(payload)
                 elif kind == "done":
-                    turn = payload
+                    turn = payload  # type: ignore[assignment]
             if turn is None:
                 break
             result.usage.add(turn.usage)
@@ -145,8 +145,10 @@ async def _run_chakla_tool(
                 "The dispatch did not authorize it."
             )
 
-    # Execute, serializing all work behind the shared lock so concurrent workers
-    # never trip SQLITE_BUSY on the shared engagement DB.
+    # Workers share one engagement DB connection on a single event loop. The lock
+    # serializes each tool's execution so concurrent workers can't interleave
+    # multi-step tool work (e.g. a long-running bash await) against the shared
+    # engagement state mid-operation.
     async with db_lock:
         try:
             res = await tool.execute(call.arguments, toolctx)
