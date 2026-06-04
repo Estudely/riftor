@@ -213,3 +213,31 @@ def test_dispatch_clamps_to_max_workers(tmp_workdir, engagement, monkeypatch):
     res = asyncio.run(tool.execute({"tasks": ["a", "b", "c", "d"]}, ctx))
     assert not res.is_error
     assert "clamped" in res.content.lower() or "capped" in res.content.lower()
+
+
+def test_dispatch_tool_is_registered():
+    names = [t.name for t in tools_mod.all_tools()]
+    assert "dispatch_chakla" in names
+    # registered before the mutating core tools (write/edit/bash)
+    assert names.index("dispatch_chakla") < names.index("bash")
+
+
+def test_dispatch_timeout_is_reported(tmp_workdir, engagement, monkeypatch):
+    monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "ok")
+    cfg = Config(chakla_timeout_s=1)
+    tool = DispatchChaklaTool()
+    ctx = tools_mod.ToolContext(
+        workdir=tmp_workdir, engagement=engagement, config=cfg,
+        permissions=Permissions(), audit=AuditLog(),
+    )
+
+    # Patch run_chakla to hang, so wait_for fires the timeout path.
+    import riftor.tools.subagent as sub
+
+    async def _hang(*a, **k):
+        await asyncio.sleep(5)
+
+    monkeypatch.setattr(sub, "run_chakla", _hang)
+    res = asyncio.run(tool.execute({"tasks": ["slow task"]}, ctx))
+    assert not res.is_error
+    assert "timed out" in res.content
