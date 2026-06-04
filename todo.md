@@ -146,25 +146,29 @@ multiple lightweight, cheap workers **Chakla** (🐦 sparrows) to run batches of
 low-effort parallel tasks (e.g. recon). Naming terminology is config-renameable
 (`label_main` / `label_worker`).
 
-**7a — core dispatch (Approach A)**
-- [ ] `DispatchChaklaTool` (`tools/subagent.py`): explicit `tasks` list → one worker per task
-- [ ] `run_chakla()` worker loop (`agent/subagent.py`): stripped headless loop, isolated
+**7a — core dispatch (Approach A)**  ✅ (shipped on `feat/subagents-baaj-chakla`)
+- [x] `DispatchChaklaTool` (`tools/subagent.py`): explicit `tasks` list → one worker per task
+- [x] `run_chakla()` worker loop (`agent/subagent.py`): stripped headless loop, isolated
       Context, `lore=False`, own Usage accumulator
-- [ ] Second cheap Provider via `config.model_copy(update={"model": chakla_model})`
-- [ ] Config fields: `chakla_model` (cheap default), `label_main`/`label_worker`,
-      `chakla_max_workers` (~5), worker step budget (~8)
-- [ ] Extend `ToolContext` with optional `config`/`permissions`/`audit`/`yolo` (guard None)
-- [ ] Permission bridge: approving the dispatch grants workers scoped, ephemeral
-      tool access (bash) — scope still hard-enforced per-command
-- [ ] Concurrency: `asyncio.gather` + per-worker `asyncio.wait_for` timeout;
-      shared `asyncio.Lock` around engagement-DB writes
-- [ ] CLI `--chakla-model` + completions + docs; offline test via `RIFTOR_DEMO_RESPONSE`
+- [x] Second cheap Provider via `config.model_copy(update={"model": chakla_model})`
+- [x] Config fields: `chakla_model` (cheap default), `label_main`/`label_worker`,
+      `chakla_max_workers` (~5), worker step budget (~8), `chakla_timeout_s` (~300)
+- [x] `terminology()` helper (`terminology.py`) — single source of truth for renameable labels
+- [x] Extend `ToolContext` with optional `config`/`permissions`/`audit`/`yolo` (guard None)
+- [x] Permission bridge: approving the dispatch grants workers scoped, ephemeral
+      tool access (bash) — scope still hard-enforced per-command; deny-wins
+- [x] Concurrency: `asyncio.gather` + per-worker `asyncio.wait_for` timeout;
+      shared `asyncio.Lock` serializing worker tool execution
+- [x] `/config` WORKERS section (Chakla model + labels) + status-bar worker-cost segment (wiring)
+- [x] System prompt: "Delegating to workers (Chakla)" — teach Baaj when to dispatch
+- [x] CLI `--chakla-model` + bash/zsh completions + docs; offline tests via `RIFTOR_DEMO_RESPONSE`
 
 **7b — live worker visibility (Approach B, follow-up)**
 - [ ] Tool→UI progress channel (none exists today): thread a progress callback into
       `run_chakla` so workers emit status events
 - [ ] TUI "flock" panel: per-Chakla live status (running / done / N findings / error)
-- [ ] Status bar: separate worker-cost/token segment (set when non-zero)
+- [ ] Per-dispatch worker-usage propagation: return `Usage` from the dispatch tool and
+      feed `app.chakla_usage` so the 🐦 status segment populates (segment wiring done in 7a)
 - [ ] Decide headless equivalent (e.g. periodic stderr progress lines)
 
 ---
