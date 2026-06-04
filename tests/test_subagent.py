@@ -288,3 +288,9 @@ def test_config_screen_result_keys_persist():
     cfg.label_worker = result["label_worker"]
     assert cfg.label_main == "Hawk"
     assert 'label_main = "Hawk"' in cfg._to_toml()
+
+
+def test_system_prompt_mentions_dispatch():
+    from riftor.agent.context import _load_system_prompt
+    prompt = _load_system_prompt()
+    assert "dispatch_chakla" in prompt
