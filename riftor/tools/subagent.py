@@ -114,10 +114,26 @@ class DispatchChaklaTool(Tool):
         worker_provider = Provider(worker_cfg)
         db_lock = asyncio.Lock()
         timeout = max(1, cfg.chakla_timeout_s)
+        emit = ctx.progress or (lambda _e: None)
 
-        async def _one(task: str) -> ChaklaResult:
+        # All rows appear immediately: emit queued for every worker up front.
+        for idx, task in enumerate(tasks):
+            emit({"worker": idx, "task": task, "state": "queued",
+                  "detail": "", "usage": None, "n_recorded": 0})
+
+        async def _one(idx: int, task: str) -> ChaklaResult:
+            def worker_emit(partial: dict) -> None:
+                # run_chakla supplies state/detail/usage; we add worker/task and
+                # fill any missing keys so every emitted event has the full
+                # 6-key shape (worker/task/state/detail/usage/n_recorded).
+                # `partial` overrides the defaults.
+                emit({"worker": idx, "task": task, "state": "detail",
+                      "detail": "", "usage": None, "n_recorded": 0, **partial})
+
+            emit({"worker": idx, "task": task, "state": "running",
+                  "detail": "", "usage": None, "n_recorded": 0})
             try:
-                return await asyncio.wait_for(
+                r = await asyncio.wait_for(
                     run_chakla(
                         task,
                         worker_provider=worker_provider,
@@ -128,15 +144,28 @@ class DispatchChaklaTool(Tool):
                         yolo=ctx.yolo,
                         db_lock=db_lock,
                         grant=grant,
+                        progress=worker_emit,
                     ),
                     timeout=timeout,
                 )
             except asyncio.TimeoutError:
-                return ChaklaResult(task=task, status="timeout",
-                                    error=f"timed out after {timeout}s")
+                r = ChaklaResult(task=task, status="timeout",
+                                 error=f"timed out after {timeout}s")
+            emit({"worker": idx, "task": task, "state": r.status,
+                  "detail": (r.error or _terminal_detail(r)),
+                  "usage": r.usage, "n_recorded": r.n_recorded})
+            return r
 
-        results = await asyncio.gather(*[_one(t) for t in tasks])
+        results = await asyncio.gather(*[_one(i, t) for i, t in enumerate(tasks)])
         return ToolResult(_format(results, labels, worker_cfg.model, clamped))
+
+
+def _terminal_detail(r: ChaklaResult) -> str:
+    """A short one-liner for a finished worker's terminal event."""
+    if r.n_recorded:
+        return f"{r.n_recorded} recorded"
+    first = r.text.strip().splitlines()[0] if r.text.strip() else ""
+    return first[:80]
 
 
 def _format(results: list[ChaklaResult], labels: dict, model: str, clamped: bool) -> str:

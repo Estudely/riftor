@@ -588,3 +588,101 @@ def test_worker_provider_does_not_clobber_main_base():
     assert cfg.providers["openai"].api_base == PROVIDERS["openai"].default_base
     # worker deepseek got ITS OWN default base, not openai's
     assert cfg.providers["deepseek"].api_base == PROVIDERS["deepseek"].default_base
+
+
+def test_dispatch_emits_ordered_lifecycle_events(tmp_workdir, engagement, monkeypatch):
+    monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "worker done")
+    cfg = Config(api_key="test-key")
+    events = []
+    ctx = tools_mod.ToolContext(
+        workdir=tmp_workdir, engagement=engagement, config=cfg,
+        permissions=Permissions(), audit=AuditLog(), yolo=False,
+        progress=lambda e: events.append(dict(e)),
+    )
+    res = asyncio.run(DispatchChaklaTool().execute(
+        {"tasks": ["recon A", "recon B", "recon C"], "tools": []}, ctx))
+    assert not res.is_error
+    by_worker = {}
+    for e in events:
+        by_worker.setdefault(e["worker"], []).append(e["state"])
+    assert set(by_worker) == {0, 1, 2}
+    terminal = {"done", "timeout", "error"}
+    for w, states in by_worker.items():
+        assert states[0] == "queued", states
+        assert "running" in states, states
+        assert states[-1] in terminal, states
+        assert sum(1 for s in states if s in terminal) == 1, states
+
+
+def test_dispatch_terminal_events_carry_usage(tmp_workdir, engagement, monkeypatch):
+    monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "worker done")
+    cfg = Config(api_key="test-key")
+    events = []
+    ctx = tools_mod.ToolContext(
+        workdir=tmp_workdir, engagement=engagement, config=cfg,
+        permissions=Permissions(), audit=AuditLog(),
+        progress=lambda e: events.append(dict(e)),
+    )
+    asyncio.run(DispatchChaklaTool().execute({"tasks": ["a", "b"], "tools": []}, ctx))
+    terminals = [e for e in events if e["state"] in ("done", "timeout", "error")]
+    assert len(terminals) == 2
+    for e in terminals:
+        assert e["usage"] is not None
+
+
+def test_dispatch_terminal_usage_sums_to_worker_total(tmp_workdir, engagement, monkeypatch):
+    from riftor.agent.provider import Usage
+    import riftor.tools.subagent as sub
+
+    async def _fake(task, **k):
+        return ChaklaResult(task=task, status="done",
+                            usage=Usage(completion_tokens=23_600, cost=0.007), n_recorded=1)
+
+    monkeypatch.setattr(sub, "run_chakla", _fake)
+    cfg = Config(api_key="test-key")
+    events = []
+    ctx = tools_mod.ToolContext(
+        workdir=tmp_workdir, engagement=engagement, config=cfg,
+        permissions=Permissions(), audit=AuditLog(),
+        progress=lambda e: events.append(dict(e)),
+    )
+    asyncio.run(DispatchChaklaTool().execute({"tasks": ["a", "b"], "tools": []}, ctx))
+    accumulated = Usage()
+    for e in events:
+        if e["state"] in ("done", "timeout", "error") and e["usage"] is not None:
+            accumulated.add(e["usage"])
+    assert accumulated.total_tokens == 47_200
+    assert abs(accumulated.cost - 0.014) < 1e-9
+
+
+def test_dispatch_progress_none_is_safe(tmp_workdir, engagement, monkeypatch):
+    monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "worker done: nothing notable")
+    cfg = Config(api_key="test-key")
+    ctx = tools_mod.ToolContext(
+        workdir=tmp_workdir, engagement=engagement, config=cfg,
+        permissions=Permissions(), audit=AuditLog(),
+    )
+    res = asyncio.run(DispatchChaklaTool().execute({"tasks": ["recon A"], "tools": []}, ctx))
+    assert not res.is_error
+    assert "recon A" in res.content
+
+
+def test_dispatch_timeout_emits_timeout_event(tmp_workdir, engagement, monkeypatch):
+    monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "ok")
+    cfg = Config(chakla_timeout_s=1, api_key="test-key")
+    events = []
+    ctx = tools_mod.ToolContext(
+        workdir=tmp_workdir, engagement=engagement, config=cfg,
+        permissions=Permissions(), audit=AuditLog(),
+        progress=lambda e: events.append(dict(e)),
+    )
+    import riftor.tools.subagent as sub
+
+    async def _hang(*a, **k):
+        await asyncio.sleep(5)
+
+    monkeypatch.setattr(sub, "run_chakla", _hang)
+    res = asyncio.run(DispatchChaklaTool().execute({"tasks": ["slow"], "tools": []}, ctx))
+    assert not res.is_error
+    states = [e["state"] for e in events if e["worker"] == 0]
+    assert "timeout" in states, states
