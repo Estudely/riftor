@@ -1,7 +1,14 @@
 """Tests for the Baaj/Chakla subagent feature (all offline)."""
 from __future__ import annotations
 
+import asyncio
+
+from riftor import tools as tools_mod
+from riftor.agent.provider import Provider
+from riftor.agent.subagent import ChaklaResult, run_chakla
 from riftor.config import Config
+from riftor.safety.audit import AuditLog
+from riftor.safety.permissions import Permissions
 from riftor.terminology import terminology
 from riftor.tools.base import ToolContext
 
@@ -50,3 +57,48 @@ def test_toolcontext_new_fields_default_to_none(tmp_workdir, engagement):
     assert ctx.permissions is None
     assert ctx.audit is None
     assert ctx.yolo is False
+
+
+def _worker_provider(cfg: Config) -> Provider:
+    return Provider(cfg.model_copy(update={"model": cfg.chakla_model}))
+
+
+async def _run_one(task, *, cfg, engagement, grant, yolo=False, monkeypatch_env):
+    # RIFTOR_DEMO_RESPONSE makes the provider stream canned text with no network.
+    monkeypatch_env("RIFTOR_DEMO_RESPONSE", "worker reporting: recon complete, no open ports")
+    toolctx = tools_mod.ToolContext(
+        workdir=engagement.dir.parent,
+        engagement=engagement,
+        config=cfg,
+        permissions=Permissions(),
+        audit=AuditLog(),
+        yolo=yolo,
+    )
+    return await run_chakla(
+        task,
+        worker_provider=_worker_provider(cfg),
+        toolctx=toolctx,
+        permissions=toolctx.permissions,
+        audit=toolctx.audit,
+        max_steps=cfg.chakla_max_steps,
+        yolo=yolo,
+        db_lock=asyncio.Lock(),
+        grant=grant,
+    )
+
+
+def test_run_chakla_returns_result_with_text(tmp_workdir, engagement, monkeypatch):
+    cfg = Config()
+    result = asyncio.run(
+        _run_one(
+            "recon 10.0.0.5",
+            cfg=cfg,
+            engagement=engagement,
+            grant=set(),
+            monkeypatch_env=monkeypatch.setenv,
+        )
+    )
+    assert isinstance(result, ChaklaResult)
+    assert result.status == "done"
+    assert "recon complete" in result.text
+    assert result.error is None
