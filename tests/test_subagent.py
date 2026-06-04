@@ -461,6 +461,55 @@ def test_toolcontext_progress_is_callable_when_set(tmp_workdir, engagement):
     assert seen == [{"worker": 0, "state": "running"}]
 
 
+def test_run_chakla_emits_detail_events(tmp_workdir, engagement):
+    from riftor.agent.provider import ToolCall, Turn, Usage
+
+    class _StubProvider:
+        """Yields one scope_list tool call, then a plain answer turn."""
+        def __init__(self):
+            self._calls = 0
+
+        async def stream_turn(self, messages, schemas):
+            self._calls += 1
+            if self._calls == 1:
+                tc = ToolCall(id="t1", name="scope_list", arguments={})
+                yield ("done", Turn(
+                    text="", tool_calls=[tc],
+                    assistant_message={"role": "assistant", "content": None,
+                                       "tool_calls": [{"id": "t1", "type": "function",
+                                                       "function": {"name": "scope_list",
+                                                                    "arguments": "{}"}}]},
+                    usage=Usage(prompt_tokens=10, completion_tokens=5),
+                ))
+            else:
+                yield ("text", "done.")
+                yield ("done", Turn(
+                    text="done.", tool_calls=[],
+                    assistant_message={"role": "assistant", "content": "done."},
+                    usage=Usage(prompt_tokens=4, completion_tokens=2),
+                ))
+
+    events = []
+    cfg = Config()
+    toolctx = tools_mod.ToolContext(
+        workdir=engagement.dir.parent, engagement=engagement, config=cfg,
+        permissions=Permissions(), audit=AuditLog(),
+    )
+    result = asyncio.run(run_chakla(
+        "recon 10.0.0.5",
+        worker_provider=_StubProvider(),  # type: ignore[arg-type]
+        toolctx=toolctx, permissions=toolctx.permissions, audit=toolctx.audit,
+        max_steps=cfg.chakla_max_steps, yolo=False,
+        db_lock=asyncio.Lock(), grant=set(),
+        progress=lambda e: events.append(e),
+    ))
+    assert result.status == "done"
+    detail_events = [e for e in events if e["state"] == "detail"]
+    assert len(detail_events) == 1, events
+    assert detail_events[0]["detail"]  # non-empty label like "scope_list…"
+    assert "usage" in detail_events[0]
+
+
 def test_worker_provider_does_not_clobber_main_base():
     # Reproduce the review footgun: main=openai (real base+key), worker=deepseek.
     # The worker store must NOT overwrite the main openai entry's base, and must
