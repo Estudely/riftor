@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from riftor.config import Config
+from riftor.terminology import terminology
 
 
 def test_config_has_chakla_defaults():
@@ -23,3 +24,20 @@ def test_config_toml_roundtrips_chakla_fields():
     assert "chakla_timeout_s = 300" in toml
     assert 'label_main = "Baaj"' in toml
     assert 'label_worker = "Chakla"' in toml
+
+
+def test_terminology_defaults():
+    t = terminology(Config())
+    assert t["main"] == "Baaj"
+    assert t["worker"] == "Chakla"
+    assert t["main_emoji"] == "🦅"
+    assert t["worker_emoji"] == "🐦"
+
+
+def test_terminology_respects_renamed_labels():
+    t = terminology(Config(label_main="Hawk", label_worker="Finch"))
+    assert t["main"] == "Hawk"
+    assert t["worker"] == "Finch"
+    # emoji are fixed branding; only the text labels are renameable
+    assert t["main_emoji"] == "🦅"
+    assert t["worker_emoji"] == "🐦"
