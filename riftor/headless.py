@@ -55,11 +55,17 @@ async def _run(cfg: Config, workdir: Path, prompt: str, scope_file: str | None, 
             engagement.import_scope(Path(scope_file).expanduser().read_text(encoding="utf-8"))
         except Exception as exc:  # noqa: BLE001
             print(f"riftor: scope file error: {exc}", file=sys.stderr)
-    toolctx = ToolContext(
-        workdir=workdir, engagement=engagement, max_result_chars=cfg.max_result_chars
-    )
     permissions = Permissions.load(PERMISSIONS_PATH)
     audit = AuditLog()
+    toolctx = ToolContext(
+        workdir=workdir,
+        engagement=engagement,
+        max_result_chars=cfg.max_result_chars,
+        config=cfg,
+        permissions=permissions,
+        audit=audit,
+        yolo=yolo,
+    )
     schemas = tools.schemas()
 
     context.add_user(prompt)

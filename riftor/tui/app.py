@@ -158,11 +158,6 @@ class RiftorApp(App):
         self.tools = tools.all_tools()
         self.tool_schemas = tools.schemas()
         self.engagement = Engagement(self.workdir)
-        self.toolctx = ToolContext(
-            workdir=self.workdir,
-            engagement=self.engagement,
-            max_result_chars=config.max_result_chars,
-        )
         self.permissions = Permissions.load(PERMISSIONS_PATH)
         self.audit = AuditLog()
         self.max_steps = config.max_steps
@@ -174,6 +169,16 @@ class RiftorApp(App):
         self._last_output: str = ""
         self._last_user_text: str | None = None
         self.usage = Usage()
+        self.chakla_usage = Usage()
+        self.toolctx = ToolContext(
+            workdir=self.workdir,
+            engagement=self.engagement,
+            max_result_chars=config.max_result_chars,
+            config=self.config,
+            permissions=self.permissions,
+            audit=self.audit,
+            yolo=self.yolo,
+        )
         self._rate_times: list[float] = []
         self._autoscroll = True
 

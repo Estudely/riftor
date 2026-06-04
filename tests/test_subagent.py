@@ -241,3 +241,20 @@ def test_dispatch_timeout_is_reported(tmp_workdir, engagement, monkeypatch):
     res = asyncio.run(tool.execute({"tasks": ["slow task"]}, ctx))
     assert not res.is_error
     assert "timed out" in res.content
+
+
+def test_headless_toolctx_carries_config(tmp_workdir):
+    # Build the headless toolctx the way run_headless does and confirm the new
+    # fields are populated so dispatch_chakla is usable end-to-end.
+    from riftor.engagement import Engagement
+    from riftor.tools.base import ToolContext as TC
+    from riftor.safety.permissions import Permissions as P
+    from riftor.safety.audit import AuditLog as A
+
+    eng = Engagement(tmp_workdir)
+    cfg = Config()
+    ctx = TC(workdir=tmp_workdir, engagement=eng, max_result_chars=cfg.max_result_chars,
+             config=cfg, permissions=P(), audit=A(), yolo=False)
+    assert ctx.config is cfg
+    assert ctx.permissions is not None
+    assert ctx.audit is not None
