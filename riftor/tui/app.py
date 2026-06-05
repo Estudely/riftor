@@ -1086,6 +1086,7 @@ class RiftorApp(App):
         self.session_id = sessions.new_id()
         self.context.clear()
         self.usage = Usage()
+        self.chakla_usage = Usage()  # reset the 🐦 worker gauge with the session
         self._refresh_usage()
         self._clear_flock()
         self.chat.remove_children()
@@ -1116,6 +1117,7 @@ class RiftorApp(App):
     def action_clear(self) -> None:
         self.context.clear()
         self.usage = Usage()
+        self.chakla_usage = Usage()  # reset the 🐦 worker gauge with the session
         self._refresh_usage()
         self._clear_flock()
         self.chat.remove_children()
