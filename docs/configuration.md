@@ -19,6 +19,9 @@ falls back to detected defaults (it won't overwrite your file) and launches.
 | `max_tokens` | int | `2048` | Max tokens per model response. |
 | `theme` | string | `rift` | Dark: `rift` `dusk` `void` `fracture` `singularity` · Light: `dawn` `paper`. Changing it in `/config` previews live. |
 | `lore` | bool | `true` | The subtle rift persona; off = strictly professional voice. |
+| `show_thinking` | bool | `true` | Show the model's reasoning as a dim block above each answer (and on stderr in `--headless`). |
+| `show_tool_output` | bool | `true` | Render tool-result blocks in the chat. When off, the `⛏` call line still shows and hidden output stays reachable via `/show <id>`. |
+| `reasoning_effort` | string | `medium` | Thinking budget requested from the model: `none` `low` `medium` `high`. `none` (or `show_thinking = false`) sends no reasoning request. |
 | `max_steps` | int | `16` | Tool-call steps per task before pausing (extend live with `/continue`). |
 | `max_result_chars` | int | `30000` | Cap on tool output fed back to the model. |
 | `result_preview_lines` | int | `25` | Lines of a tool result shown before `…/show <id>`. |
@@ -38,6 +41,9 @@ temperature = 0.3
 max_tokens = 2048
 theme = "rift"
 lore = true
+show_thinking = true
+show_tool_output = true
+reasoning_effort = "medium"
 max_steps = 16
 rate_limit_per_min = 0
 

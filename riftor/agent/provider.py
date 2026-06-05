@@ -193,7 +193,11 @@ class Provider:
     async def stream_turn(
         self, messages: list[dict], tools: list[dict] | None = None
     ) -> AsyncIterator[tuple[str, object]]:
-        """Yield ``("text", str)`` deltas, then a final ``("done", Turn)``."""
+        """Yield ``("text"|"thinking", str)`` deltas, then a final ``("done", Turn)``.
+
+        ``"thinking"`` carries the model's reasoning (litellm ``reasoning_content``)
+        and is display-only — it is never folded into the returned ``Turn``.
+        """
         response = await self._acompletion(**self._kwargs(messages, tools))
         text_parts: list[str] = []
         acc: dict[int, dict] = {}
