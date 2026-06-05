@@ -213,6 +213,13 @@ class Provider:
                 text_parts.append(content)
                 yield ("text", content)
 
+            reasoning = getattr(delta, "reasoning_content", None)
+            if reasoning:
+                # Display-only: surface the model's thinking to the UI but never
+                # accumulate it into the assistant message (keeps history clean,
+                # avoids provider replay issues with thinking blocks).
+                yield ("thinking", reasoning)
+
             for tc in getattr(delta, "tool_calls", None) or []:
                 idx = getattr(tc, "index", 0) or 0
                 slot = acc.setdefault(idx, {"id": None, "name": None, "args": ""})
