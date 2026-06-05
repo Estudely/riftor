@@ -153,13 +153,54 @@ async def main() -> None:
         await pilot.pause()
         assert app.theme == "void", app.theme
 
-        # /config opens the modal; escape cancels it
+        # /config opens the sidebar modal. Verify: (1) it mounts, (2) every
+        # field id stays query-able regardless of which section is active —
+        # this is the load-bearing contract, since Save reads them all via
+        # query_one and the sidebar must NOT unmount off-screen sections,
+        # (3) switching the active section toggles panel visibility,
+        # (4) escape cancels.
         from riftor.tui.config_screen import ConfigScreen
 
         inp.value = "/config"
         await pilot.press("enter")
         await pilot.pause()
-        assert isinstance(app.screen, ConfigScreen), type(app.screen)
+        screen = app.screen
+        assert isinstance(screen, ConfigScreen), type(screen)
+
+        # Every field across every section must be mounted up front. If the
+        # sidebar refactor ever unmounts a hidden section, these raise.
+        all_field_ids = [
+            "#cfg-provider", "#cfg-model-select", "#cfg-model", "#cfg-base", "#cfg-key",
+            "#cfg-temp", "#cfg-maxtok",
+            "#cfg-chakla-provider", "#cfg-chakla-model-select", "#cfg-chakla-custom",
+            "#cfg-label-main", "#cfg-label-worker",
+            "#cfg-theme", "#cfg-lore",
+            "#cfg-show-thinking", "#cfg-show-tool-output", "#cfg-reasoning-effort",
+        ]
+        for fid in all_field_ids:
+            assert screen.query(fid), f"field {fid} not mounted in sidebar config"
+
+        # The five section panels exist and exactly one is visible at a time.
+        panel_ids = [
+            "#section-model", "#section-generation", "#section-workers",
+            "#section-appearance", "#section-display",
+        ]
+        for pid in panel_ids:
+            assert screen.query(pid), f"section panel {pid} missing"
+        visible = [pid for pid in panel_ids
+                   if not screen.query_one(pid).has_class("hidden")]
+        assert visible == ["#section-model"], f"expected only Model visible, got {visible}"
+
+        # Switch to the Workers section via the screen's section selector and
+        # confirm visibility moved there while fields stay query-able.
+        screen.show_section("workers")
+        await pilot.pause()
+        visible = [pid for pid in panel_ids
+                   if not screen.query_one(pid).has_class("hidden")]
+        assert visible == ["#section-workers"], f"expected Workers visible, got {visible}"
+        # a Model-section field is still mounted even though Model is hidden
+        assert screen.query("#cfg-provider"), "hidden-section field must stay mounted"
+
         await pilot.press("escape")
         await pilot.pause()
         assert not isinstance(app.screen, ConfigScreen)
