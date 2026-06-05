@@ -1076,6 +1076,7 @@ class RiftorApp(App):
         self.session_id = data["id"]
         self.context.load(data.get("messages", []))
         self.context.repair()
+        self._clear_flock()
         self.chat.remove_children()
         self._replay_transcript(self.context.messages)
         self._note(f"resumed session {sid} ({len(data.get('messages', []))} messages)")
@@ -1086,6 +1087,7 @@ class RiftorApp(App):
         self.context.clear()
         self.usage = Usage()
         self._refresh_usage()
+        self._clear_flock()
         self.chat.remove_children()
         self._note(f"new session {self.session_id}")
 
@@ -1115,6 +1117,7 @@ class RiftorApp(App):
         self.context.clear()
         self.usage = Usage()
         self._refresh_usage()
+        self._clear_flock()
         self.chat.remove_children()
         self._note("conversation cleared")
 
@@ -1235,6 +1238,7 @@ class RiftorApp(App):
         except Exception as exc:  # noqa: BLE001
             self._error(f"rift collapsed — {exc}")
         finally:
+            self._clear_flock()
             self.status.set_busy(False)
             self.chat.scroll_end(animate=False)
             self._save_session(complete=True)

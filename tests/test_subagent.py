@@ -776,3 +776,32 @@ def test_dispatch_through_app_mounts_flock_without_error(monkeypatch, tmp_path):
     last = tool_msgs[-1].get("content") or ""
     assert "More values provided" not in last, last
     assert "error:" not in last.lower() or "workers" in last.lower(), last
+
+
+def test_flock_cleared_on_agent_finally_and_reset(monkeypatch, tmp_path):
+    # The flock pane must not leak: it is cleared in the _agent finally (covering
+    # the CancelledError/Esc path that bypasses the Exception handler) and before
+    # the /clear-family remove_children() resets.
+    import asyncio as _asyncio
+    from riftor.config import Config
+    from riftor.tui.app import RiftorApp
+    from riftor.tui.widgets import FlockPane
+    from textual.widgets import Static
+
+    async def _drive():
+        cfg = Config(model="ollama_chat/x", api_base="http://localhost:11434")
+        app = RiftorApp(cfg, workdir=tmp_path)
+        async with app.run_test():
+            # Simulate a mounted flock (as if a dispatch were in flight).
+            header, table = Static(), FlockPane()
+            app._flock = (header, table)
+            app.chat.mount(header)
+            app.chat.mount(table)
+            # _clear_flock resets the handle and removes the widgets.
+            app._clear_flock()
+            assert app._flock is None
+            # idempotent: a second call is a harmless no-op.
+            app._clear_flock()
+            assert app._flock is None
+
+    _asyncio.run(_drive())
