@@ -36,7 +36,7 @@ from riftor.safety.permissions import ConfirmScreen, Permissions
 from riftor.tools import ToolContext, ToolResult
 from riftor.tui.config_screen import ConfigScreen
 from riftor.tui.theme import THEMES, css_variable_defaults, palette
-from riftor.tui.widgets import STAGE_NAMES, Banner, CommandDropdown, StatusBar
+from riftor.tui.widgets import STAGE_NAMES, Banner, CommandDropdown, FlockPane, StatusBar
 
 if TYPE_CHECKING:
     from riftor.config import Config
@@ -170,6 +170,7 @@ class RiftorApp(App):
         self._last_user_text: str | None = None
         self.usage = Usage()
         self.chakla_usage = Usage()
+        self._flock: tuple[Static, FlockPane] | None = None  # (header, table) while a dispatch is live
         self.toolctx = ToolContext(
             workdir=self.workdir,
             engagement=self.engagement,
@@ -178,6 +179,7 @@ class RiftorApp(App):
             permissions=self.permissions,
             audit=self.audit,
             yolo=self.yolo,
+            progress=self._on_chakla_progress,
         )
         self._rate_times: list[float] = []
         self._autoscroll = True
@@ -278,6 +280,44 @@ class RiftorApp(App):
         self.status.set_chakla_usage(self.chakla_usage.total_tokens, self.chakla_usage.cost)
         pct = int(self.context.estimated_tokens() / self._context_window() * 100)
         self.status.set_context(min(pct, 999))
+
+    def _on_chakla_progress(self, event: dict) -> None:
+        """Render a live worker progress event. Runs on the UI task (the agent
+        loop is @work(exclusive=True), async) so widget mutation is direct."""
+        if self._flock is None:
+            header = Static(classes="flock-header")
+            table = FlockPane()
+            self._flock = (header, table)
+            self.chat.mount(header)
+            self.chat.mount(table)
+            self._scroll_if_following()
+        header, table = self._flock
+        table.update_worker(event)
+        if event.get("state") in ("done", "timeout", "error"):
+            usage = event.get("usage")
+            if usage is not None:
+                self.chakla_usage.add(usage)
+                self._refresh_usage()
+        header.update(Text(self._flock_header_text(table), style=self._pal()["violet"]))
+
+    def _flock_header_text(self, table: FlockPane) -> str:
+        # Count from the widget's tracked raw state (public accessors), NOT by
+        # re-parsing rendered cells — so a glyph/label change can't break counts.
+        indices = table.worker_indices
+        done = sum(1 for i in indices if table.worker_state(i) in ("done", "timeout", "error"))
+        run = sum(1 for i in indices if table.worker_state(i) in ("running", "detail"))
+        return f"🦅 dispatch · {len(indices)} 🐦 · {done} done · {run} running"
+
+    def _clear_flock(self) -> None:
+        if self._flock is None:
+            return
+        header, table = self._flock
+        self._flock = None
+        try:
+            header.remove()
+            table.remove()
+        except Exception:  # noqa: BLE001 — teardown must never crash the loop
+            pass
 
     # ---- accessors -------------------------------------------------------------
     @property
@@ -1036,6 +1076,7 @@ class RiftorApp(App):
         self.session_id = data["id"]
         self.context.load(data.get("messages", []))
         self.context.repair()
+        self._clear_flock()
         self.chat.remove_children()
         self._replay_transcript(self.context.messages)
         self._note(f"resumed session {sid} ({len(data.get('messages', []))} messages)")
@@ -1045,7 +1086,9 @@ class RiftorApp(App):
         self.session_id = sessions.new_id()
         self.context.clear()
         self.usage = Usage()
+        self.chakla_usage = Usage()  # reset the 🐦 worker gauge with the session
         self._refresh_usage()
+        self._clear_flock()
         self.chat.remove_children()
         self._note(f"new session {self.session_id}")
 
@@ -1074,7 +1117,9 @@ class RiftorApp(App):
     def action_clear(self) -> None:
         self.context.clear()
         self.usage = Usage()
+        self.chakla_usage = Usage()  # reset the 🐦 worker gauge with the session
         self._refresh_usage()
+        self._clear_flock()
         self.chat.remove_children()
         self._note("conversation cleared")
 
@@ -1195,6 +1240,7 @@ class RiftorApp(App):
         except Exception as exc:  # noqa: BLE001
             self._error(f"rift collapsed — {exc}")
         finally:
+            self._clear_flock()
             self.status.set_busy(False)
             self.chat.scroll_end(animate=False)
             self._save_session(complete=True)
@@ -1302,6 +1348,8 @@ class RiftorApp(App):
             result = await tool.execute(call.arguments, self.toolctx)
         except Exception as exc:  # noqa: BLE001
             result = ToolResult(f"error: {exc}", is_error=True)
+        if call.name == "dispatch_chakla":
+            self._clear_flock()
         result = result.truncated(self.config.max_result_chars)
         duration = time.monotonic() - start
 

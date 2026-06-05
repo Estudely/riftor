@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from pathlib import Path
+from typing import Callable
 
 from riftor import tools
 from riftor.agent.context import Context
@@ -20,6 +21,35 @@ from riftor.engagement import Engagement
 from riftor.safety.audit import AuditLog
 from riftor.safety.permissions import Permissions
 from riftor.tools import ToolContext, ToolResult
+
+
+def _make_progress_printer(total: int = 0) -> Callable[[dict], None]:
+    """Return a progress callback that prints one stderr line per terminal worker
+    event. Non-terminal states (queued/running/detail) are ignored so stdout's
+    sibling stream isn't flooded. ``total`` is the worker count for the ``[i/N]``
+    label; 0 means unknown (label shows just ``[i]``).
+
+    Token formatting parallels ``widgets._fmt_tok`` but folds in a comma prefix and
+    `` tok`` suffix and omits the ``—`` placeholder (this is a log fragment, not a
+    table cell), so the two are intentionally not shared."""
+
+    def _printer(event: dict) -> None:
+        state = event.get("state")
+        if state not in ("done", "timeout", "error"):
+            return
+        idx = int(event.get("worker", 0)) + 1
+        task = str(event.get("task", "")).replace("\n", " ").strip()[:48]
+        detail = str(event.get("detail", "") or "").strip()[:80]  # cap free-form detail length
+        usage = event.get("usage")
+        tok = ""
+        if usage is not None and usage.total_tokens:
+            n = usage.total_tokens
+            tok = f", {n / 1000:.1f}k tok" if n >= 1000 else f", {n} tok"
+        suffix = f" — {state}" + (f" ({detail}{tok})" if (detail or tok) else "")
+        label = f"[{idx}/{total}]" if total else f"[{idx}]"
+        print(f"  🐦 {label} {task}{suffix}", file=sys.stderr)
+
+    return _printer
 
 
 def run_headless(
@@ -65,6 +95,7 @@ async def _run(cfg: Config, workdir: Path, prompt: str, scope_file: str | None, 
         permissions=permissions,
         audit=audit,
         yolo=yolo,
+        progress=_make_progress_printer(),
     )
     schemas = tools.schemas()
 

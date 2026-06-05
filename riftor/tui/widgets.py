@@ -5,7 +5,7 @@ from __future__ import annotations
 import difflib
 
 from rich.text import Text
-from textual.widgets import ListItem, ListView, Static
+from textual.widgets import DataTable, ListItem, ListView, Static
 
 from riftor.tui.theme import palette
 
@@ -135,6 +135,81 @@ class StatusBar(Static):
         if self.busy:
             t.append("   ⟳ opening rift…", style=p["cyan"])
         self.update(t)
+
+
+#: state -> (glyph, short word) for the flock table
+_FLOCK_STATE = {
+    "queued": ("⋯", "queued"),
+    "running": ("⟳", "run"),
+    "detail": ("⟳", "run"),
+    "done": ("✓", "done"),
+    "timeout": ("✗", "t/o"),
+    "error": ("✗", "err"),
+}
+
+
+def _fmt_tok(usage) -> str:
+    """Format a Usage's total tokens like the dispatch result ('1.2k' / '850')."""
+    if usage is None:
+        return "—"
+    n = usage.total_tokens
+    return f"{n / 1000:.1f}k" if n >= 1000 else str(n)
+
+
+class FlockPane(DataTable):
+    """Live per-worker status table for an in-flight Chakla dispatch.
+
+    One row per worker, keyed by the worker index (as a string). The sole entry
+    point is :meth:`update_worker`, which creates the row on first sight of a
+    worker index and updates it thereafter. UI-only: it renders event dicts.
+
+    Per-worker state is tracked in ``self._state`` (index -> raw state string) so
+    the app can count done/running without re-parsing rendered cells — exposed via
+    the public ``worker_indices`` / ``worker_state`` accessors.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(zebra_stripes=False, cursor_type="none")
+        self._state: dict[int, str] = {}
+        self._cols: list = []
+
+    def _ensure_columns(self) -> None:
+        # Columns must exist before any add_row/update_cell. Textual's DataTable
+        # allows add_columns before on_mount, and the app's progress callback
+        # mounts this widget and calls update_worker synchronously (before
+        # on_mount would fire), so we create columns lazily on first use rather
+        # than in on_mount. Idempotent.
+        if not self._cols:
+            self._cols = list(self.add_columns("#", "state", "task", "detail", "tok"))
+
+    @property
+    def worker_indices(self) -> set[int]:
+        """The set of worker indices that currently have a row."""
+        return set(self._state)
+
+    def worker_state(self, idx: int) -> str:
+        """Raw state string for a worker (e.g. 'running', 'done'), or '' if unknown."""
+        return self._state.get(idx, "")
+
+    def update_worker(self, event: dict) -> None:
+        self._ensure_columns()
+        idx = int(event["worker"])
+        state = str(event.get("state", ""))
+        glyph, word = _FLOCK_STATE.get(state, ("?", "?"))
+        task = str(event.get("task", "")).replace("\n", " ").strip()[:48]
+        detail = str(event.get("detail", "") or "")[:40] or "—"
+        tok = _fmt_tok(event.get("usage"))
+        state_cell = f"{glyph} {word}"
+        key = str(idx)
+        new_row = idx not in self._state
+        self._state[idx] = state  # track raw state for counting
+        if new_row:
+            self.add_row(str(idx + 1), state_cell, task, detail, tok, key=key)
+            return
+        self.update_cell(key, self._cols[1], state_cell)
+        self.update_cell(key, self._cols[2], task)
+        self.update_cell(key, self._cols[3], detail)
+        self.update_cell(key, self._cols[4], tok)
 
 
 class CommandDropdown(Static):

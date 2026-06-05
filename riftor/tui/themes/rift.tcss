@@ -46,6 +46,12 @@ Screen {
     padding: 0 2;
 }
 
+.flock-header {
+    margin: 1 0 0 0;
+    padding: 0 2;
+    color: $violet;
+}
+
 .tool-result {
     margin: 0;
     padding: 0 2 0 3;

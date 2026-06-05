@@ -447,6 +447,121 @@ def test_dispatch_ollama_worker_needs_no_key(tmp_workdir, engagement, monkeypatc
     assert "no credentials for worker model" not in res.content
 
 
+def test_toolcontext_progress_defaults_to_none(tmp_workdir, engagement):
+    ctx = ToolContext(workdir=tmp_workdir, engagement=engagement)
+    assert ctx.progress is None
+
+
+def test_toolcontext_progress_is_callable_when_set(tmp_workdir, engagement):
+    seen = []
+    ctx = ToolContext(workdir=tmp_workdir, engagement=engagement,
+                      progress=lambda e: seen.append(e))
+    assert ctx.progress is not None
+    ctx.progress({"worker": 0, "state": "running"})
+    assert seen == [{"worker": 0, "state": "running"}]
+
+
+def test_run_chakla_emits_detail_events(tmp_workdir, engagement):
+    from riftor.agent.provider import ToolCall, Turn, Usage
+
+    class _StubProvider:
+        """Yields one scope_list tool call, then a plain answer turn."""
+        def __init__(self):
+            self._calls = 0
+
+        async def stream_turn(self, messages, schemas):
+            self._calls += 1
+            if self._calls == 1:
+                tc = ToolCall(id="t1", name="scope_list", arguments={})
+                yield ("done", Turn(
+                    text="", tool_calls=[tc],
+                    assistant_message={"role": "assistant", "content": None,
+                                       "tool_calls": [{"id": "t1", "type": "function",
+                                                       "function": {"name": "scope_list",
+                                                                    "arguments": "{}"}}]},
+                    usage=Usage(prompt_tokens=10, completion_tokens=5),
+                ))
+            else:
+                yield ("text", "done.")
+                yield ("done", Turn(
+                    text="done.", tool_calls=[],
+                    assistant_message={"role": "assistant", "content": "done."},
+                    usage=Usage(prompt_tokens=4, completion_tokens=2),
+                ))
+
+    events = []
+    cfg = Config()
+    toolctx = tools_mod.ToolContext(
+        workdir=engagement.dir.parent, engagement=engagement, config=cfg,
+        permissions=Permissions(), audit=AuditLog(),
+    )
+    result = asyncio.run(run_chakla(
+        "recon 10.0.0.5",
+        worker_provider=_StubProvider(),  # type: ignore[arg-type]
+        toolctx=toolctx, permissions=toolctx.permissions, audit=toolctx.audit,
+        max_steps=cfg.chakla_max_steps, yolo=False,
+        db_lock=asyncio.Lock(), grant=set(),
+        progress=lambda e: events.append(e),
+    ))
+    assert result.status == "done"
+    detail_events = [e for e in events if e["state"] == "detail"]
+    assert len(detail_events) == 1, events
+    assert detail_events[0]["detail"]  # non-empty label like "scope_list…"
+    assert "usage" in detail_events[0]
+
+
+def test_run_chakla_detail_usage_is_snapshot(tmp_workdir, engagement):
+    # The usage on a detail event must be a point-in-time snapshot, not the live
+    # accumulator (which keeps growing across turns).
+    from riftor.agent.provider import ToolCall, Turn, Usage
+
+    class _StubProvider:
+        def __init__(self):
+            self._calls = 0
+
+        async def stream_turn(self, messages, schemas):
+            self._calls += 1
+            if self._calls == 1:
+                tc = ToolCall(id="t1", name="scope_list", arguments={})
+                yield ("done", Turn(
+                    text="", tool_calls=[tc],
+                    assistant_message={"role": "assistant", "content": None,
+                                       "tool_calls": [{"id": "t1", "type": "function",
+                                                       "function": {"name": "scope_list",
+                                                                    "arguments": "{}"}}]},
+                    usage=Usage(prompt_tokens=10, completion_tokens=5),
+                ))
+            else:
+                yield ("done", Turn(
+                    text="done.", tool_calls=[],
+                    assistant_message={"role": "assistant", "content": "done."},
+                    usage=Usage(prompt_tokens=100, completion_tokens=200),
+                ))
+
+    import asyncio as _aio
+    captured = {}
+    cfg = Config()
+    toolctx = tools_mod.ToolContext(
+        workdir=engagement.dir.parent, engagement=engagement, config=cfg,
+        permissions=Permissions(), audit=AuditLog(),
+    )
+
+    def _grab(e):
+        if e["state"] == "detail":
+            captured["usage_tokens"] = e["usage"].total_tokens
+
+    result = _aio.run(run_chakla(
+        "recon", worker_provider=_StubProvider(),  # type: ignore[arg-type]
+        toolctx=toolctx, permissions=toolctx.permissions, audit=toolctx.audit,
+        max_steps=cfg.chakla_max_steps, yolo=False,
+        db_lock=_aio.Lock(), grant=set(), progress=_grab,
+    ))
+    # At emission time, only turn-1 usage (15) had accumulated. After the run,
+    # result.usage has grown to 15+300=315. The snapshot must still read 15.
+    assert captured["usage_tokens"] == 15, captured
+    assert result.usage.total_tokens == 315
+
+
 def test_worker_provider_does_not_clobber_main_base():
     # Reproduce the review footgun: main=openai (real base+key), worker=deepseek.
     # The worker store must NOT overwrite the main openai entry's base, and must
@@ -473,3 +588,220 @@ def test_worker_provider_does_not_clobber_main_base():
     assert cfg.providers["openai"].api_base == PROVIDERS["openai"].default_base
     # worker deepseek got ITS OWN default base, not openai's
     assert cfg.providers["deepseek"].api_base == PROVIDERS["deepseek"].default_base
+
+
+def test_dispatch_emits_ordered_lifecycle_events(tmp_workdir, engagement, monkeypatch):
+    monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "worker done")
+    cfg = Config(api_key="test-key")
+    events = []
+    ctx = tools_mod.ToolContext(
+        workdir=tmp_workdir, engagement=engagement, config=cfg,
+        permissions=Permissions(), audit=AuditLog(), yolo=False,
+        progress=lambda e: events.append(dict(e)),
+    )
+    res = asyncio.run(DispatchChaklaTool().execute(
+        {"tasks": ["recon A", "recon B", "recon C"], "tools": []}, ctx))
+    assert not res.is_error
+    by_worker = {}
+    for e in events:
+        by_worker.setdefault(e["worker"], []).append(e["state"])
+    assert set(by_worker) == {0, 1, 2}
+    terminal = {"done", "timeout", "error"}
+    for w, states in by_worker.items():
+        assert states[0] == "queued", states
+        assert "running" in states, states
+        assert states[-1] in terminal, states
+        assert sum(1 for s in states if s in terminal) == 1, states
+
+
+def test_dispatch_terminal_events_carry_usage(tmp_workdir, engagement, monkeypatch):
+    monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "worker done")
+    cfg = Config(api_key="test-key")
+    events = []
+    ctx = tools_mod.ToolContext(
+        workdir=tmp_workdir, engagement=engagement, config=cfg,
+        permissions=Permissions(), audit=AuditLog(),
+        progress=lambda e: events.append(dict(e)),
+    )
+    asyncio.run(DispatchChaklaTool().execute({"tasks": ["a", "b"], "tools": []}, ctx))
+    terminals = [e for e in events if e["state"] in ("done", "timeout", "error")]
+    assert len(terminals) == 2
+    for e in terminals:
+        assert e["usage"] is not None
+
+
+def test_dispatch_terminal_usage_sums_to_worker_total(tmp_workdir, engagement, monkeypatch):
+    from riftor.agent.provider import Usage
+    import riftor.tools.subagent as sub
+
+    async def _fake(task, **k):
+        return ChaklaResult(task=task, status="done",
+                            usage=Usage(completion_tokens=23_600, cost=0.007), n_recorded=1)
+
+    monkeypatch.setattr(sub, "run_chakla", _fake)
+    cfg = Config(api_key="test-key")
+    events = []
+    ctx = tools_mod.ToolContext(
+        workdir=tmp_workdir, engagement=engagement, config=cfg,
+        permissions=Permissions(), audit=AuditLog(),
+        progress=lambda e: events.append(dict(e)),
+    )
+    asyncio.run(DispatchChaklaTool().execute({"tasks": ["a", "b"], "tools": []}, ctx))
+    accumulated = Usage()
+    for e in events:
+        if e["state"] in ("done", "timeout", "error") and e["usage"] is not None:
+            accumulated.add(e["usage"])
+    assert accumulated.total_tokens == 47_200
+    assert abs(accumulated.cost - 0.014) < 1e-9
+
+
+def test_dispatch_progress_none_is_safe(tmp_workdir, engagement, monkeypatch):
+    monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "worker done: nothing notable")
+    cfg = Config(api_key="test-key")
+    ctx = tools_mod.ToolContext(
+        workdir=tmp_workdir, engagement=engagement, config=cfg,
+        permissions=Permissions(), audit=AuditLog(),
+    )
+    res = asyncio.run(DispatchChaklaTool().execute({"tasks": ["recon A"], "tools": []}, ctx))
+    assert not res.is_error
+    assert "recon A" in res.content
+
+
+def test_dispatch_timeout_emits_timeout_event(tmp_workdir, engagement, monkeypatch):
+    monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "ok")
+    cfg = Config(chakla_timeout_s=1, api_key="test-key")
+    events = []
+    ctx = tools_mod.ToolContext(
+        workdir=tmp_workdir, engagement=engagement, config=cfg,
+        permissions=Permissions(), audit=AuditLog(),
+        progress=lambda e: events.append(dict(e)),
+    )
+    import riftor.tools.subagent as sub
+
+    async def _hang(*a, **k):
+        await asyncio.sleep(5)
+
+    monkeypatch.setattr(sub, "run_chakla", _hang)
+    res = asyncio.run(DispatchChaklaTool().execute({"tasks": ["slow"], "tools": []}, ctx))
+    assert not res.is_error
+    states = [e["state"] for e in events if e["worker"] == 0]
+    assert "timeout" in states, states
+
+
+def test_flockpane_creates_and_updates_rows():
+    import asyncio as _asyncio
+    from textual.app import App
+    from riftor.tui.widgets import FlockPane
+
+    class _Harness(App):
+        def compose(self):
+            yield FlockPane()
+
+    async def _drive():
+        app = _Harness()
+        async with app.run_test() as pilot:
+            pane = app.query_one(FlockPane)
+            pane.update_worker({"worker": 0, "task": "nmap A", "state": "queued",
+                                "detail": "", "usage": None, "n_recorded": 0})
+            pane.update_worker({"worker": 1, "task": "httpx B", "state": "queued",
+                                "detail": "", "usage": None, "n_recorded": 0})
+            await pilot.pause()
+            assert pane.row_count == 2
+            pane.update_worker({"worker": 0, "task": "nmap A", "state": "running",
+                                "detail": "running nmap…", "usage": None, "n_recorded": 0})
+            await pilot.pause()
+            assert pane.row_count == 2  # still 2 rows — updated, not appended
+            assert pane.worker_indices == {0, 1}
+            assert pane.worker_state(0) == "running"
+            row = pane.get_row("0")
+            assert any("nmap A" in str(c) for c in row)
+            assert any("run" in str(c) for c in row)
+
+    _asyncio.run(_drive())
+
+
+def test_headless_progress_printer_writes_terminal_events(capsys):
+    # Build the headless progress callback in isolation and confirm it prints
+    # only terminal events, to stderr.
+    from riftor.headless import _make_progress_printer
+
+    printer = _make_progress_printer(total=3)
+    printer({"worker": 0, "task": "nmap A", "state": "queued", "usage": None})
+    printer({"worker": 0, "task": "nmap A", "state": "running", "usage": None})
+    printer({"worker": 0, "task": "nmap A", "state": "detail",
+             "detail": "running nmap…", "usage": None})
+    from riftor.agent.provider import Usage
+    printer({"worker": 0, "task": "nmap A", "state": "done",
+             "detail": "4 services", "usage": Usage(completion_tokens=900), "n_recorded": 4})
+    printer({"worker": 2, "task": "subfinder", "state": "timeout",
+             "detail": "timed out", "usage": Usage()})
+    captured = capsys.readouterr()
+    assert captured.out == ""  # nothing on stdout
+    assert "[1/3]" in captured.err and "nmap A" in captured.err and "done" in captured.err
+    assert "[3/3]" in captured.err and "timeout" in captured.err
+    # queued/running/detail produced no lines
+    assert "running nmap" not in captured.err
+    assert captured.err.count("🐦") == 2  # only the two terminal events
+
+
+def test_dispatch_through_app_mounts_flock_without_error(monkeypatch, tmp_path):
+    # Regression: the app's progress callback mounts FlockPane and synchronously
+    # calls update_worker before on_mount fires. Columns must already exist or
+    # add_row raises "More values provided than there are columns" and the whole
+    # dispatch errors. Drive the REAL dispatch->progress path through the app.
+    import asyncio as _asyncio
+    from riftor.config import Config
+    from riftor.tui.app import RiftorApp
+    from riftor.agent.provider import ToolCall
+
+    monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "worker done: nothing notable")
+
+    async def _drive():
+        cfg = Config(model="ollama_chat/x", api_base="http://localhost:11434", api_key="k")
+        cfg.chakla_model = ""  # reuse main (ollama => no creds needed)
+        app = RiftorApp(cfg, workdir=tmp_path)
+        async with app.run_test() as pilot:
+            app.engagement.add_scope("10.0.0.0/24", "in")
+            app.permissions.allow_for_session("dispatch_chakla")
+            await app._run_tool(ToolCall(
+                id="d1", name="dispatch_chakla",
+                arguments={"tasks": ["recon 10.0.0.5", "recon 10.0.0.6"], "tools": []}))
+            await pilot.pause()
+        return app
+
+    app = _asyncio.run(_drive())
+    # The dispatch must have produced a non-error result fed to the model.
+    tool_msgs = [m for m in app.context._messages if m.get("role") == "tool"]
+    assert tool_msgs, "expected a tool result message"
+    last = tool_msgs[-1].get("content") or ""
+    assert "More values provided" not in last, last
+    assert "error:" not in last.lower() or "workers" in last.lower(), last
+
+
+def test_flock_cleared_on_agent_finally_and_reset(monkeypatch, tmp_path):
+    # The flock pane must not leak: it is cleared in the _agent finally (covering
+    # the CancelledError/Esc path that bypasses the Exception handler) and before
+    # the /clear-family remove_children() resets.
+    import asyncio as _asyncio
+    from riftor.config import Config
+    from riftor.tui.app import RiftorApp
+    from riftor.tui.widgets import FlockPane
+    from textual.widgets import Static
+
+    async def _drive():
+        cfg = Config(model="ollama_chat/x", api_base="http://localhost:11434")
+        app = RiftorApp(cfg, workdir=tmp_path)
+        async with app.run_test():
+            # Simulate a mounted flock (as if a dispatch were in flight).
+            header, table = Static(), FlockPane()
+            app._flock = (header, table)
+            app.chat.mount(header)
+            app.chat.mount(table)
+            # _clear_flock resets the handle and removes the widgets.
+            app._clear_flock()
+            assert app._flock is None
+            # idempotent: a second call is a harmless no-op.
+            app._clear_flock()
+            assert app._flock is None
+
+    _asyncio.run(_drive())

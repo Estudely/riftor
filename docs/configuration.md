@@ -69,6 +69,15 @@ Key properties of the worker fleet:
   bounded recon tasks. Override it with `--chakla-model` at the CLI or by editing
   the config file.
 
+### Live worker visibility
+
+While a `dispatch_chakla` batch runs, the TUI shows a live "flock" table — one
+row per worker (queued → running → done/timeout/error) with the worker's current
+activity and token count. The table is removed when the dispatch finishes; the
+aggregated text summary remains. Worker token/cost accrues in the status-bar 🐦
+segment as each worker completes. In headless mode, one progress line per finished
+worker is printed to stderr (the agent's answer stays on stdout).
+
 ### CLI flags
 
 The following flags are runtime-only overrides (they apply for the current
