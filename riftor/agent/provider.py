@@ -149,6 +149,11 @@ class Provider:
             kwargs["api_base"] = api_base
         if api_key:
             kwargs["api_key"] = api_key
+        # Reasoning: ask the model to think only when the operator wants it shown.
+        # litellm normalizes ``reasoning_effort`` across providers and drops it for
+        # models that don't support it (drop_params=True). "none" => don't request.
+        if self.config.show_thinking and self.config.reasoning_effort != "none":
+            kwargs["reasoning_effort"] = self.config.reasoning_effort
         # Offline demo hook: return canned streamed text instead of calling a model.
         # Only active when the env var is set (used by demo.tape / CI), so normal
         # runs are unaffected.

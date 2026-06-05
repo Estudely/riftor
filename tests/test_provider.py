@@ -58,6 +58,30 @@ def Provider_for_test() -> "prov.Provider":
     return prov.Provider(Config(model="anthropic/claude-sonnet-4-6", api_key="sk-demo"))
 
 
+def test_kwargs_includes_reasoning_effort_when_thinking_on(monkeypatch):
+    monkeypatch.delenv("RIFTOR_DEMO_RESPONSE", raising=False)
+    cfg = Config(model="anthropic/claude-opus-4-8", api_key="sk-demo",
+                 show_thinking=True, reasoning_effort="high")
+    kw = prov.Provider(cfg)._kwargs([{"role": "user", "content": "hi"}])
+    assert kw["reasoning_effort"] == "high"
+
+
+def test_kwargs_omits_reasoning_effort_when_thinking_off(monkeypatch):
+    monkeypatch.delenv("RIFTOR_DEMO_RESPONSE", raising=False)
+    cfg = Config(model="anthropic/claude-opus-4-8", api_key="sk-demo",
+                 show_thinking=False, reasoning_effort="high")
+    kw = prov.Provider(cfg)._kwargs([{"role": "user", "content": "hi"}])
+    assert "reasoning_effort" not in kw
+
+
+def test_kwargs_omits_reasoning_effort_when_none(monkeypatch):
+    monkeypatch.delenv("RIFTOR_DEMO_RESPONSE", raising=False)
+    cfg = Config(model="anthropic/claude-opus-4-8", api_key="sk-demo",
+                 show_thinking=True, reasoning_effort="none")
+    kw = prov.Provider(cfg)._kwargs([{"role": "user", "content": "hi"}])
+    assert "reasoning_effort" not in kw
+
+
 def test_kwargs_uses_provider_table_creds(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     from riftor.config import ProviderCreds
