@@ -96,17 +96,20 @@ def test_kwargs_uses_provider_table_creds(monkeypatch):
 @pytest.mark.asyncio
 async def test_stream_turn_yields_thinking_and_excludes_it_from_message(monkeypatch):
     # Fake litellm streaming chunks: reasoning_content deltas, then content.
-    class _Fn:
-        def __init__(self): self.name = None; self.arguments = None
     class _Delta:
         def __init__(self, content=None, reasoning_content=None):
             self.content = content
             self.reasoning_content = reasoning_content
             self.tool_calls = None
+
     class _Choice:
-        def __init__(self, delta): self.delta = delta
+        def __init__(self, delta):
+            self.delta = delta
+
     class _Chunk:
-        def __init__(self, delta): self.choices = [_Choice(delta)]; self.usage = None
+        def __init__(self, delta):
+            self.choices = [_Choice(delta)]
+            self.usage = None
 
     async def _fake_stream():
         yield _Chunk(_Delta(reasoning_content="let me "))
