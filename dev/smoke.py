@@ -96,8 +96,11 @@ async def main() -> None:
         # Phase 7b: a dispatch mounts the live flock pane, updates it during
         # flight, then clears it; the 🐦 status segment reflects worker usage.
         # Offline via RIFTOR_DEMO_RESPONSE. Capture max rows seen mid-flight by
-        # spying on the progress callback.
+        # spying on the progress callback. Save/restore every global+config
+        # mutation so later smoke steps see a clean app (mirrors the scope block).
         import os
+        _saved_demo = os.environ.get("RIFTOR_DEMO_RESPONSE")
+        _saved_key, _saved_chakla_model = app.config.api_key, app.config.chakla_model
         os.environ["RIFTOR_DEMO_RESPONSE"] = "worker reporting: recon complete"
         app.engagement.add_scope("10.0.0.0/24", "in")
         app.permissions.allow_for_session("dispatch_chakla")
@@ -120,7 +123,13 @@ async def main() -> None:
         assert seen_rows["max"] >= 2, f"expected >=2 flock rows during flight, saw {seen_rows['max']}"
         assert app._flock is None, "flock pane should be cleared after the dispatch"
         assert app.status.chakla_tokens >= 0  # 🐦 usage segment fed (0 ok for demo)
-        app.toolctx.progress = app._on_chakla_progress  # restore
+        # restore callback + every mutation so later steps aren't polluted
+        app.toolctx.progress = app._on_chakla_progress
+        app.config.api_key, app.config.chakla_model = _saved_key, _saved_chakla_model
+        if _saved_demo is None:
+            os.environ.pop("RIFTOR_DEMO_RESPONSE", None)
+        else:
+            os.environ["RIFTOR_DEMO_RESPONSE"] = _saved_demo
 
         # /theme switches the live theme
         inp.value = "/theme void"
