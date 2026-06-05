@@ -176,6 +176,22 @@ def test_creds_for_base_only_table_entry():
     assert cfg.has_credentials()
 
 
+def test_display_settings_default_and_roundtrip(tmp_path, monkeypatch):
+    monkeypatch.setattr(cfgmod, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(cfgmod, "CONFIG_PATH", tmp_path / "config.toml")
+    # defaults
+    fresh = Config()
+    assert fresh.show_thinking is True
+    assert fresh.show_tool_output is True
+    assert fresh.reasoning_effort == "medium"
+    # round-trip non-default values
+    Config(show_thinking=False, show_tool_output=False, reasoning_effort="high").save()
+    loaded = Config.load()
+    assert loaded.show_thinking is False
+    assert loaded.show_tool_output is False
+    assert loaded.reasoning_effort == "high"
+
+
 def test_creds_for_openrouter_routed_id_is_miskeyed_known_limitation(monkeypatch):
     # KNOWN LIMITATION (deferred to picker tasks): a slash-routed OpenRouter id like
     # "openai/gpt-5.5" is classified by prefix as the "openai" provider, so creds stored

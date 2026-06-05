@@ -56,6 +56,10 @@ class Config(BaseModel):
     max_tokens: int = 2048
     theme: str = "rift"
     lore: bool = True
+    # Display: reasoning + tool-output visibility (runtime, via /config).
+    show_thinking: bool = True
+    show_tool_output: bool = True
+    reasoning_effort: str = "medium"  # none | low | medium | high
     # Agent-loop tuning
     max_steps: int = 16
     max_result_chars: int = 30_000
@@ -208,6 +212,9 @@ class Config(BaseModel):
             f"max_tokens = {self.max_tokens}",
             f'theme = "{self.theme}"',
             f"lore = {str(self.lore).lower()}",
+            f"show_thinking = {str(self.show_thinking).lower()}",
+            f"show_tool_output = {str(self.show_tool_output).lower()}",
+            f'reasoning_effort = "{self.reasoning_effort}"',
             f"max_steps = {self.max_steps}",
             f"max_result_chars = {self.max_result_chars}",
             f"result_preview_lines = {self.result_preview_lines}",
