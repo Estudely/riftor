@@ -41,6 +41,13 @@ Screen {
     padding: 0 2;
 }
 
+.thinking {
+    margin: 1 0 0 0;
+    padding: 0 2;
+    color: $dim;
+    text-style: italic;
+}
+
 .tool {
     margin: 1 0 0 0;
     padding: 0 2;

@@ -1248,17 +1248,37 @@ class RiftorApp(App):
     async def _assistant_turn(self) -> Turn:
         self.context.repair()
 
-        bubble = Markdown("", classes="assistant")
-        await self._mount(bubble)
+        p = self._pal()
+        thinking_block: Static | None = None
+        thinking_buf: list[str] = []
+        bubble: Markdown | None = None
         buffer: list[str] = []
         last_render = 0.0
+        last_think_render = 0.0
         turn: Turn | None = None
 
         async for event, payload in self.provider.stream_turn(
             self.context.messages, self.tool_schemas
         ):
-            if event == "text":
+            if event == "thinking":
+                if not self.config.show_thinking:
+                    continue
+                thinking_buf.append(str(payload))
+                if thinking_block is None:
+                    thinking_block = Static(Text(""), classes="thinking")
+                    await self._mount(thinking_block)
+                now = time.monotonic()
+                if now - last_think_render > 0.08:
+                    thinking_block.update(
+                        Text("💭 " + "".join(thinking_buf), style=f"italic {p['dim']}")
+                    )
+                    self._scroll_if_following()
+                    last_think_render = now
+            elif event == "text":
                 buffer.append(str(payload))
+                if bubble is None:
+                    bubble = Markdown("", classes="assistant")
+                    await self._mount(bubble)
                 now = time.monotonic()
                 if now - last_render > 0.08:
                     await bubble.update("".join(buffer))
@@ -1267,11 +1287,20 @@ class RiftorApp(App):
             elif event == "done":
                 turn = payload  # type: ignore[assignment]
 
+        # finalize the thinking block (flush any buffered tail)
+        if thinking_block is not None:
+            thinking_block.update(
+                Text("💭 " + "".join(thinking_buf), style=f"italic {p['dim']}")
+            )
+
         text = "".join(buffer).strip()
         if text:
+            if bubble is None:
+                bubble = Markdown("", classes="assistant")
+                await self._mount(bubble)
             await bubble.update(text)
             self._last_output = text
-        else:
+        elif bubble is not None:
             await bubble.remove()
         self._scroll_if_following()
         return turn or Turn(text=text, assistant_message={"role": "assistant", "content": text})
