@@ -1380,6 +1380,13 @@ class RiftorApp(App):
     async def _show_tool_result(self, content: str, is_error: bool = False) -> None:
         max_lines = self.config.result_preview_lines
         lines = content.splitlines() or [""]
+        if not self.config.show_tool_output:
+            # Hidden by /config: don't render, but still register the full result
+            # so the operator can reveal it on demand with /show N. The call line
+            # (⛏ toolname …) is mounted separately and stays visible.
+            rid = len(self._tool_results) + 1
+            self._tool_results[rid] = content
+            return
         shown = "\n".join(lines[:max_lines])
         if len(lines) > max_lines:
             rid = len(self._tool_results) + 1
