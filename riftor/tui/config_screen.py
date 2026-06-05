@@ -177,8 +177,8 @@ class ConfigScreen(ModalScreen[dict | None]):
         return self.app  # type: ignore[return-value]
 
     def on_mount(self) -> None:
-        # Model is the default-visible section; focus its first field.
-        self.query_one("#config-nav", ListView).index = 0
+        # Model is the default-visible section (the only panel composed without
+        # the `hidden` class); focus its first field.
         self.query_one("#cfg-provider", Select).focus()
 
     def show_section(self, key: str) -> None:
