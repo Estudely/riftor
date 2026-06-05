@@ -130,6 +130,19 @@ class ConfigScreen(ModalScreen[dict | None]):
                 yield _row("Theme", Select([(n, n) for n in THEMES], value=theme,
                                            allow_blank=False, id="cfg-theme"))
                 yield _row("Lore", Switch(value=self.config.lore, id="cfg-lore"))
+
+                yield Rule()
+                yield Label("DISPLAY", classes="config-section")
+                yield _row("Show thinking", Switch(
+                    value=self.config.show_thinking, id="cfg-show-thinking"))
+                yield _row("Show tool output", Switch(
+                    value=self.config.show_tool_output, id="cfg-show-tool-output"))
+                _effort = self.config.reasoning_effort \
+                    if self.config.reasoning_effort in ("none", "low", "medium", "high") \
+                    else "medium"
+                yield _row("Reasoning effort", Select(
+                    [(e, e) for e in ("none", "low", "medium", "high")],
+                    value=_effort, allow_blank=False, id="cfg-reasoning-effort"))
             with Horizontal(id="config-buttons"):
                 yield Button("Save", id="save", variant="success")
                 yield Button("Cancel", id="cancel", variant="error")
@@ -246,6 +259,9 @@ class ConfigScreen(ModalScreen[dict | None]):
             "max_tokens": max_tokens,
             "theme": self.query_one("#cfg-theme", Select).value,
             "lore": self.query_one("#cfg-lore", Switch).value,
+            "show_thinking": self.query_one("#cfg-show-thinking", Switch).value,
+            "show_tool_output": self.query_one("#cfg-show-tool-output", Switch).value,
+            "reasoning_effort": self.query_one("#cfg-reasoning-effort", Select).value,
             "chakla_model": chakla_model,
             "chakla_provider": w_provider if w_chosen else None,
             "label_main": self.query_one("#cfg-label-main", Input).value.strip()

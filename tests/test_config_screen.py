@@ -42,13 +42,16 @@ async def test_config_modal_renders_all_fields():
                 ("#cfg-chakla-custom", Input),
                 ("#cfg-label-main", Input), ("#cfg-label-worker", Input),
                 ("#cfg-theme", Select), ("#cfg-lore", Switch),
+                ("#cfg-show-thinking", Switch), ("#cfg-show-tool-output", Switch),
+                ("#cfg-reasoning-effort", Select),
             ]:
                 assert screen.query_one(fid, kind) is not None, fid
-            # four grouped section headers (MODEL / GENERATION / WORKERS / APPEARANCE)
-            assert len(list(screen.query(".config-section"))) == 4
+            # five grouped section headers (MODEL / GENERATION / WORKERS / APPEARANCE / DISPLAY)
+            assert len(list(screen.query(".config-section"))) == 5
             # aligned label column: one .field-label per field row. WORKERS now has
             # 3 picker rows + 2 label rows (was 1 plain input + 2 labels) => +2.
-            assert len(list(screen.query(".field-label"))) == 15
+            # +3 field rows for the DISPLAY section => 15 + 3 = 18
+            assert len(list(screen.query(".field-label"))) == 18
             await pilot.press("escape")
             await pilot.pause()
 
@@ -110,6 +113,27 @@ async def test_config_modal_saves_changes():
             await pilot.pause()
             assert app.config.temperature == 0.7
             assert app.config.max_tokens == 4096
+
+
+@pytest.mark.asyncio
+async def test_display_settings_save():
+    with tempfile.TemporaryDirectory() as d:
+        _patch_paths(Path(d))
+        cfg = Config(model="ollama_chat/x", api_base="http://localhost:11434")
+        app = RiftorApp(cfg, workdir=Path(d))
+        async with app.run_test() as pilot:
+            app.query_one("#prompt", Input).value = "/config"
+            await pilot.press("enter")
+            await pilot.pause()
+            screen = app.screen
+            screen.query_one("#cfg-show-thinking", Switch).value = False
+            screen.query_one("#cfg-show-tool-output", Switch).value = False
+            screen.query_one("#cfg-reasoning-effort", Select).value = "high"
+            screen.query_one("#save").press()
+            await pilot.pause()
+            assert app.config.show_thinking is False
+            assert app.config.show_tool_output is False
+            assert app.config.reasoning_effort == "high"
 
 
 @pytest.mark.asyncio
