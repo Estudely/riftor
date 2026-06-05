@@ -50,6 +50,25 @@ def test_roundtrip_new_fields(tmp_path, monkeypatch):
     assert loaded.max_result_chars == 5000
 
 
+def test_reasoning_effort_clamps_invalid_to_medium(tmp_path, monkeypatch):
+    # A hand-edited config with a bogus effort must not forward garbage to litellm;
+    # it clamps to the safe default while keeping the rest of the config intact.
+    assert Config(reasoning_effort="invalid").reasoning_effort == "medium"
+    assert Config(reasoning_effort="").reasoning_effort == "medium"
+    # valid levels pass through untouched
+    for level in ("none", "low", "medium", "high"):
+        assert Config(reasoning_effort=level).reasoning_effort == level
+    # survives a round-trip from a manually-corrupted file (other fields preserved)
+    monkeypatch.setattr(cfgmod, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(cfgmod, "CONFIG_PATH", tmp_path / "config.toml")
+    (tmp_path / "config.toml").write_text(
+        '[riftor]\nmodel = "openai/gpt-5.5"\nreasoning_effort = "bogus"\n'
+    )
+    loaded = Config.load()
+    assert loaded.reasoning_effort == "medium"
+    assert loaded.model == "openai/gpt-5.5"
+
+
 def test_load_keybindings(tmp_path, monkeypatch):
     monkeypatch.setattr(cfgmod, "KEYBINDINGS_PATH", tmp_path / "keybindings.toml")
     assert cfgmod.load_keybindings() == {}

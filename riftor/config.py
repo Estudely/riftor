@@ -38,6 +38,9 @@ _KNOWN_PROVIDERS = (
     "deepseek/", "xai/", "perplexity/", "fireworks_ai/", "huggingface/", "replicate/",
 )
 
+# Valid reasoning-effort levels (litellm vocabulary). "none" => no reasoning request.
+REASONING_EFFORTS = ("none", "low", "medium", "high")
+
 
 class ProviderCreds(BaseModel):
     """Per-provider credentials, stored in the [providers.<key>] TOML table."""
@@ -90,6 +93,13 @@ class Config(BaseModel):
             # Bare ids (e.g. "gpt-4o") still work for some providers; just warn-shape.
             return value
         return value
+
+    @field_validator("reasoning_effort")
+    @classmethod
+    def _check_reasoning_effort(cls, value: str) -> str:
+        # Clamp (don't raise) so a hand-edited config keeps its other settings and
+        # never forwards a bogus value to litellm; unknown => the safe default.
+        return value if value in REASONING_EFFORTS else "medium"
 
     def model_warning(self) -> str | None:
         """A human hint if the model id looks unusual (not a hard error)."""

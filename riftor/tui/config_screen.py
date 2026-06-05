@@ -19,14 +19,12 @@ from riftor.providers import (
     fetch_models,
     provider_key_for_model,
 )
+from riftor.config import REASONING_EFFORTS
 from riftor.tui.theme import THEMES
 
 if TYPE_CHECKING:
     from riftor.config import Config
     from riftor.tui.app import RiftorApp
-
-
-_EFFORT_LEVELS = ("none", "low", "medium", "high")
 
 
 def _row(label: str, field: Widget) -> Horizontal:
@@ -141,9 +139,9 @@ class ConfigScreen(ModalScreen[dict | None]):
                 yield _row("Show tool output", Switch(
                     value=self.config.show_tool_output, id="cfg-show-tool-output"))
                 _effort = (self.config.reasoning_effort
-                           if self.config.reasoning_effort in _EFFORT_LEVELS else "medium")
+                           if self.config.reasoning_effort in REASONING_EFFORTS else "medium")
                 yield _row("Reasoning effort", Select(
-                    [(e, e) for e in _EFFORT_LEVELS],
+                    [(e, e) for e in REASONING_EFFORTS],
                     value=_effort, allow_blank=False, id="cfg-reasoning-effort"))
             with Horizontal(id="config-buttons"):
                 yield Button("Save", id="save", variant="success")
