@@ -149,6 +149,11 @@ class Provider:
             kwargs["api_base"] = api_base
         if api_key:
             kwargs["api_key"] = api_key
+        # Reasoning: ask the model to think only when the operator wants it shown.
+        # litellm normalizes ``reasoning_effort`` across providers and drops it for
+        # models that don't support it (drop_params=True). "none" => don't request.
+        if self.config.show_thinking and self.config.reasoning_effort != "none":
+            kwargs["reasoning_effort"] = self.config.reasoning_effort
         # Offline demo hook: return canned streamed text instead of calling a model.
         # Only active when the env var is set (used by demo.tape / CI), so normal
         # runs are unaffected.
@@ -188,7 +193,11 @@ class Provider:
     async def stream_turn(
         self, messages: list[dict], tools: list[dict] | None = None
     ) -> AsyncIterator[tuple[str, object]]:
-        """Yield ``("text", str)`` deltas, then a final ``("done", Turn)``."""
+        """Yield ``("text"|"thinking", str)`` deltas, then a final ``("done", Turn)``.
+
+        ``"thinking"`` carries the model's reasoning (litellm ``reasoning_content``)
+        and is display-only — it is never folded into the returned ``Turn``.
+        """
         response = await self._acompletion(**self._kwargs(messages, tools))
         text_parts: list[str] = []
         acc: dict[int, dict] = {}
@@ -207,6 +216,13 @@ class Provider:
             if content:
                 text_parts.append(content)
                 yield ("text", content)
+
+            reasoning = getattr(delta, "reasoning_content", None)
+            if reasoning:
+                # Display-only: surface the model's thinking to the UI but never
+                # accumulate it into the assistant message (keeps history clean,
+                # avoids provider replay issues with thinking blocks).
+                yield ("thinking", reasoning)
 
             for tc in getattr(delta, "tool_calls", None) or []:
                 idx = getattr(tc, "index", 0) or 0

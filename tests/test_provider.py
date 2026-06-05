@@ -58,6 +58,30 @@ def Provider_for_test() -> "prov.Provider":
     return prov.Provider(Config(model="anthropic/claude-sonnet-4-6", api_key="sk-demo"))
 
 
+def test_kwargs_includes_reasoning_effort_when_thinking_on(monkeypatch):
+    monkeypatch.delenv("RIFTOR_DEMO_RESPONSE", raising=False)
+    cfg = Config(model="anthropic/claude-opus-4-8", api_key="sk-demo",
+                 show_thinking=True, reasoning_effort="high")
+    kw = prov.Provider(cfg)._kwargs([{"role": "user", "content": "hi"}])
+    assert kw["reasoning_effort"] == "high"
+
+
+def test_kwargs_omits_reasoning_effort_when_thinking_off(monkeypatch):
+    monkeypatch.delenv("RIFTOR_DEMO_RESPONSE", raising=False)
+    cfg = Config(model="anthropic/claude-opus-4-8", api_key="sk-demo",
+                 show_thinking=False, reasoning_effort="high")
+    kw = prov.Provider(cfg)._kwargs([{"role": "user", "content": "hi"}])
+    assert "reasoning_effort" not in kw
+
+
+def test_kwargs_omits_reasoning_effort_when_none(monkeypatch):
+    monkeypatch.delenv("RIFTOR_DEMO_RESPONSE", raising=False)
+    cfg = Config(model="anthropic/claude-opus-4-8", api_key="sk-demo",
+                 show_thinking=True, reasoning_effort="none")
+    kw = prov.Provider(cfg)._kwargs([{"role": "user", "content": "hi"}])
+    assert "reasoning_effort" not in kw
+
+
 def test_kwargs_uses_provider_table_creds(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     from riftor.config import ProviderCreds
@@ -67,3 +91,50 @@ def test_kwargs_uses_provider_table_creds(monkeypatch):
     kw = prov.Provider(cfg)._kwargs([{"role": "user", "content": "hi"}])
     assert kw["api_key"] == "sk-table"
     assert kw["api_base"] == "https://table/"
+
+
+@pytest.mark.asyncio
+async def test_stream_turn_yields_thinking_and_excludes_it_from_message(monkeypatch):
+    # Fake litellm streaming chunks: reasoning_content deltas, then content.
+    class _Delta:
+        def __init__(self, content=None, reasoning_content=None):
+            self.content = content
+            self.reasoning_content = reasoning_content
+            self.tool_calls = None
+
+    class _Choice:
+        def __init__(self, delta):
+            self.delta = delta
+
+    class _Chunk:
+        def __init__(self, delta):
+            self.choices = [_Choice(delta)]
+            self.usage = None
+
+    async def _fake_stream():
+        yield _Chunk(_Delta(reasoning_content="let me "))
+        yield _Chunk(_Delta(reasoning_content="think"))
+        yield _Chunk(_Delta(content="the answer"))
+
+    async def _fake_acompletion(self, **kwargs):
+        return _fake_stream()
+
+    monkeypatch.setattr(prov.Provider, "_acompletion", _fake_acompletion)
+    p = Provider_for_test()
+
+    thinking, text, turn = [], [], None
+    async for event, payload in p.stream_turn([{"role": "user", "content": "go"}]):
+        if event == "thinking":
+            thinking.append(str(payload))
+        elif event == "text":
+            text.append(str(payload))
+        elif event == "done":
+            turn = payload
+
+    assert "".join(thinking) == "let me think"
+    assert "".join(text) == "the answer"
+    assert turn is not None
+    # reasoning is display-only: never persisted into the assistant message
+    assert turn.assistant_message["content"] == "the answer"
+    assert "reasoning_content" not in turn.assistant_message
+    assert "let me think" not in (turn.assistant_message.get("content") or "")

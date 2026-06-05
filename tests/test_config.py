@@ -50,6 +50,25 @@ def test_roundtrip_new_fields(tmp_path, monkeypatch):
     assert loaded.max_result_chars == 5000
 
 
+def test_reasoning_effort_clamps_invalid_to_medium(tmp_path, monkeypatch):
+    # A hand-edited config with a bogus effort must not forward garbage to litellm;
+    # it clamps to the safe default while keeping the rest of the config intact.
+    assert Config(reasoning_effort="invalid").reasoning_effort == "medium"
+    assert Config(reasoning_effort="").reasoning_effort == "medium"
+    # valid levels pass through untouched
+    for level in ("none", "low", "medium", "high"):
+        assert Config(reasoning_effort=level).reasoning_effort == level
+    # survives a round-trip from a manually-corrupted file (other fields preserved)
+    monkeypatch.setattr(cfgmod, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(cfgmod, "CONFIG_PATH", tmp_path / "config.toml")
+    (tmp_path / "config.toml").write_text(
+        '[riftor]\nmodel = "openai/gpt-5.5"\nreasoning_effort = "bogus"\n'
+    )
+    loaded = Config.load()
+    assert loaded.reasoning_effort == "medium"
+    assert loaded.model == "openai/gpt-5.5"
+
+
 def test_load_keybindings(tmp_path, monkeypatch):
     monkeypatch.setattr(cfgmod, "KEYBINDINGS_PATH", tmp_path / "keybindings.toml")
     assert cfgmod.load_keybindings() == {}
@@ -174,6 +193,22 @@ def test_creds_for_base_only_table_entry():
     assert cfg.creds_for("ollama_chat/llama3") == (None, "http://localhost:11434")
     # and ollama is always "credentialed" via its prefix branch
     assert cfg.has_credentials()
+
+
+def test_display_settings_default_and_roundtrip(tmp_path, monkeypatch):
+    monkeypatch.setattr(cfgmod, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(cfgmod, "CONFIG_PATH", tmp_path / "config.toml")
+    # defaults
+    fresh = Config()
+    assert fresh.show_thinking is True
+    assert fresh.show_tool_output is True
+    assert fresh.reasoning_effort == "medium"
+    # round-trip non-default values
+    Config(show_thinking=False, show_tool_output=False, reasoning_effort="high").save()
+    loaded = Config.load()
+    assert loaded.show_thinking is False
+    assert loaded.show_tool_output is False
+    assert loaded.reasoning_effort == "high"
 
 
 def test_creds_for_openrouter_routed_id_is_miskeyed_known_limitation(monkeypatch):

@@ -568,6 +568,9 @@ class RiftorApp(App):
         self.config.temperature = result["temperature"]
         self.config.max_tokens = result["max_tokens"]
         self.config.lore = result["lore"]
+        self.config.show_thinking = result.get("show_thinking", self.config.show_thinking)
+        self.config.show_tool_output = result.get("show_tool_output", self.config.show_tool_output)
+        self.config.reasoning_effort = result.get("reasoning_effort", self.config.reasoning_effort)
         self.config.chakla_model = result.get("chakla_model", self.config.chakla_model)
         self.config.label_main = result.get("label_main", self.config.label_main)
         self.config.label_worker = result.get("label_worker", self.config.label_worker)
@@ -1248,17 +1251,37 @@ class RiftorApp(App):
     async def _assistant_turn(self) -> Turn:
         self.context.repair()
 
-        bubble = Markdown("", classes="assistant")
-        await self._mount(bubble)
+        p = self._pal()
+        thinking_block: Static | None = None
+        thinking_buf: list[str] = []
+        bubble: Markdown | None = None
         buffer: list[str] = []
         last_render = 0.0
+        last_think_render = 0.0
         turn: Turn | None = None
 
         async for event, payload in self.provider.stream_turn(
             self.context.messages, self.tool_schemas
         ):
-            if event == "text":
+            if event == "thinking":
+                if not self.config.show_thinking:
+                    continue
+                thinking_buf.append(str(payload))
+                if thinking_block is None:
+                    thinking_block = Static(Text(""), classes="thinking")
+                    await self._mount(thinking_block)
+                now = time.monotonic()
+                if now - last_think_render > 0.08:
+                    thinking_block.update(
+                        Text("💭 " + "".join(thinking_buf), style=f"italic {p['dim']}")
+                    )
+                    self._scroll_if_following()
+                    last_think_render = now
+            elif event == "text":
                 buffer.append(str(payload))
+                if bubble is None:
+                    bubble = Markdown("", classes="assistant")
+                    await self._mount(bubble)
                 now = time.monotonic()
                 if now - last_render > 0.08:
                     await bubble.update("".join(buffer))
@@ -1267,11 +1290,20 @@ class RiftorApp(App):
             elif event == "done":
                 turn = payload  # type: ignore[assignment]
 
+        # finalize the thinking block (flush any buffered tail)
+        if thinking_block is not None:
+            thinking_block.update(
+                Text("💭 " + "".join(thinking_buf), style=f"italic {p['dim']}")
+            )
+
         text = "".join(buffer).strip()
         if text:
+            if bubble is None:
+                bubble = Markdown("", classes="assistant")
+                await self._mount(bubble)
             await bubble.update(text)
             self._last_output = text
-        else:
+        elif bubble is not None:
             await bubble.remove()
         self._scroll_if_following()
         return turn or Turn(text=text, assistant_message={"role": "assistant", "content": text})
@@ -1380,6 +1412,13 @@ class RiftorApp(App):
     async def _show_tool_result(self, content: str, is_error: bool = False) -> None:
         max_lines = self.config.result_preview_lines
         lines = content.splitlines() or [""]
+        if not self.config.show_tool_output:
+            # Hidden by /config: don't render, but still register the full result
+            # so the operator can reveal it on demand with /show N. The call line
+            # (⛏ toolname …) is mounted separately and stays visible.
+            rid = len(self._tool_results) + 1
+            self._tool_results[rid] = content
+            return
         shown = "\n".join(lines[:max_lines])
         if len(lines) > max_lines:
             rid = len(self._tool_results) + 1

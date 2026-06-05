@@ -107,7 +107,12 @@ async def _run(cfg: Config, workdir: Path, prompt: str, scope_file: str | None, 
         turn = None
         try:
             async for event, payload in provider.stream_turn(context.messages, schemas):
-                if event == "text":
+                if event == "thinking":
+                    if cfg.show_thinking:
+                        # reasoning goes to stderr so stdout stays the clean answer
+                        sys.stderr.write(str(payload))
+                        sys.stderr.flush()
+                elif event == "text":
                     sys.stdout.write(str(payload))
                     sys.stdout.flush()
                     text_parts.append(str(payload))

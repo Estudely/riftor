@@ -93,6 +93,22 @@ async def main() -> None:
             for m in app.context._messages
         ), "expected out-of-scope block fed back to model"
 
+        # show_tool_output gate: when off, the result block is NOT rendered, but
+        # the ⛏ call line still is, and the result still reaches the model context.
+        from textual.widgets import Static as _Static
+        app.config.show_tool_output = False
+        app.permissions.allow_for_session("bash")
+        before_results = len([w for w in app.query(_Static)
+                              if "tool-result" in (w.classes or set())])
+        await app._show_tool_result("SECRET-OUTPUT-LINE", is_error=False)
+        after_results = len([w for w in app.query(_Static)
+                             if "tool-result" in (w.classes or set())])
+        assert after_results == before_results, "tool-result must not render when hidden"
+        # still revealable on demand via /show
+        assert any("SECRET-OUTPUT-LINE" in v for v in app._tool_results.values()), \
+            "hidden result must still be registered for /show"
+        app.config.show_tool_output = True
+
         # Phase 7b: a dispatch mounts the live flock pane, updates it during
         # flight, then clears it; the 🐦 status segment reflects worker usage.
         # Offline via RIFTOR_DEMO_RESPONSE. Capture max rows seen mid-flight by
