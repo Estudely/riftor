@@ -18,6 +18,7 @@ import os
 import time
 import urllib.error
 import urllib.request
+from importlib import resources
 from pathlib import Path
 
 from riftor.codex_auth import _jwt_claims, _jwt_exp, codex_home
@@ -186,3 +187,101 @@ def refresh_tokens() -> str:
     )
     _write_auth_secure(data)
     return new_access
+
+
+# --- instructions prompt (Task 4b) -----------------------------------------
+#
+# The Codex backend rejects requests whose ``instructions`` field isn't the
+# canonical Codex system prompt, so the handler must supply it. We BUNDLE a
+# pinned copy (``prompts/codex/default.md``) and *opportunistically* refresh it
+# from GitHub with a short timeout, falling back to the bundle on any failure.
+#
+# v1 scope cut (deliberate): the refreshed prompt is cached in-process for the
+# lifetime of the process only — there is NO disk / ETag cache. A long-running
+# process picks up an upstream prompt change on its next fresh start, which is
+# good enough for now.
+
+# Bundled prompt resource (loaded via importlib.resources, mirroring how
+# ``context.py`` loads ``prompts/system.md``).
+_BUNDLED_INSTRUCTIONS_RESOURCE = "prompts/codex/default.md"
+
+# Remote source: the canonical Codex prompt in the openai/codex repo. Fetched
+# opportunistically; any failure degrades to the bundled copy.
+_REMOTE_INSTRUCTIONS_URLS = {
+    "codex": (
+        "https://raw.githubusercontent.com/openai/codex/main/"
+        "codex-rs/core/gpt_5_codex_prompt.md"
+    ),
+}
+_REMOTE_FETCH_TIMEOUT_S = 3.0
+
+# Process-level cache keyed by family (no disk cache — see scope note above).
+_INSTRUCTIONS_CACHE: dict[str, str] = {}
+
+
+def _bundled_instructions() -> str:
+    """Return the pinned, bundled Codex instructions prompt.
+
+    Loaded as package data via ``importlib.resources`` (same mechanism as
+    ``context._load_system_prompt``), so it works from an installed wheel.
+    """
+    return (
+        resources.files("riftor.agent")
+        .joinpath(_BUNDLED_INSTRUCTIONS_RESOURCE)
+        .read_text(encoding="utf-8")
+    )
+
+
+def _model_family(model: str) -> str:
+    """Map a model id to a prompt family.
+
+    For v1 everything maps to the single bundled "codex" family; this helper
+    exists so future families (e.g. distinct prompts per model) are a one-line
+    change here rather than threaded through the call sites.
+    """
+    return "codex"
+
+
+def _fetch_remote_instructions(family: str) -> str | None:
+    """Fetch the latest instructions prompt for ``family`` from GitHub.
+
+    This is the SINGLE network seam — tests monkeypatch *this*, never the
+    network. Uses a short timeout and returns ``None`` on any failure; it never
+    raises.
+    """
+    url = _REMOTE_INSTRUCTIONS_URLS.get(family)
+    if not url:
+        return None
+    try:
+        req = urllib.request.Request(url, method="GET")
+        with urllib.request.urlopen(  # noqa: S310 — fixed https raw.githubusercontent URL
+            req, timeout=_REMOTE_FETCH_TIMEOUT_S
+        ) as resp:
+            text = resp.read().decode("utf-8")
+        return text or None
+    except Exception:  # noqa: BLE001 — opportunistic refresh; any failure falls back to the bundle
+        return None
+
+
+def instructions_for(model: str) -> str:
+    """Return the Codex ``instructions`` prompt for ``model``.
+
+    Never raises and always returns a non-empty string. Tries the (cached)
+    opportunistic remote fetch first, then falls back to the bundled copy.
+    """
+    family = _model_family(model)
+    cached = _INSTRUCTIONS_CACHE.get(family)
+    if cached:
+        return cached
+
+    try:
+        remote = _fetch_remote_instructions(family)
+    except Exception:  # noqa: BLE001 — a misbehaving seam must still degrade to the bundle
+        remote = None
+    if isinstance(remote, str) and remote:
+        _INSTRUCTIONS_CACHE[family] = remote
+        return remote
+
+    bundled = _bundled_instructions()
+    _INSTRUCTIONS_CACHE[family] = bundled
+    return bundled

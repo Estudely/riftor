@@ -200,3 +200,54 @@ def test_refresh_non_json_becomes_auth_error(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError) as ei:
         codex_provider.refresh_tokens()
     assert "codex login" in str(ei.value)
+
+
+# --- instructions prompt (Task 4b) -----------------------------------------
+
+
+def test_bundled_instructions_loads():
+    text = codex_provider._bundled_instructions()
+    assert text
+    assert text.startswith("You are Codex")
+
+
+def test_instructions_falls_back_to_bundle_offline(monkeypatch):
+    codex_provider._INSTRUCTIONS_CACHE.clear()
+    monkeypatch.setattr(codex_provider, "_fetch_remote_instructions", lambda family: None)
+    text = codex_provider.instructions_for("gpt-5.5-codex")
+    assert text
+    assert text.startswith("You are Codex")
+
+    # And a variant where the remote seam raises — still falls back, never crashes.
+    codex_provider._INSTRUCTIONS_CACHE.clear()
+
+    def boom(family):
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(codex_provider, "_fetch_remote_instructions", boom)
+    text2 = codex_provider.instructions_for("gpt-5.5-codex")
+    assert text2
+    assert text2.startswith("You are Codex")
+
+
+def test_instructions_uses_remote_when_available(monkeypatch):
+    codex_provider._INSTRUCTIONS_CACHE.clear()
+    monkeypatch.setattr(
+        codex_provider, "_fetch_remote_instructions", lambda family: "REMOTE PROMPT TEXT"
+    )
+    assert codex_provider.instructions_for("gpt-5.5-codex") == "REMOTE PROMPT TEXT"
+
+
+def test_instructions_caches(monkeypatch):
+    codex_provider._INSTRUCTIONS_CACHE.clear()
+    calls = {"n": 0}
+
+    def counting(family):
+        calls["n"] += 1
+        return "X"
+
+    monkeypatch.setattr(codex_provider, "_fetch_remote_instructions", counting)
+    first = codex_provider.instructions_for("gpt-5.5-codex")
+    second = codex_provider.instructions_for("gpt-5.5-codex")
+    assert first == second == "X"
+    assert calls["n"] == 1
