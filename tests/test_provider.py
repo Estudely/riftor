@@ -93,6 +93,20 @@ def test_kwargs_uses_provider_table_creds(monkeypatch):
     assert kw["api_base"] == "https://table/"
 
 
+def test_kwargs_marks_codex_model_for_litellm(monkeypatch):
+    monkeypatch.delenv("RIFTOR_DEMO_RESPONSE", raising=False)
+    cfg = Config(model="codex/gpt-5.5")
+    kw = prov.Provider(cfg)._kwargs([{"role": "user", "content": "hi"}])
+    assert kw["model"] == "codex/riftorcodex-gpt-5.5"
+
+
+def test_kwargs_leaves_non_codex_model_unchanged(monkeypatch):
+    monkeypatch.delenv("RIFTOR_DEMO_RESPONSE", raising=False)
+    cfg = Config(model="anthropic/claude-opus-4-8", api_key="sk-demo")
+    kw = prov.Provider(cfg)._kwargs([{"role": "user", "content": "hi"}])
+    assert kw["model"] == "anthropic/claude-opus-4-8"
+
+
 def test_get_litellm_registers_codex():
     """_get_litellm() must register the codex custom handler into litellm."""
     # Run registration fresh so the codex entry is guaranteed to be present.

@@ -707,6 +707,93 @@ def _sse(event: dict) -> list[str]:
 def test_bare_model_strips_prefix():
     assert codex_provider._bare_model("codex/gpt-5.5-codex") == "gpt-5.5-codex"
     assert codex_provider._bare_model("gpt-5.5-codex") == "gpt-5.5-codex"
+    # The internal route marker is stripped too, so the REAL model id reaches the
+    # Codex backend (litellm sees the marked id; the handler sees the real one).
+    assert codex_provider._bare_model("codex/riftorcodex-gpt-5.5") == "gpt-5.5"
+    assert codex_provider._bare_model("riftorcodex-gpt-5.5-codex") == "gpt-5.5-codex"
+
+
+def test_to_litellm_model_adds_marker():
+    # `codex/<real>` becomes a registry-opaque id so litellm routes to our handler
+    # instead of hijacking the bare name to its built-in OpenAI provider.
+    assert (
+        codex_provider.to_litellm_model("codex/gpt-5.5")
+        == "codex/riftorcodex-gpt-5.5"
+    )
+    assert (
+        codex_provider.to_litellm_model("codex/gpt-5.3-codex")
+        == "codex/riftorcodex-gpt-5.3-codex"
+    )
+
+
+def test_to_litellm_model_idempotent():
+    once = codex_provider.to_litellm_model("codex/gpt-5.5")
+    assert codex_provider.to_litellm_model(once) == once
+
+
+def test_to_litellm_model_passes_through_non_codex():
+    assert (
+        codex_provider.to_litellm_model("anthropic/claude-opus-4-8")
+        == "anthropic/claude-opus-4-8"
+    )
+    assert codex_provider.to_litellm_model("gpt-5.5") == "gpt-5.5"
+
+
+# --- end-to-end litellm routing (the gap that let the bug through) ---------
+
+
+@pytest.mark.parametrize("real", ["gpt-5.5", "gpt-5.4", "gpt-5.3-codex", "gpt-5.2-codex"])
+def test_real_codex_model_routes_to_our_handler(tmp_path, monkeypatch, real):
+    """Drive a REAL codex model name through litellm's actual dispatch.
+
+    litellm registry-matches the bare model name, so for known names (gpt-5.5,
+    gpt-5.3-codex, ...) it would otherwise hijack the call to its built-in OpenAI
+    provider and fail with a credentials error. We send litellm the marked,
+    registry-opaque id (exactly as riftor's ``_kwargs`` does) and assert the call
+    reaches our custom handler AND the backend receives the REAL (un-marked) name.
+    """
+    _future_auth(tmp_path)
+
+    recorded: dict = {}
+
+    lines: list[str] = []
+    lines += _sse({"type": "response.output_text.delta", "delta": "Hel"})
+    lines += _sse({"type": "response.output_text.delta", "delta": "lo"})
+    lines += _sse(
+        {
+            "type": "response.completed",
+            "response": {
+                "output": [],
+                "usage": {"input_tokens": 5, "output_tokens": 2},
+            },
+        }
+    )
+
+    def fake_stream(payload, headers, timeout=120.0):
+        recorded["model"] = payload["model"]
+        return iter(lines)
+
+    monkeypatch.setattr(codex_provider, "_stream_responses", fake_stream)
+
+    from riftor.agent.codex_provider import to_litellm_model
+    from riftor.agent.provider import _get_litellm
+
+    lit = _get_litellm()
+    litellm_model = to_litellm_model(f"codex/{real}")
+    # NOTE: no explicit custom_llm_provider — we rely on litellm routing from the
+    # model id alone, which is exactly what triggers the bug for known names.
+    resp = lit.completion(
+        model=litellm_model,
+        messages=[{"role": "user", "content": "hi"}],
+        stream=True,
+    )
+    chunks = list(resp)
+
+    # Our handler was reached (no "Missing credentials"/CodexException) and the
+    # backend got the REAL model id, not the marked one.
+    assert recorded["model"] == real
+    text = "".join((c.choices[0].delta.content or "") for c in chunks if c.choices)
+    assert text == "Hello"
 
 
 def test_streaming_text_reply(tmp_path, monkeypatch):

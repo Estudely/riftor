@@ -720,10 +720,36 @@ def _stream_responses(
             yield raw.decode("utf-8", errors="replace")
 
 
-def _bare_model(model: str) -> str:
-    """Strip a leading ``codex/`` provider prefix if present."""
+# litellm registry-matches the bare model name and will hijack any id it knows
+# (gpt-5.5, gpt-5.3-codex, ...) to its built-in OpenAI provider, bypassing this
+# custom handler. We prefix the bare name with an opaque marker so litellm cannot
+# match it and routes to us; the handler strips the marker before calling the API.
+_ROUTE_MARKER = "riftorcodex-"
+
+
+def to_litellm_model(model: str) -> str:
+    """Map a user/config codex model id to the id we hand to litellm.
+
+    `codex/gpt-5.5` -> `codex/riftorcodex-gpt-5.5` (registry-opaque, routes to us).
+    Non-codex ids pass through unchanged. Idempotent.
+    """
     prefix = "codex/"
-    return model[len(prefix) :] if model.startswith(prefix) else model
+    if not model.startswith(prefix):
+        return model
+    bare = model[len(prefix):]
+    if bare.startswith(_ROUTE_MARKER):
+        return model
+    return f"{prefix}{_ROUTE_MARKER}{bare}"
+
+
+def _bare_model(model: str) -> str:
+    """Strip the `codex/` prefix AND the internal route marker, yielding the real
+    model id to send to the Codex backend."""
+    prefix = "codex/"
+    bare = model[len(prefix):] if model.startswith(prefix) else model
+    if bare.startswith(_ROUTE_MARKER):
+        bare = bare[len(_ROUTE_MARKER):]
+    return bare
 
 
 def _chunk_to_streaming(chunk: CodexChunk) -> dict:

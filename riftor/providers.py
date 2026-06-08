@@ -58,7 +58,7 @@ PROVIDER_DEFAULTS: dict[str, list[str]] = {
     "deepseek": ["deepseek-v4-pro", "deepseek-v4-flash"],
     "xai": ["grok-4.3"],
     "mistral": ["mistral-large-latest", "mistral-medium-latest", "mistral-small-latest"],
-    "codex": ["gpt-5.5-codex", "gpt-5.5", "gpt-5.4-codex"],
+    "codex": ["gpt-5.5", "gpt-5.4", "gpt-5.3-codex", "gpt-5.2-codex"],
     "ollama": [],
     "custom": [],
 }

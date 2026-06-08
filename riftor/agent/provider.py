@@ -54,6 +54,15 @@ def _register_codex_provider(litellm) -> None:
         return
     existing.append({"provider": "codex", "custom_handler": codex_provider})
     litellm.custom_provider_map = existing
+    # Setting custom_provider_map alone is NOT enough: litellm gates custom-handler
+    # dispatch on ``custom_llm_provider in litellm._custom_providers`` (main.py), a
+    # list that stays empty until ``custom_llm_setup()`` runs. It idempotently
+    # appends our provider to both ``litellm.provider_list`` and
+    # ``litellm._custom_providers`` so routing by model id reaches our handler.
+    try:
+        litellm.utils.custom_llm_setup()
+    except Exception:  # noqa: BLE001 — Codex optional at runtime; never break the loop
+        pass
 
 
 @dataclass
@@ -152,8 +161,17 @@ class Provider:
         self.max_retries = 4
 
     def _kwargs(self, messages: list[dict], tools: list[dict] | None = None) -> dict:
+        # Route codex/<real-model> through an opaque marker id so litellm dispatches
+        # to our custom handler instead of registry-matching the bare name to its
+        # built-in OpenAI provider. Imported lazily so importing provider.py never
+        # loads litellm/codex_provider (see test_importing_provider_does_not_load_litellm).
+        model = self.config.model
+        if model.startswith("codex/"):
+            from riftor.agent.codex_provider import to_litellm_model
+
+            model = to_litellm_model(model)
         kwargs: dict = {
-            "model": self.config.model,
+            "model": model,
             "messages": messages,
             "stream": True,
             "stream_options": {"include_usage": True},
