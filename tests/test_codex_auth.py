@@ -67,3 +67,11 @@ def test_expired_token_is_not_logged_in(tmp_path, monkeypatch):
     assert status.logged_in is False
     assert status.expires_in_s == 0
     assert "expired" in status.detail
+
+
+def test_doctor_plain_includes_codex_line(tmp_path, monkeypatch):
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))  # no auth.json => not logged in
+    from riftor.engagement.doctor import check_toolchain, render_plain
+    out = render_plain(check_toolchain())
+    assert "Codex" in out
+    assert "codex login" in out
