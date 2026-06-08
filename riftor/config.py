@@ -36,6 +36,7 @@ _KNOWN_PROVIDERS = (
     "anthropic/", "openai/", "openrouter/", "ollama/", "ollama_chat/", "gemini/",
     "groq/", "mistral/", "cohere/", "azure/", "bedrock/", "vertex_ai/", "together_ai/",
     "deepseek/", "xai/", "perplexity/", "fireworks_ai/", "huggingface/", "replicate/",
+    "codex/",
 )
 
 # Valid reasoning-effort levels (litellm vocabulary). "none" => no reasoning request.

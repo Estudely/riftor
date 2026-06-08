@@ -218,11 +218,16 @@ def test_codex_creds_are_none(monkeypatch):
     assert cfg.creds_for("codex/gpt-5.5-codex") == (None, None)
 
 
-def test_codex_has_credentials_like_ollama(monkeypatch):
+def test_codex_has_credentials_like_ollama():
     # Treated like ollama: never block the UI on a key. Real login validity is
     # surfaced as status, not a hard gate.
     cfg = Config(model="codex/gpt-5.5-codex")
     assert cfg.has_credentials()
+
+
+def test_codex_model_warning_is_none():
+    # codex/ is a known provider prefix; no spurious "unknown prefix" warning.
+    assert Config(model="codex/gpt-5.5-codex").model_warning() is None
 
 
 def test_codex_provider_env_is_none():
