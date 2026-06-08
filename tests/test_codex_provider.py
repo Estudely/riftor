@@ -855,8 +855,125 @@ def test_streaming_tool_call_reply(tmp_path, monkeypatch):
     assert "bash" in names
     args = "".join(c["tool_use"]["function"]["arguments"] or "" for c in tool_chunks)
     assert args == '{"cmd":"ls"}'
-    # tool_use index is stable so the consumer reassembles one call.
-    assert all(c["tool_use"]["index"] == tool_chunks[0]["tool_use"]["index"] for c in tool_chunks)
+    # A single call streams under one stable index (0) so the consumer
+    # reassembles exactly one call.
+    assert all(c["tool_use"]["index"] == 0 for c in tool_chunks)
+
+    final = chunks[-1]
+    assert final["is_finished"] is True
+    assert final["finish_reason"] == "tool_calls"
+
+
+def test_streaming_two_parallel_tool_calls_distinct_index(tmp_path, monkeypatch):
+    _future_auth(tmp_path)
+
+    lines: list[str] = []
+    # Two parallel function calls announced up-front.
+    lines += _sse(
+        {
+            "type": "response.output_item.added",
+            "item": {
+                "type": "function_call",
+                "name": "a",
+                "call_id": "call_a",
+                "id": "item_a",
+            },
+        }
+    )
+    lines += _sse(
+        {
+            "type": "response.output_item.added",
+            "item": {
+                "type": "function_call",
+                "name": "b",
+                "call_id": "call_b",
+                "id": "item_b",
+            },
+        }
+    )
+    # Argument fragments interleaved between the two calls.
+    lines += _sse(
+        {
+            "type": "response.function_call_arguments.delta",
+            "item_id": "item_a",
+            "delta": '{"x"',
+        }
+    )
+    lines += _sse(
+        {
+            "type": "response.function_call_arguments.delta",
+            "item_id": "item_b",
+            "delta": '{"y"',
+        }
+    )
+    lines += _sse(
+        {
+            "type": "response.function_call_arguments.delta",
+            "item_id": "item_a",
+            "delta": ":1}",
+        }
+    )
+    lines += _sse(
+        {
+            "type": "response.function_call_arguments.delta",
+            "item_id": "item_b",
+            "delta": ":2}",
+        }
+    )
+    lines += _sse(
+        {
+            "type": "response.completed",
+            "response": {
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "a",
+                        "arguments": '{"x":1}',
+                        "call_id": "call_a",
+                    },
+                    {
+                        "type": "function_call",
+                        "name": "b",
+                        "arguments": '{"y":2}',
+                        "call_id": "call_b",
+                    },
+                ],
+                "usage": {"input_tokens": 9, "output_tokens": 5},
+            },
+        }
+    )
+
+    monkeypatch.setattr(
+        codex_provider, "_stream_responses", lambda payload, headers, timeout=120.0: iter(lines)
+    )
+
+    chunks = list(
+        codex_provider.codex_provider.streaming(
+            "gpt-5.5-codex", [{"role": "user", "content": "do two things"}]
+        )
+    )
+
+    tool_chunks = [c for c in chunks if c["tool_use"]]
+    # Group streamed fragments by their tool_use index.
+    by_index: dict[int, list[dict]] = {}
+    for c in tool_chunks:
+        by_index.setdefault(c["tool_use"]["index"], []).append(c)
+
+    # Two distinct calls -> two distinct indices, 0 and 1 in first-seen order.
+    assert set(by_index) == {0, 1}
+
+    # Index 0 belongs to call_a, index 1 to call_b, and arguments accumulate
+    # INDEPENDENTLY per index (no concatenation across calls).
+    def _args(idx: int) -> str:
+        return "".join(c["tool_use"]["function"]["arguments"] or "" for c in by_index[idx])
+
+    def _id(idx: int) -> str:
+        return next(c["tool_use"]["id"] for c in by_index[idx])
+
+    assert _id(0) == "call_a"
+    assert _id(1) == "call_b"
+    assert _args(0) == '{"x":1}'
+    assert _args(1) == '{"y":2}'
 
     final = chunks[-1]
     assert final["is_finished"] is True

@@ -455,7 +455,9 @@ class CodexChunk:
     """A single streamed unit, litellm-agnostic.
 
     ``tool_call`` (when set) has the shape
-    ``{"id", "name", "arguments_delta"}`` for a streaming arguments fragment.
+    ``{"id", "name", "arguments_delta", "index"}`` for a streaming arguments
+    fragment, where ``index`` is a stable 0-based index assigned per distinct
+    call in first-seen order (so parallel calls reassemble independently).
     The final chunk of a stream sets ``is_finished`` with a ``finish_reason``
     and ``usage`` (``{"prompt_tokens", "completion_tokens", "total_tokens"}``).
     """
@@ -499,9 +501,24 @@ def parse_events(events: Iterable[dict]) -> Iterator[CodexChunk]:
     ``response.completed``/``response.done``. Never raises on a missing or odd
     field — every access uses ``.get``.
     """
-    # item id -> {"id": call_id, "name": name}
+    # item id -> {"id": call_id, "name": name, "index": int}
     call_meta: dict[str, dict] = {}
     saw_function_call = False
+    next_index = 0
+
+    def _index_for(ref: str) -> int:
+        # Allocate a stable 0-based index per distinct call, in first-seen order.
+        nonlocal next_index
+        meta = call_meta.get(ref)
+        if meta is not None and "index" in meta:
+            return meta["index"]
+        idx = next_index
+        next_index += 1
+        if meta is None:
+            meta = {"id": ref, "name": None}
+            call_meta[ref] = meta
+        meta["index"] = idx
+        return idx
 
     for event in events:
         if not isinstance(event, dict):
@@ -527,6 +544,8 @@ def parse_events(events: Iterable[dict]) -> Iterator[CodexChunk]:
                 call_id = item.get("call_id") or item_id
                 if item_id is not None:
                     call_meta[item_id] = {"id": call_id, "name": item.get("name")}
+                    # Allocate the stable streaming index on first sight.
+                    _index_for(item_id)
 
         elif etype == "response.function_call_arguments.delta":
             saw_function_call = True
@@ -536,11 +555,15 @@ def parse_events(events: Iterable[dict]) -> Iterator[CodexChunk]:
             # supplied name/call_id; name stays None to be filled from output.
             call_id = meta["id"] if meta else ref
             name = meta["name"] if meta else None
+            # Allocate (or reuse) the stable per-call streaming index. Deltas for
+            # the same call share an index; a new call gets the next one.
+            index = _index_for(ref) if ref is not None else 0
             yield CodexChunk(
                 tool_call={
                     "id": call_id,
                     "name": name,
                     "arguments_delta": event.get("delta") or "",
+                    "index": index,
                 }
             )
 
@@ -622,10 +645,6 @@ def iter_sse_lines(lines: Iterable[str]) -> Iterator[dict]:
 
 # Undocumented Codex/ChatGPT-backend Responses endpoint (POST).
 RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses"
-
-# The arguments fragments of a single Codex function call all carry one stable
-# tool_use index so the consumer (provider.stream_turn) reassembles one call.
-_TOOL_USE_INDEX = 0
 
 
 def _litellm_types() -> Any:
@@ -720,7 +739,7 @@ def _chunk_to_streaming(chunk: CodexChunk) -> dict:
         tool_use = {
             "id": chunk.tool_call.get("id"),
             "type": "function",
-            "index": _TOOL_USE_INDEX,
+            "index": chunk.tool_call.get("index", 0),
             "function": {
                 "name": chunk.tool_call.get("name"),
                 "arguments": chunk.tool_call.get("arguments_delta") or "",
