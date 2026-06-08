@@ -76,7 +76,8 @@ ConfirmScreen, ConfigScreen {
     background: $background 75%;
 }
 
-#confirm-box, #config-box {
+/* --- confirm modal: unchanged classic card (its own rules now) --- */
+#confirm-box {
     width: 72;
     max-width: 90%;
     height: auto;
@@ -85,39 +86,96 @@ ConfirmScreen, ConfigScreen {
     background: $panel;
     border: round $violet;
 }
-
-/* config card lays out as: title (auto) · body (flexes/scrolls) · footer (auto).
-   The flexing body is what keeps the Save/Cancel footer on-screen even on short
-   terminals — without this the body's fixed height pushed the buttons off the
-   bottom. */
-#config-box {
-    layout: vertical;
-}
-
-/* title bar — bold, with an underline rule that spans the card */
-#confirm-title, #config-title {
+/* title bar — own background + divider, matching the config modal's title bar.
+   (The glyph text colour comes from the inline Rich style in permissions.py;
+   this rule controls the bar background, divider, and bold weight.) */
+#confirm-title {
     width: 1fr;
-    padding: 0 0 1 0;
+    height: auto;
+    padding: 1 2;
     margin-bottom: 1;
+    background: $surface;
     border-bottom: solid $border;
-    color: $violet;
     text-style: bold;
 }
 
-/* — config body & field rows — */
-/* 1fr so the body takes only the space left after the title + footer, and
-   scrolls inside it. This guarantees the footer buttons stay visible on short
-   terminals. height:auto would let the body grow and shove the footer off. */
-#config-body {
-    height: 1fr;
+/* --- config modal: bars + sidebar; no card padding so bars span edge-to-edge --- */
+/* Fixed height 30 (the densest section, Model, needs ~30 rows) with the content
+   pane scrolling inside (see #config-pane). This gives the modal a CONSISTENT
+   size across sections and keeps the title/footer bars pinned. max-height 100%
+   shrinks the box to fit terminals under 30 rows (the pane scrolls), so the
+   footer is never pushed off-screen even on short terminals. */
+#config-box {
+    layout: vertical;
+    width: 80;
+    max-width: 92%;
+    height: 30;
+    max-height: 100%;
     padding: 0;
+    background: $panel;
+    border: round $violet;
+}
+/* title BAR — own background, spans the card, divider underneath */
+#config-title {
+    width: 1fr;
+    height: 3;
+    padding: 1 2 0 2;
+    background: $surface;
+    border-bottom: solid $border;
+    color: $foreground;
+    text-style: bold;
+}
+
+/* — config sidebar: nav column + content pane — */
+/* The middle band flexes (1fr) to fill the fixed-height box between the title
+   and footer bars. Nav and pane both 1fr, so they share the same height and
+   the divider (border-left on the pane) spans the full band. */
+#config-main {
+    height: 1fr;
+    layout: horizontal;
+}
+
+/* left nav — slightly-off background column */
+#config-nav {
+    width: 20;
+    height: 1fr;
+    background: $surface;
+    padding: 1 0;
+}
+#config-nav > ListItem {
+    padding: 0 2;
+    color: $muted;
+}
+#config-nav > ListItem.--highlight {
+    background: $violet 25%;
+    color: $foreground;
+    border-left: thick $violet;
+}
+
+/* right content pane — scrolls when a section is taller than the band (so the
+   pinned footer stays visible); its left border is the nav/content divider. */
+#config-pane {
+    width: 1fr;
+    height: 1fr;
+    padding: 1 2;
+    border-left: solid $border;
+    overflow-y: auto;
+    scrollbar-color: $border;
+}
+
+/* only the active section panel is shown */
+.config-section-panel {
+    height: auto;
+}
+.config-section-panel.hidden {
+    display: none;
 }
 
 .config-section {
     width: 1fr;
     color: $cyan;
     text-style: bold;
-    margin: 1 0 0 0;
+    margin: 0 0 1 0;
 }
 
 .field-row {
@@ -138,13 +196,23 @@ ConfirmScreen, ConfigScreen {
     width: 1fr;
 }
 
+/* A Select's natural height is 5 (it reserves space for its overlay); without
+   pinning it to 3 it overflows the 3-tall row and overlaps the next field.
+   Pinning matches the Inputs (whose natural height is already 3). */
+.field-row Select {
+    height: 3;
+}
+
 .field-row Switch {
     height: 3;
 }
 
-#config-body Rule {
-    color: $border;
-    margin: 0;
+/* focus glow on the active field. Uses `outline` (not `border`): outline
+   draws over the widget edge without consuming an inner row, so focusing a
+   field does NOT change its height and cannot shove neighbors around. */
+.field-row Input:focus,
+.field-row Select:focus {
+    outline: round $violet;
 }
 
 /* — confirm modal detail/diff — */
@@ -169,16 +237,61 @@ ConfirmScreen, ConfigScreen {
     scrollbar-color: $border;
 }
 
-/* — shared footer — */
-#confirm-buttons, #config-buttons {
+/* — confirm footer: slim centered actions, matching the config footer — */
+#confirm-buttons {
     height: auto;
     align: center middle;
     padding-top: 1;
 }
-
-#confirm-buttons Button, #config-buttons Button {
+/* flat height-1 "text" buttons (no chunky bordered blocks), like the config
+   footer. The five decision keys keep their bindings; #once (Allow once, the
+   auto-focused safe default) is the filled primary. */
+#confirm-buttons Button {
+    height: 1;
+    min-height: 1;
     min-width: 12;
+    border: none;
     margin: 0 1;
+}
+#confirm-buttons #once {
+    background: $violet;
+    color: $background;
+    text-style: bold;
+}
+/* focus indication for the keyboard-driven decision buttons (a/s/w/d/esc).
+   `reverse` reads clearly on a flat height-1 button without changing its size. */
+#confirm-buttons Button:focus {
+    text-style: bold reverse;
+}
+
+/* — config footer BAR: slim, right-aligned actions — */
+/* The buttons are flat height-1 "text" buttons (border: none), not the default
+   3-tall bordered blocks: a tall footer looked heavy/ugly and the border-top
+   clipped 3-tall buttons. height:3 bar = 1 divider row + 1 button row + 1 of
+   breathing room. */
+#config-buttons {
+    height: 3;
+    align: right middle;
+    background: $surface;
+    border-top: solid $border;
+    padding: 0 2;
+}
+#config-buttons Button {
+    height: 1;
+    min-height: 1;
+    min-width: 10;
+    border: none;
+    margin: 0 0 0 2;
+}
+/* filled primary Save; muted text Cancel */
+#config-buttons #save {
+    background: $violet;
+    color: $background;
+    text-style: bold;
+}
+#config-buttons #cancel {
+    background: $surface;
+    color: $muted;
 }
 
 StatusBar {
@@ -200,6 +313,9 @@ StatusBar {
 }
 
 /* ──────────────────────────── command dropdown ──────────────────────── */
+/* Shares the modal language: rounded violet border, breathing room, and a
+   highlight that matches the config nav's active item (violet tint + a thick
+   violet left accent bar). */
 #cmd-dropdown {
     display: none;
     height: auto;
@@ -217,15 +333,17 @@ StatusBar {
 #cmd-dropdown ListView {
     background: $panel;
     color: $foreground;
-    padding: 0 1;
+    padding: 1 1;
+    scrollbar-color: $border;
 }
 
 #cmd-dropdown ListView > ListItem {
-    padding: 0 1;
+    padding: 0 2;
     color: $muted;
 }
 
 #cmd-dropdown ListView > ListItem.--highlight {
-    background: $violet 30%;
+    background: $violet 25%;
     color: $foreground;
+    border-left: thick $violet;
 }

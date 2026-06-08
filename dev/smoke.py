@@ -153,13 +153,105 @@ async def main() -> None:
         await pilot.pause()
         assert app.theme == "void", app.theme
 
-        # /config opens the modal; escape cancels it
+        # /config opens the sidebar modal. Verify: (1) it mounts, (2) every
+        # field id stays query-able regardless of which section is active —
+        # this is the load-bearing contract, since Save reads them all via
+        # query_one and the sidebar must NOT unmount off-screen sections,
+        # (3) switching the active section toggles panel visibility,
+        # (4) escape cancels.
         from riftor.tui.config_screen import ConfigScreen
 
         inp.value = "/config"
         await pilot.press("enter")
         await pilot.pause()
-        assert isinstance(app.screen, ConfigScreen), type(app.screen)
+        screen = app.screen
+        assert isinstance(screen, ConfigScreen), type(screen)
+
+        # Every field across every section must be mounted up front. If the
+        # sidebar refactor ever unmounts a hidden section, these raise.
+        all_field_ids = [
+            "#cfg-provider", "#cfg-model-select", "#cfg-model", "#cfg-base", "#cfg-key",
+            "#cfg-temp", "#cfg-maxtok",
+            "#cfg-chakla-provider", "#cfg-chakla-model-select", "#cfg-chakla-custom",
+            "#cfg-label-main", "#cfg-label-worker",
+            "#cfg-theme", "#cfg-lore",
+            "#cfg-show-thinking", "#cfg-show-tool-output", "#cfg-reasoning-effort",
+        ]
+        for fid in all_field_ids:
+            assert screen.query(fid), f"field {fid} not mounted in sidebar config"
+
+        # The five section panels exist and exactly one is visible at a time.
+        panel_ids = [
+            "#section-model", "#section-generation", "#section-workers",
+            "#section-appearance", "#section-display",
+        ]
+        for pid in panel_ids:
+            assert screen.query(pid), f"section panel {pid} missing"
+        visible = [pid for pid in panel_ids
+                   if not screen.query_one(pid).has_class("hidden")]
+        assert visible == ["#section-model"], f"expected only Model visible, got {visible}"
+
+        # Switch to the Workers section via the screen's section selector and
+        # confirm visibility moved there while fields stay query-able.
+        screen.show_section("workers")
+        await pilot.pause()
+        visible = [pid for pid in panel_ids
+                   if not screen.query_one(pid).has_class("hidden")]
+        assert visible == ["#section-workers"], f"expected Workers visible, got {visible}"
+        # a Model-section field is still mounted even though Model is hidden
+        assert screen.query("#cfg-provider"), "hidden-section field must stay mounted"
+
+        # Layout contract (regression guard for the sidebar styling). The config
+        # modal is FIXED-HEIGHT (~30 rows) with the content pane scrolling inside,
+        # so the title/footer bars stay pinned and the footer never clips — at any
+        # terminal height, including short ones (the box shrinks to fit and the
+        # pane scrolls). Verify at a tall (100x40) and a short (90x24) terminal.
+        await pilot.resize_terminal(100, 40)
+        await pilot.pause()
+        # (1) NO ROW OVERLAP — a Select's natural height is 5, but the field
+        #     row is 3; if the Select isn't pinned it overflows and covers the
+        #     next row. Assert each Select (every section — the pin is global)
+        #     fits inside its row's height.
+        screen.show_section("model")
+        await pilot.pause()
+        for sel in screen.query(".field-row Select"):
+            row = sel.parent
+            assert sel.outer_size.height <= row.outer_size.height, (
+                f"Select {sel.id} (h={sel.outer_size.height}) overflows its "
+                f"row (h={row.outer_size.height}) — will overlap the next field"
+            )
+        # (2) CONSISTENT FIXED HEIGHT — a sparse section (Generation) and the
+        #     densest (Model) must report the SAME box height: the modal does not
+        #     resize per section. (If a future change makes it hug content again,
+        #     these differ and this fails.)
+        screen.show_section("model")
+        await pilot.pause()
+        model_h = screen.query_one("#config-box").outer_size.height
+        screen.show_section("generation")
+        await pilot.pause()
+        gen_h = screen.query_one("#config-box").outer_size.height
+        assert gen_h == model_h, (
+            f"config modal is not a consistent fixed height: Generation box "
+            f"h={gen_h} != Model box h={model_h}"
+        )
+        # (3) FOOTER NEVER CLIPPED — at BOTH a tall and a short terminal, on the
+        #     densest section, the pinned footer buttons must render fully on
+        #     screen (the box shrinks + the pane scrolls rather than pushing the
+        #     footer off the bottom).
+        for w, h in ((100, 40), (90, 24)):
+            await pilot.resize_terminal(w, h)
+            await pilot.pause()
+            screen.show_section("model")
+            await pilot.pause()
+            for btn in screen.query("#config-buttons Button"):
+                br = btn.region
+                assert br.y >= 0 and br.y + br.height <= h, (
+                    f"footer button {btn.id} off-screen at {w}x{h}: "
+                    f"y={br.y} h={br.height}"
+                )
+        await pilot.resize_terminal(80, 24)
+        await pilot.pause()
+
         await pilot.press("escape")
         await pilot.pause()
         assert not isinstance(app.screen, ConfigScreen)

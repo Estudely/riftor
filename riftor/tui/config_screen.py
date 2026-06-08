@@ -9,7 +9,7 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widget import Widget
-from textual.widgets import Button, Input, Label, Rule, Select, Switch
+from textual.widgets import Button, Input, Label, ListItem, ListView, Select, Switch
 
 from riftor.providers import (
     PROVIDER_DEFAULTS,
@@ -30,6 +30,18 @@ if TYPE_CHECKING:
 def _row(label: str, field: Widget) -> Horizontal:
     """A label-column + field row, so every field's left edge lines up."""
     return Horizontal(Label(label, classes="field-label"), field, classes="field-row")
+
+
+# The five config sections, in display order. (key, nav-label) — the key is
+# used for the panel id (#section-<key>) and show_section(); the label is what
+# the left nav shows. Glyphs are cosmetic and theme-neutral.
+SECTIONS: list[tuple[str, str]] = [
+    ("model", "◆ Model"),
+    ("generation", "∿ Generation"),
+    ("workers", "🐦 Workers"),
+    ("appearance", "✦ Appearance"),
+    ("display", "▤ Display"),
+]
 
 
 def _model_options(provider_key: str) -> list[tuple[str, str]]:
@@ -86,73 +98,113 @@ class ConfigScreen(ModalScreen[dict | None]):
         w_model_val = wbare if self.config.chakla_model and wbare else Select.NULL
         with Vertical(id="config-box"):
             yield Label("riftor · config", id="config-title")
-            with VerticalScroll(id="config-body"):
-                yield Label("MODEL", classes="config-section")
-                yield _row("Provider", Select(
-                    [(m.label, k) for k, m in PROVIDERS.items()],
-                    value=pkey, allow_blank=False, id="cfg-provider"))
-                yield _row("Model", Select(
-                    model_opts, value=model_val, allow_blank=True, id="cfg-model-select"))
-                yield _row("Custom id", Input(
-                    value="", placeholder="override (optional)", id="cfg-model"))
-                yield _row("Base URL", Input(
-                    value=base_val, placeholder="provider default", id="cfg-base"))
-                yield _row("API key", Input(
-                    password=True, placeholder="leave blank to keep", id="cfg-key"))
-                with Horizontal(classes="field-row"):
-                    yield Label("", classes="field-label")
-                    yield Button("Fetch models", id="cfg-fetch", variant="primary")
+            with Horizontal(id="config-main"):
+                # left nav — keyboard-focusable; selection drives show_section()
+                # NOTE: items are passed as constructor children, not via
+                # ListView.extend(), because extend() calls mount() internally
+                # which raises MountError during compose() (the ListView is not
+                # mounted yet). Constructor children are queued as pending and
+                # mounted with the parent — the supported compose-time pattern.
+                yield ListView(
+                    *(ListItem(Label(label), id=f"nav-{key}") for key, label in SECTIONS),
+                    id="config-nav",
+                )
+                # right content area — all five panels mounted; non-active hidden
+                with VerticalScroll(id="config-pane"):
+                    with Vertical(id="section-model", classes="config-section-panel"):
+                        yield Label("Model", classes="config-section")
+                        yield _row("Provider", Select(
+                            [(m.label, k) for k, m in PROVIDERS.items()],
+                            value=pkey, allow_blank=False, id="cfg-provider"))
+                        yield _row("Model", Select(
+                            model_opts, value=model_val, allow_blank=True, id="cfg-model-select"))
+                        yield _row("Custom id", Input(
+                            value="", placeholder="override (optional)", id="cfg-model"))
+                        yield _row("Base URL", Input(
+                            value=base_val, placeholder="provider default", id="cfg-base"))
+                        yield _row("API key", Input(
+                            password=True, placeholder="leave blank to keep", id="cfg-key"))
+                        with Horizontal(classes="field-row"):
+                            yield Label("", classes="field-label")
+                            yield Button("Fetch models", id="cfg-fetch", variant="primary")
 
-                yield Rule()
-                yield Label("GENERATION", classes="config-section")
-                yield _row("Temperature", Input(value=str(self.config.temperature), id="cfg-temp"))
-                yield _row("Max tokens", Input(value=str(self.config.max_tokens), id="cfg-maxtok"))
+                    with Vertical(id="section-generation", classes="config-section-panel hidden"):
+                        yield Label("Generation", classes="config-section")
+                        yield _row("Temperature", Input(value=str(self.config.temperature), id="cfg-temp"))
+                        yield _row("Max tokens", Input(value=str(self.config.max_tokens), id="cfg-maxtok"))
 
-                yield Rule()
-                yield Label("WORKERS", classes="config-section")
-                yield _row("Provider", Select(
-                    [(m.label, k) for k, m in PROVIDERS.items()],
-                    value=wkey, allow_blank=False, id="cfg-chakla-provider"))
-                yield _row("Model", Select(
-                    w_model_opts, value=w_model_val, allow_blank=True,
-                    id="cfg-chakla-model-select"))
-                yield _row("Custom id", Input(
-                    value="", placeholder="blank = reuse main model",
-                    id="cfg-chakla-custom"))
-                yield _row("Main label", Input(
-                    value=self.config.label_main, placeholder="e.g. Baaj",
-                    id="cfg-label-main"))
-                yield _row("Worker label", Input(
-                    value=self.config.label_worker, placeholder="e.g. Chakla",
-                    id="cfg-label-worker"))
+                    with Vertical(id="section-workers", classes="config-section-panel hidden"):
+                        yield Label("Workers", classes="config-section")
+                        yield _row("Provider", Select(
+                            [(m.label, k) for k, m in PROVIDERS.items()],
+                            value=wkey, allow_blank=False, id="cfg-chakla-provider"))
+                        yield _row("Model", Select(
+                            w_model_opts, value=w_model_val, allow_blank=True,
+                            id="cfg-chakla-model-select"))
+                        yield _row("Custom id", Input(
+                            value="", placeholder="blank = reuse main model",
+                            id="cfg-chakla-custom"))
+                        yield _row("Main label", Input(
+                            value=self.config.label_main, placeholder="e.g. Baaj",
+                            id="cfg-label-main"))
+                        yield _row("Worker label", Input(
+                            value=self.config.label_worker, placeholder="e.g. Chakla",
+                            id="cfg-label-worker"))
 
-                yield Rule()
-                yield Label("APPEARANCE", classes="config-section")
-                yield _row("Theme", Select([(n, n) for n in THEMES], value=theme,
-                                           allow_blank=False, id="cfg-theme"))
-                yield _row("Lore", Switch(value=self.config.lore, id="cfg-lore"))
+                    with Vertical(id="section-appearance", classes="config-section-panel hidden"):
+                        yield Label("Appearance", classes="config-section")
+                        yield _row("Theme", Select([(n, n) for n in THEMES], value=theme,
+                                                   allow_blank=False, id="cfg-theme"))
+                        yield _row("Lore", Switch(value=self.config.lore, id="cfg-lore"))
 
-                yield Rule()
-                yield Label("DISPLAY", classes="config-section")
-                yield _row("Show thinking", Switch(
-                    value=self.config.show_thinking, id="cfg-show-thinking"))
-                yield _row("Show tool output", Switch(
-                    value=self.config.show_tool_output, id="cfg-show-tool-output"))
-                _effort = (self.config.reasoning_effort
-                           if self.config.reasoning_effort in REASONING_EFFORTS else "medium")
-                yield _row("Reasoning effort", Select(
-                    [(e, e) for e in REASONING_EFFORTS],
-                    value=_effort, allow_blank=False, id="cfg-reasoning-effort"))
+                    with Vertical(id="section-display", classes="config-section-panel hidden"):
+                        yield Label("Display", classes="config-section")
+                        yield _row("Show thinking", Switch(
+                            value=self.config.show_thinking, id="cfg-show-thinking"))
+                        yield _row("Show tool output", Switch(
+                            value=self.config.show_tool_output, id="cfg-show-tool-output"))
+                        _effort = (self.config.reasoning_effort
+                                   if self.config.reasoning_effort in REASONING_EFFORTS else "medium")
+                        yield _row("Reasoning effort", Select(
+                            [(e, e) for e in REASONING_EFFORTS],
+                            value=_effort, allow_blank=False, id="cfg-reasoning-effort"))
             with Horizontal(id="config-buttons"):
-                yield Button("Save", id="save", variant="success")
                 yield Button("Cancel", id="cancel", variant="error")
+                yield Button("Save", id="save", variant="success")
 
     @property
     def _riftor_app(self) -> "RiftorApp":
         return self.app  # type: ignore[return-value]
 
     def on_mount(self) -> None:
+        # Model is the default-visible section (the only panel composed without
+        # the `hidden` class); focus its first field.
         self.query_one("#cfg-provider", Select).focus()
+
+    def show_section(self, key: str) -> None:
+        """Show the named section panel, hide the rest. All panels stay mounted
+        (the Save path reads every field via query_one), so this only toggles
+        the `hidden` class — it never adds or removes widgets.
+
+        Guarded: ListView.Highlighted can fire while the screen is still
+        composing (before the panels are mounted). query() returns an empty
+        result set rather than raising, so we no-op until the panels exist."""
+        if not self.query(".config-section-panel"):
+            return
+        for skey, _ in SECTIONS:
+            panel = self.query_one(f"#section-{skey}", Vertical)
+            if skey == key:
+                panel.remove_class("hidden")
+            else:
+                panel.add_class("hidden")
+
+    def on_list_view_highlighted(self, event: "ListView.Highlighted") -> None:
+        if event.list_view.id != "config-nav" or event.item is None:
+            return
+        # item id is "nav-<key>"; strip the prefix to get the section key.
+        item_id = event.item.id or ""
+        if item_id.startswith("nav-"):
+            self.show_section(item_id[len("nav-"):])
 
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "cfg-theme":
