@@ -266,8 +266,9 @@ def _fetch_remote_instructions(family: str) -> str | None:
 def instructions_for(model: str) -> str:
     """Return the Codex ``instructions`` prompt for ``model``.
 
-    Never raises and always returns a non-empty string. Tries the (cached)
-    opportunistic remote fetch first, then falls back to the bundled copy.
+    Never raises on network/remote failure; always returns a non-empty string.
+    Tries the (cached) opportunistic remote fetch first, then falls back to the
+    bundled copy.
     """
     family = _model_family(model)
     cached = _INSTRUCTIONS_CACHE.get(family)
@@ -285,3 +286,149 @@ def instructions_for(model: str) -> str:
     bundled = _bundled_instructions()
     _INSTRUCTIONS_CACHE[family] = bundled
     return bundled
+
+
+# --- Responses request-body builder (Task 4c) ------------------------------
+#
+# Pure data transformation: Chat-Completions ``messages`` + ``tools`` -> the
+# undocumented Codex *Responses API* request body. No network, no I/O. See the
+# CLAUDE.md/task spec for the authoritative mapping.
+
+
+def _extract_text(content: object) -> str:
+    """Coerce a Chat-Completions ``content`` value into plain text.
+
+    ``content`` may be a string, ``None``, or a list of parts. For a list we
+    concatenate the text of ``{"type": "text"|"input_text", "text": ...}`` parts
+    (joined with ""), ignoring non-text parts. Anything else stringifies to "".
+    """
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            if part.get("type") in ("text", "input_text"):
+                text = part.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "".join(parts)
+    return ""
+
+
+def _message_item(role: str, text: str) -> dict:
+    """A Responses ``message`` input item wrapping ``text`` for ``role``."""
+    return {
+        "type": "message",
+        "role": role,
+        "content": [{"type": "input_text", "text": text}],
+    }
+
+
+def _map_message(msg: dict) -> list[dict]:
+    """Map one Chat-Completions message to zero or more Responses input items.
+
+    System messages are handled by the caller (collected into a single leading
+    ``developer`` item), so they yield nothing here.
+    """
+    role = msg.get("role")
+    if role == "system":
+        return []  # handled by build_request_body as a leading developer item
+    if role == "tool":
+        return [
+            {
+                "type": "function_call_output",
+                "call_id": msg.get("tool_call_id"),
+                "output": _extract_text(msg.get("content")),
+            }
+        ]
+    if role == "assistant":
+        items: list[dict] = []
+        text = _extract_text(msg.get("content"))
+        if text:
+            items.append(_message_item("assistant", text))
+        for call in msg.get("tool_calls") or []:
+            fn = call.get("function") or {}
+            items.append(
+                {
+                    "type": "function_call",
+                    "name": fn.get("name"),
+                    "arguments": fn.get("arguments"),
+                    "call_id": call.get("id"),
+                }
+            )
+        return items
+    # Default: a plain user (or other) message.
+    text = _extract_text(msg.get("content"))
+    if not text:
+        return []
+    return [_message_item("user" if role is None else role, text)]
+
+
+def _map_tool(tool: dict) -> dict:
+    """Flatten a Chat-Completions function tool to the Responses tool shape."""
+    fn = tool.get("function") or {}
+    out: dict = {
+        "type": "function",
+        "name": fn.get("name"),
+        "description": fn.get("description"),
+        "parameters": fn.get("parameters"),
+    }
+    if "strict" in fn:
+        out["strict"] = fn["strict"]
+    return out
+
+
+def build_request_body(
+    model: str,
+    messages: list[dict],
+    tools: list[dict] | None = None,
+    *,
+    instructions: str,
+    reasoning_effort: str = "medium",
+    verbosity: str = "medium",
+) -> dict:
+    """Build the Codex *Responses API* request body from Chat-Completions inputs.
+
+    Pure function — no network, no I/O. ``model`` is passed through as-is (the
+    caller has already stripped any provider prefix). ``instructions`` is the
+    canonical Codex system prompt and is placed verbatim in the top-level
+    ``instructions`` field (riftor's own RIFT system message is NOT placed there;
+    it rides along as a leading ``developer`` item in ``input`` instead).
+
+    Sampling/length params (``max_tokens``, ``max_output_tokens``,
+    ``max_completion_tokens``, ``temperature``, ``top_p``) are never emitted.
+    """
+    input_items: list[dict] = []
+
+    # riftor's RIFT system prompt(s) become a single leading developer item.
+    system_texts = [
+        _extract_text(m.get("content"))
+        for m in messages
+        if m.get("role") == "system"
+    ]
+    system_texts = [t for t in system_texts if t]
+    if system_texts:
+        input_items.append(_message_item("developer", "\n\n".join(system_texts)))
+
+    for msg in messages:
+        input_items.extend(_map_message(msg))
+
+    body: dict = {
+        "model": model,
+        "input": input_items,
+        "instructions": instructions,
+        "store": False,
+        "stream": True,
+        "include": ["reasoning.encrypted_content"],
+        "reasoning": {"effort": reasoning_effort, "summary": "auto"},
+        "text": {"verbosity": verbosity},
+    }
+
+    if tools:
+        body["tools"] = [_map_tool(t) for t in tools]
+
+    return body

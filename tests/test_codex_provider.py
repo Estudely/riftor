@@ -251,3 +251,238 @@ def test_instructions_caches(monkeypatch):
     second = codex_provider.instructions_for("gpt-5.5-codex")
     assert first == second == "X"
     assert calls["n"] == 1
+
+
+# --- build_request_body (Task 4c) ------------------------------------------
+
+
+def test_build_request_body_system_becomes_developer_item():
+    body = codex_provider.build_request_body(
+        "gpt-5.5-codex",
+        [{"role": "system", "content": "RIFT system prompt"}],
+        instructions="canonical codex instructions",
+    )
+    # The RIFT system text rides along as the first developer item in input.
+    first = body["input"][0]
+    assert first["type"] == "message"
+    assert first["role"] == "developer"
+    assert first["content"][0]["type"] == "input_text"
+    assert first["content"][0]["text"] == "RIFT system prompt"
+    # instructions stays exactly what was passed in (not the system text).
+    assert body["instructions"] == "canonical codex instructions"
+
+
+def test_build_request_body_multiple_system_messages_concatenated():
+    body = codex_provider.build_request_body(
+        "m",
+        [
+            {"role": "system", "content": "first"},
+            {"role": "system", "content": "second"},
+        ],
+        instructions="ci",
+    )
+    first = body["input"][0]
+    assert first["role"] == "developer"
+    assert first["content"][0]["text"] == "first\n\nsecond"
+
+
+def test_build_request_body_user_message():
+    body = codex_provider.build_request_body(
+        "m",
+        [{"role": "user", "content": "hello"}],
+        instructions="ci",
+    )
+    item = body["input"][0]
+    assert item == {
+        "type": "message",
+        "role": "user",
+        "content": [{"type": "input_text", "text": "hello"}],
+    }
+
+
+def test_build_request_body_assistant_tool_calls():
+    body = codex_provider.build_request_body(
+        "m",
+        [
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "function": {"name": "bash", "arguments": '{"cmd":"ls"}'},
+                    }
+                ],
+            }
+        ],
+        instructions="ci",
+    )
+    item = body["input"][0]
+    assert item == {
+        "type": "function_call",
+        "name": "bash",
+        "arguments": '{"cmd":"ls"}',
+        "call_id": "call_1",
+    }
+
+
+def test_build_request_body_assistant_text_and_tool_calls():
+    body = codex_provider.build_request_body(
+        "m",
+        [
+            {
+                "role": "assistant",
+                "content": "thinking out loud",
+                "tool_calls": [
+                    {
+                        "id": "call_2",
+                        "function": {"name": "grep", "arguments": "{}"},
+                    }
+                ],
+            }
+        ],
+        instructions="ci",
+    )
+    # Text message comes before the function_call item.
+    assert body["input"][0] == {
+        "type": "message",
+        "role": "assistant",
+        "content": [{"type": "input_text", "text": "thinking out loud"}],
+    }
+    assert body["input"][1]["type"] == "function_call"
+    assert body["input"][1]["call_id"] == "call_2"
+
+
+def test_build_request_body_tool_message():
+    body = codex_provider.build_request_body(
+        "m",
+        [{"role": "tool", "tool_call_id": "call_1", "content": "output text"}],
+        instructions="ci",
+    )
+    assert body["input"][0] == {
+        "type": "function_call_output",
+        "call_id": "call_1",
+        "output": "output text",
+    }
+
+
+def test_build_request_body_top_level_fields():
+    body = codex_provider.build_request_body(
+        "gpt-5.5-codex",
+        [{"role": "user", "content": "hi"}],
+        instructions="ci",
+        reasoning_effort="high",
+        verbosity="low",
+    )
+    assert body["model"] == "gpt-5.5-codex"
+    assert body["store"] is False
+    assert body["stream"] is True
+    assert body["include"] == ["reasoning.encrypted_content"]
+    assert body["reasoning"]["summary"] == "auto"
+    assert body["reasoning"]["effort"] == "high"
+    assert body["text"]["verbosity"] == "low"
+
+
+def test_build_request_body_strips_sampling_params():
+    # Even if sampling params sneak in via message dicts, they must not appear.
+    body = codex_provider.build_request_body(
+        "m",
+        [
+            {
+                "role": "user",
+                "content": "hi",
+                "temperature": 0.7,
+                "top_p": 0.9,
+                "max_tokens": 100,
+            }
+        ],
+        instructions="ci",
+    )
+    for key in (
+        "max_tokens",
+        "max_output_tokens",
+        "max_completion_tokens",
+        "temperature",
+        "top_p",
+    ):
+        assert key not in body
+
+
+def test_build_request_body_flattens_tools():
+    body = codex_provider.build_request_body(
+        "m",
+        [{"role": "user", "content": "hi"}],
+        tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "bash",
+                    "description": "d",
+                    "parameters": {"type": "object"},
+                },
+            }
+        ],
+        instructions="ci",
+    )
+    tool = body["tools"][0]
+    assert tool["type"] == "function"
+    assert tool["name"] == "bash"
+    assert tool["description"] == "d"
+    assert tool["parameters"] == {"type": "object"}
+    assert "function" not in tool
+
+
+def test_build_request_body_tool_strict_preserved():
+    body = codex_provider.build_request_body(
+        "m",
+        [{"role": "user", "content": "hi"}],
+        tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "bash",
+                    "description": "d",
+                    "parameters": {"type": "object"},
+                    "strict": True,
+                },
+            }
+        ],
+        instructions="ci",
+    )
+    assert body["tools"][0]["strict"] is True
+
+
+def test_build_request_body_no_tools_omits_key():
+    body = codex_provider.build_request_body(
+        "m",
+        [{"role": "user", "content": "hi"}],
+        instructions="ci",
+    )
+    assert "tools" not in body
+
+
+def test_build_request_body_content_as_list():
+    body = codex_provider.build_request_body(
+        "m",
+        [{"role": "user", "content": [{"type": "text", "text": "hi"}]}],
+        instructions="ci",
+    )
+    assert body["input"][0]["content"][0]["text"] == "hi"
+
+
+def test_build_request_body_content_as_list_input_text_variant():
+    body = codex_provider.build_request_body(
+        "m",
+        [{"role": "user", "content": [{"type": "input_text", "text": "yo"}]}],
+        instructions="ci",
+    )
+    assert body["input"][0]["content"][0]["text"] == "yo"
+
+
+def test_build_request_body_empty_assistant_text_skipped():
+    body = codex_provider.build_request_body(
+        "m",
+        [{"role": "assistant", "content": ""}],
+        instructions="ci",
+    )
+    assert body["input"] == []
