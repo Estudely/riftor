@@ -125,8 +125,9 @@ class ConfigScreen(ModalScreen[dict | None]):
                             value=base_val, placeholder="provider default", id="cfg-base"))
                         yield _row("API key", Input(
                             password=True, placeholder="leave blank to keep", id="cfg-key"))
-                        yield _row("Codex login", Label(
-                            self._codex_status_text(), id="cfg-codex-status"))
+                        _codex_row = _row("Codex login", Label("", id="cfg-codex-status"))
+                        _codex_row.add_class("hidden")
+                        yield _codex_row
                         with Horizontal(classes="field-row"):
                             yield Label("", classes="field-label")
                             yield Button("Fetch models", id="cfg-fetch", variant="primary")

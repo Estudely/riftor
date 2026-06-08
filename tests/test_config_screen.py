@@ -293,11 +293,21 @@ async def test_codex_provider_hides_key_base_fetch_shows_login(monkeypatch):
             def row_hidden(wid: str) -> bool:
                 return screen.query_one(wid).parent.has_class("hidden")
 
+            def row_visible(wid: str) -> bool:
+                # Textual sets widget.display=False when `display: none` applies
+                # via CSS. This is the REAL visibility, so a missing
+                # `.field-row.hidden` rule would make a "hidden" row still True.
+                return screen.query_one(wid).parent.display
+
             # Non-codex provider: standard rows visible, status row hidden.
             assert not row_hidden("#cfg-key")
             assert not row_hidden("#cfg-base")
             assert not row_hidden("#cfg-fetch")
             assert row_hidden("#cfg-codex-status")
+            assert row_visible("#cfg-key")
+            assert row_visible("#cfg-base")
+            assert row_visible("#cfg-fetch")
+            assert not row_visible("#cfg-codex-status")
 
             # Switch to Codex: key/base/fetch hidden, login status shown.
             screen.query_one("#cfg-provider", Select).value = "codex"
@@ -306,6 +316,11 @@ async def test_codex_provider_hides_key_base_fetch_shows_login(monkeypatch):
             assert row_hidden("#cfg-base")
             assert row_hidden("#cfg-fetch")
             assert not row_hidden("#cfg-codex-status")
+            # Real computed visibility: the CSS rule must actually take effect.
+            assert not row_visible("#cfg-key")
+            assert not row_visible("#cfg-base")
+            assert not row_visible("#cfg-fetch")
+            assert row_visible("#cfg-codex-status")
             status_text = screen._codex_status_text()
             assert "✓" in status_text and "logged in" in status_text
 
@@ -316,6 +331,10 @@ async def test_codex_provider_hides_key_base_fetch_shows_login(monkeypatch):
             assert not row_hidden("#cfg-base")
             assert not row_hidden("#cfg-fetch")
             assert row_hidden("#cfg-codex-status")
+            assert row_visible("#cfg-key")
+            assert row_visible("#cfg-base")
+            assert row_visible("#cfg-fetch")
+            assert not row_visible("#cfg-codex-status")
             await pilot.press("escape")
             await pilot.pause()
 
