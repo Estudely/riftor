@@ -93,6 +93,38 @@ def test_kwargs_uses_provider_table_creds(monkeypatch):
     assert kw["api_base"] == "https://table/"
 
 
+def test_get_litellm_registers_codex():
+    """_get_litellm() must register the codex custom handler into litellm."""
+    # Run registration fresh so the codex entry is guaranteed to be present.
+    saved = prov._litellm
+    try:
+        prov._litellm = None
+        lit = prov._get_litellm()
+        entries = list(getattr(lit, "custom_provider_map", None) or [])
+        providers = [e.get("provider") for e in entries]
+        assert "codex" in providers, f"'codex' not in custom_provider_map providers: {providers}"
+        codex_entry = next(e for e in entries if e.get("provider") == "codex")
+        assert codex_entry.get("custom_handler") is not None
+    finally:
+        prov._litellm = saved
+
+
+def test_get_litellm_registration_is_idempotent():
+    """Calling _get_litellm() multiple times must not duplicate the codex entry."""
+    saved = prov._litellm
+    try:
+        prov._litellm = None
+        lit = prov._get_litellm()
+        # Second call: _litellm is already cached, so registration won't re-run,
+        # but the guard must also prevent duplication if somehow called again.
+        prov._register_codex_provider(lit)  # call the guard directly a second time
+        entries = list(getattr(lit, "custom_provider_map", None) or [])
+        codex_count = sum(1 for e in entries if e.get("provider") == "codex")
+        assert codex_count == 1, f"Expected 1 codex entry, got {codex_count}"
+    finally:
+        prov._litellm = saved
+
+
 @pytest.mark.asyncio
 async def test_stream_turn_yields_thinking_and_excludes_it_from_message(monkeypatch):
     # Fake litellm streaming chunks: reasoning_content deltas, then content.

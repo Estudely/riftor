@@ -33,8 +33,27 @@ def _get_litellm():
         litellm.telemetry = False
         litellm.drop_params = True
         litellm.suppress_debug_info = True
+        _register_codex_provider(litellm)
         _litellm = litellm
     return _litellm
+
+
+def _register_codex_provider(litellm) -> None:
+    """Register riftor's vendored `codex/` handler (reads ~/.codex/auth.json).
+
+    Guarded: if importing/instantiating the handler fails for any reason, Codex
+    simply won't work, but every other provider still does — riftor's
+    never-crash-on-an-optional-thing ethos.
+    """
+    try:
+        from riftor.agent.codex_provider import codex_provider
+    except Exception:  # noqa: BLE001 — Codex optional at runtime; never break the loop
+        return
+    existing = list(getattr(litellm, "custom_provider_map", None) or [])
+    if any(entry.get("provider") == "codex" for entry in existing):
+        return
+    existing.append({"provider": "codex", "custom_handler": codex_provider})
+    litellm.custom_provider_map = existing
 
 
 @dataclass
