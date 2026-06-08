@@ -44,6 +44,7 @@ if TYPE_CHECKING:
 # Model-window estimates (tokens) for the context gauge, by provider prefix.
 _CONTEXT_WINDOWS = {
     "anthropic/": 200_000, "openai/": 128_000, "openrouter/": 128_000,
+    "codex/": 128_000,
     "gemini/": 1_000_000, "groq/": 128_000, "ollama": 8_192,
 }
 _DEFAULT_WINDOW = 128_000
