@@ -486,3 +486,200 @@ def test_build_request_body_empty_assistant_text_skipped():
         instructions="ci",
     )
     assert body["input"] == []
+
+
+# --- parse_events (Task 4d) ------------------------------------------------
+
+
+def test_parse_events_text_deltas():
+    events = [
+        {"type": "response.output_text.delta", "delta": "Hel"},
+        {"type": "response.output_text.delta", "delta": "lo"},
+    ]
+    chunks = list(codex_provider.parse_events(events))
+    assert len(chunks) == 2
+    assert chunks[0].text == "Hel"
+    assert chunks[0].reasoning == ""
+    assert chunks[0].is_finished is False
+    assert chunks[1].text == "lo"
+
+
+def test_parse_events_reasoning_delta():
+    for etype in (
+        "response.reasoning_summary_text.delta",
+        "response.reasoning_text.delta",
+    ):
+        chunks = list(
+            codex_provider.parse_events([{"type": etype, "delta": "thinking"}])
+        )
+        assert len(chunks) == 1
+        assert chunks[0].reasoning == "thinking"
+        assert chunks[0].text == ""
+
+
+def test_parse_events_function_call_sequence():
+    events = [
+        {
+            "type": "response.output_item.added",
+            "item": {
+                "type": "function_call",
+                "name": "bash",
+                "call_id": "call_1",
+                "id": "item_1",
+            },
+        },
+        {
+            "type": "response.function_call_arguments.delta",
+            "item_id": "item_1",
+            "delta": '{"cmd"',
+        },
+        {
+            "type": "response.function_call_arguments.delta",
+            "item_id": "item_1",
+            "delta": ':"ls"}',
+        },
+    ]
+    chunks = list(codex_provider.parse_events(events))
+    assert len(chunks) == 2
+    fragments = "".join(c.tool_call["arguments_delta"] for c in chunks)
+    assert fragments == '{"cmd":"ls"}'
+    for c in chunks:
+        assert c.tool_call["id"] == "call_1"
+        assert c.tool_call["name"] == "bash"
+
+
+def test_parse_events_completed_with_usage_tool_calls():
+    events = [
+        {
+            "type": "response.completed",
+            "response": {
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "bash",
+                        "arguments": "{}",
+                        "call_id": "call_1",
+                    }
+                ],
+                "usage": {"input_tokens": 11, "output_tokens": 7},
+            },
+        }
+    ]
+    chunks = list(codex_provider.parse_events(events))
+    assert len(chunks) == 1
+    final = chunks[0]
+    assert final.is_finished is True
+    assert final.finish_reason == "tool_calls"
+    assert final.usage == {
+        "prompt_tokens": 11,
+        "completion_tokens": 7,
+        "total_tokens": 18,
+    }
+
+
+def test_parse_events_completed_text_only_is_stop():
+    events = [
+        {"type": "response.output_text.delta", "delta": "hi"},
+        {
+            "type": "response.completed",
+            "response": {
+                "output": [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "hi"}],
+                    }
+                ],
+                "usage": {
+                    "input_tokens": 3,
+                    "output_tokens": 1,
+                    "total_tokens": 4,
+                },
+            },
+        },
+    ]
+    chunks = list(codex_provider.parse_events(events))
+    final = chunks[-1]
+    assert final.is_finished is True
+    assert final.finish_reason == "stop"
+    assert final.usage["total_tokens"] == 4
+
+
+def test_parse_events_done_accepted_like_completed():
+    events = [
+        {
+            "type": "response.done",
+            "response": {"output": [], "usage": {"input_tokens": 1, "output_tokens": 2}},
+        }
+    ]
+    chunks = list(codex_provider.parse_events(events))
+    assert len(chunks) == 1
+    assert chunks[0].is_finished is True
+    assert chunks[0].finish_reason == "stop"
+    assert chunks[0].usage["total_tokens"] == 3
+
+
+def test_parse_events_unknown_type_yields_nothing():
+    chunks = list(
+        codex_provider.parse_events([{"type": "response.something.weird", "x": 1}])
+    )
+    assert chunks == []
+
+
+def test_parse_events_missing_fields_never_raises():
+    # Odd/empty events must be tolerated via .get, not crash.
+    events = [
+        {},
+        {"type": "response.output_text.delta"},  # no delta
+        {"type": "response.function_call_arguments.delta"},  # no item_id/delta
+    ]
+    chunks = list(codex_provider.parse_events(events))
+    # Text delta with no "delta" coerces to empty string; tool-call delta still
+    # emits a (best-effort) chunk. Nothing raises.
+    assert all(isinstance(c, codex_provider.CodexChunk) for c in chunks)
+
+
+# --- iter_sse_lines (Task 4d) ----------------------------------------------
+
+
+def test_iter_sse_lines_basic_and_done():
+    lines = [
+        'data: {"type":"response.output_text.delta","delta":"hi"}',
+        "",
+        "data: [DONE]",
+    ]
+    events = list(codex_provider.iter_sse_lines(lines))
+    assert events == [{"type": "response.output_text.delta", "delta": "hi"}]
+
+
+def test_iter_sse_lines_skips_malformed_frame():
+    lines = [
+        "data: {not json",
+        "",
+        'data: {"type":"response.output_text.delta","delta":"ok"}',
+        "",
+    ]
+    events = list(codex_provider.iter_sse_lines(lines))
+    assert events == [{"type": "response.output_text.delta", "delta": "ok"}]
+
+
+def test_iter_sse_lines_ignores_event_and_comment_lines():
+    lines = [
+        ": this is a comment",
+        "event: response.output_text.delta",
+        'data: {"type":"response.output_text.delta","delta":"x"}',
+        "",
+    ]
+    events = list(codex_provider.iter_sse_lines(lines))
+    assert events == [{"type": "response.output_text.delta", "delta": "x"}]
+
+
+def test_iter_sse_lines_skips_blank_data_frame():
+    lines = [
+        "data: ",
+        "",
+        'data: {"type":"response.output_text.delta","delta":"y"}',
+        "",
+    ]
+    events = list(codex_provider.iter_sse_lines(lines))
+    assert events == [{"type": "response.output_text.delta", "delta": "y"}]

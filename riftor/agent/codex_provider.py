@@ -18,6 +18,8 @@ import os
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Iterable, Iterator
+from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
 
@@ -432,3 +434,174 @@ def build_request_body(
         body["tools"] = [_map_tool(t) for t in tools]
 
     return body
+
+
+# --- SSE response parser (Task 4d) -----------------------------------------
+#
+# Pure logic over already-decoded event dicts (and over raw SSE text lines).
+# No network — 4e feeds these from the live HTTP response. We translate the
+# undocumented Codex *Responses API* event stream into a litellm-agnostic
+# ``CodexChunk`` representation that 4e maps onto litellm's streaming chunks.
+
+_DONE_SENTINEL = "[DONE]"
+
+
+@dataclass
+class CodexChunk:
+    """A single streamed unit, litellm-agnostic.
+
+    ``tool_call`` (when set) has the shape
+    ``{"id", "name", "arguments_delta"}`` for a streaming arguments fragment.
+    The final chunk of a stream sets ``is_finished`` with a ``finish_reason``
+    and ``usage`` (``{"prompt_tokens", "completion_tokens", "total_tokens"}``).
+    """
+
+    text: str = ""
+    reasoning: str = ""
+    tool_call: dict | None = None
+    is_finished: bool = False
+    finish_reason: str | None = None
+    usage: dict | None = None
+
+
+def _usage_from_response(response: dict) -> dict:
+    """Map a Responses ``usage`` block to Chat-Completions usage shape.
+
+    ``input_tokens`` -> prompt_tokens, ``output_tokens`` -> completion_tokens,
+    ``total_tokens`` passed through (computed from the other two when absent).
+    Tolerant of a missing/odd ``usage`` via ``.get`` — never raises.
+    """
+    usage = response.get("usage") or {}
+    prompt = usage.get("input_tokens") or 0
+    completion = usage.get("output_tokens") or 0
+    total = usage.get("total_tokens")
+    if total is None:
+        total = prompt + completion
+    return {
+        "prompt_tokens": prompt,
+        "completion_tokens": completion,
+        "total_tokens": total,
+    }
+
+
+def parse_events(events: Iterable[dict]) -> Iterator[CodexChunk]:
+    """Translate decoded Codex Responses-API events into ``CodexChunk``s.
+
+    Pure generator. Tracks function-call name/call_id announced on
+    ``response.output_item.added`` (keyed by item id) so later
+    ``function_call_arguments.delta`` fragments can be associated, and remembers
+    whether any function call was seen so the terminal chunk's ``finish_reason``
+    is ``"tool_calls"`` vs ``"stop"``. Yields exactly one final chunk on
+    ``response.completed``/``response.done``. Never raises on a missing or odd
+    field — every access uses ``.get``.
+    """
+    # item id -> {"id": call_id, "name": name}
+    call_meta: dict[str, dict] = {}
+    saw_function_call = False
+
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        etype = event.get("type")
+
+        if etype == "response.output_text.delta":
+            yield CodexChunk(text=event.get("delta") or "")
+
+        elif etype in (
+            "response.reasoning_summary_text.delta",
+            "response.reasoning_text.delta",
+        ):
+            yield CodexChunk(reasoning=event.get("delta") or "")
+
+        elif etype == "response.output_item.added":
+            item = event.get("item") or {}
+            if item.get("type") == "function_call":
+                # The added event's own id keys the deltas; deltas reference it
+                # via ``item_id``. The call_id (preferred) or that id identifies
+                # the call to the rest of the system.
+                item_id = item.get("id")
+                call_id = item.get("call_id") or item_id
+                if item_id is not None:
+                    call_meta[item_id] = {"id": call_id, "name": item.get("name")}
+
+        elif etype == "response.function_call_arguments.delta":
+            saw_function_call = True
+            ref = event.get("item_id") or event.get("call_id")
+            meta = call_meta.get(ref) if ref is not None else None
+            # Fall back to the referencing id as the call id when no added event
+            # supplied name/call_id; name stays None to be filled from output.
+            call_id = meta["id"] if meta else ref
+            name = meta["name"] if meta else None
+            yield CodexChunk(
+                tool_call={
+                    "id": call_id,
+                    "name": name,
+                    "arguments_delta": event.get("delta") or "",
+                }
+            )
+
+        elif etype in ("response.completed", "response.done"):
+            response = event.get("response") or {}
+            output = response.get("output") or []
+            output_has_call = any(
+                isinstance(item, dict) and item.get("type") == "function_call"
+                for item in output
+            )
+            finish_reason = (
+                "tool_calls" if (saw_function_call or output_has_call) else "stop"
+            )
+            yield CodexChunk(
+                is_finished=True,
+                finish_reason=finish_reason,
+                usage=_usage_from_response(response),
+            )
+            return
+
+        # Unknown event types yield nothing.
+
+
+def iter_sse_lines(lines: Iterable[str]) -> Iterator[dict]:
+    """Turn decoded SSE text lines into event dicts.
+
+    Accumulates ``data:`` payload lines until a blank line, ``json.loads`` the
+    joined payload, and yields the dict. ``data: [DONE]`` is a terminal sentinel
+    (stop). ``event:``/``id:``/comment (``:``) lines are ignored for the dict
+    payload — the ``type`` lives inside the JSON. Blank-data frames are skipped.
+    A single malformed data frame is skipped, never raised.
+    """
+    data_parts: list[str] = []
+
+    def _flush() -> Iterator[dict]:
+        nonlocal data_parts
+        if not data_parts:
+            return
+        payload = "\n".join(data_parts)
+        data_parts = []
+        if not payload.strip():
+            return
+        try:
+            obj = json.loads(payload)
+        except Exception:  # noqa: BLE001 — one bad data frame is skipped, never crashes the stream
+            return
+        if isinstance(obj, dict):
+            yield obj
+
+    for raw in lines:
+        line = raw.rstrip("\n").rstrip("\r")
+        if line == "":
+            # End of an event: flush the accumulated data payload.
+            yield from _flush()
+            continue
+        if line.startswith(":"):
+            continue  # SSE comment
+        if line.startswith("data:"):
+            value = line[len("data:") :]
+            if value.startswith(" "):
+                value = value[1:]
+            if value == _DONE_SENTINEL:
+                return  # terminal sentinel — stop
+            data_parts.append(value)
+        # event:/id:/other field lines carry no JSON payload — ignore.
+
+    # Flush any trailing event not terminated by a blank line.
+    yield from _flush()
