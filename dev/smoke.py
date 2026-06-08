@@ -201,6 +201,58 @@ async def main() -> None:
         # a Model-section field is still mounted even though Model is hidden
         assert screen.query("#cfg-provider"), "hidden-section field must stay mounted"
 
+        # Layout contract (regression guard for the sidebar styling). These run
+        # at a realistic terminal height (100x40) — the design's stated contract
+        # is "fits any terminal >=30 rows"; the suite's default 80x24 is below
+        # that floor, where the densest section legitimately cannot fit. Resize
+        # for the checks, then restore so later steps see the default size.
+        await pilot.resize_terminal(100, 40)
+        await pilot.pause()
+        # (1) NO ROW OVERLAP — a Select's natural height is 5, but the field
+        #     row is 3; if the Select isn't pinned it overflows and covers the
+        #     next row. Assert each Select fits inside its row's height.
+        screen.show_section("model")
+        await pilot.pause()
+        for sel in screen.query("#section-model .field-row Select"):
+            row = sel.parent
+            assert sel.outer_size.height <= row.outer_size.height, (
+                f"Select {sel.id} (h={sel.outer_size.height}) overflows its "
+                f"row (h={row.outer_size.height}) — will overlap the next field"
+            )
+        # (2) MODAL HUGS CONTENT — a sparse section must not stretch the modal
+        #     to the same height as a dense one. Generation (2 fields) must be
+        #     shorter than Model (6 fields). If the 1fr chain stretches the box
+        #     to max-height, these are equal and this fails.
+        screen.show_section("model")
+        await pilot.pause()
+        model_h = screen.query_one("#config-box").outer_size.height
+        screen.show_section("generation")
+        await pilot.pause()
+        gen_h = screen.query_one("#config-box").outer_size.height
+        assert gen_h < model_h, (
+            f"config modal does not hug content: Generation box h={gen_h} is "
+            f"not shorter than Model box h={model_h} (1fr stretch regression)"
+        )
+        # (3) FOOTER NOT CLIPPED — the footer bar's `border-top` consumes one
+        #     row, so a 3-tall Button needs a 4-tall bar or its bottom row is
+        #     clipped. Check the button against the footer's CONTENT region (the
+        #     area inside its border) — that's where the clip actually happens,
+        #     not the outer box edge. Verify on a short section (Appearance) so
+        #     it's purely the footer geometry, not any max-height interaction.
+        screen.show_section("appearance")
+        await pilot.pause()
+        footer = screen.query_one("#config-buttons")
+        footer_bottom = footer.content_region.y + footer.content_region.height
+        for btn in screen.query("#config-buttons Button"):
+            br = btn.region
+            assert br.y + br.height <= footer_bottom, (
+                f"footer button {btn.id} (bottom y={br.y + br.height}) is clipped "
+                f"by the footer bar (content bottom y={footer_bottom}) — the "
+                f"border-top steals a row, so the bar must be tall enough for it"
+            )
+        await pilot.resize_terminal(80, 24)
+        await pilot.pause()
+
         await pilot.press("escape")
         await pilot.pause()
         assert not isinstance(app.screen, ConfigScreen)

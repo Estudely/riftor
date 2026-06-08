@@ -533,9 +533,13 @@ Replace that whole block with:
     width: 1fr;
     color: $cyan;
     text-style: bold;
-    text-transform: uppercase;
     margin: 0 0 1 0;
 }
+/* NOTE: Textual does NOT support `text-transform`. Section headings render
+   title-case ("Model") as the compose() text passes them — which matches the
+   approved sidebar mockup. Do not add `text-transform: uppercase` here; it
+   crashes CSS parse. If uppercase is ever wanted, uppercase the literal text
+   in config_screen.py instead. */
 
 .field-row {
     height: 3;
