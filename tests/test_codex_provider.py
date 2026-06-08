@@ -793,6 +793,63 @@ async def test_astreaming_text_reply(tmp_path, monkeypatch):
     assert collected[-1]["is_finished"] is True
 
 
+def test_streaming_through_litellm_custom_stream_wrapper(tmp_path, monkeypatch):
+    """End-to-end: drive our handler's chunks through litellm's real
+    ``CustomStreamWrapper`` (as riftor does via ``lit.completion(..., stream=True)``).
+
+    This is the integration gap that unit tests on the chunk dict miss: the
+    terminal chunk's ``usage`` must be a plain mapping, because
+    ``CustomStreamWrapper`` does ``Usage(**chunk["usage"])``. A litellm ``Usage``
+    object there raises ``argument after ** must be a mapping, not Usage``
+    (surfaced as a ``MidStreamFallbackError``).
+    """
+    _future_auth(tmp_path)
+
+    lines: list[str] = []
+    lines += _sse({"type": "response.output_text.delta", "delta": "Hel"})
+    lines += _sse({"type": "response.output_text.delta", "delta": "lo"})
+    lines += _sse(
+        {
+            "type": "response.completed",
+            "response": {
+                "output": [],
+                "usage": {"input_tokens": 5, "output_tokens": 3},
+            },
+        }
+    )
+
+    monkeypatch.setattr(
+        codex_provider,
+        "_stream_responses",
+        lambda payload, headers, timeout=120.0: iter(lines),
+    )
+
+    from riftor.agent.provider import _get_litellm
+
+    lit = _get_litellm()
+    resp = lit.completion(
+        model="codex/gpt-5.5-codex",
+        custom_llm_provider="codex",
+        messages=[{"role": "user", "content": "hi"}],
+        stream=True,
+    )
+
+    # Iterating the stream exercises CustomStreamWrapper end-to-end.
+    # Before the fix this raises (Usage not a mapping / MidStreamFallbackError).
+    chunks = list(resp)
+
+    text = "".join(
+        (c.choices[0].delta.content or "") for c in chunks if c.choices
+    )
+    assert text == "Hello"
+
+    # If litellm surfaces usage on the final chunk, the token counts round-trip.
+    usage = getattr(chunks[-1], "usage", None)
+    if usage is not None:
+        assert int(usage.prompt_tokens) == 5
+        assert int(usage.completion_tokens) == 3
+
+
 def test_streaming_tool_call_reply(tmp_path, monkeypatch):
     _future_auth(tmp_path)
 

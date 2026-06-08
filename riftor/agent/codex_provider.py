@@ -731,8 +731,8 @@ def _chunk_to_streaming(chunk: CodexChunk) -> dict:
 
     Reasoning deltas are surfaced via ``provider_specific_fields`` so the UI can
     show thinking, mirroring litellm's ``reasoning_content`` convention. The
-    terminal chunk carries ``is_finished``/``finish_reason`` and a litellm
-    ``Usage``.
+    terminal chunk carries ``is_finished``/``finish_reason`` and a ``usage``
+    mapping (a plain dict, which ``CustomStreamWrapper`` splats into ``Usage``).
     """
     tool_use = None
     if chunk.tool_call is not None:
@@ -748,11 +748,15 @@ def _chunk_to_streaming(chunk: CodexChunk) -> dict:
 
     usage = None
     if chunk.usage is not None:
-        usage = _litellm_types().Usage(
-            prompt_tokens=chunk.usage.get("prompt_tokens", 0),
-            completion_tokens=chunk.usage.get("completion_tokens", 0),
-            total_tokens=chunk.usage.get("total_tokens", 0),
-        )
+        # litellm's CustomStreamWrapper consumes this via ``Usage(**chunk["usage"])``,
+        # so it must be a plain mapping — passing a ``Usage`` object raises
+        # "argument after ** must be a mapping, not Usage" (wrapped as
+        # MidStreamFallbackError).
+        usage = {
+            "prompt_tokens": chunk.usage.get("prompt_tokens", 0),
+            "completion_tokens": chunk.usage.get("completion_tokens", 0),
+            "total_tokens": chunk.usage.get("total_tokens", 0),
+        }
 
     provider_specific = None
     if chunk.reasoning:
