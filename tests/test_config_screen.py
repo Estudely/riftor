@@ -51,8 +51,9 @@ async def test_config_modal_renders_all_fields():
             # aligned label column: one .field-label per field row. WORKERS now has
             # 3 picker rows + 2 label rows (was 1 plain input + 2 labels) => +2.
             # +3 field rows for the DISPLAY section => 15 + 3 = 18, plus the
-            # GENERATION "Tool call steps" row => 19.
-            assert len(list(screen.query(".field-label"))) == 19
+            # GENERATION "Tool call steps" row => 19, plus the MODEL "Codex login"
+            # status row => 20.
+            assert len(list(screen.query(".field-label"))) == 20
             await pilot.press("escape")
             await pilot.pause()
 
@@ -265,6 +266,78 @@ async def test_worker_provider_switch_does_not_clobber_main_base():
         # the worker provider got ITS OWN default base, and reused the shared key
         assert app.config.providers["deepseek"].api_base == PROVIDERS["deepseek"].default_base
         assert app.config.providers["deepseek"].api_key == "sk-openai"
+
+
+@pytest.mark.asyncio
+async def test_codex_provider_hides_key_base_fetch_shows_login(monkeypatch):
+    # Picking the Codex provider hides API-key/Base-URL/Fetch (Codex reads
+    # ~/.codex/auth.json — no key/base/model-list) and reveals the login status.
+    # Switching back to another provider restores the standard rows.
+    import riftor.tui.config_screen as cs
+    from riftor.codex_auth import CodexAuthStatus
+
+    monkeypatch.setattr(
+        cs, "auth_status",
+        lambda: CodexAuthStatus(logged_in=True, expires_in_s=600, detail="logged in (10m left)"))
+    with tempfile.TemporaryDirectory() as d:
+        _patch_paths(Path(d))
+        cfg = Config(model="anthropic/claude-opus-4-8")
+        app = RiftorApp(cfg, workdir=Path(d))
+        async with app.run_test() as pilot:
+            app.query_one("#prompt", Input).value = "/config"
+            await pilot.press("enter")
+            await pilot.pause()
+            screen = app.screen
+            assert isinstance(screen, ConfigScreen)
+
+            def row_hidden(wid: str) -> bool:
+                return screen.query_one(wid).parent.has_class("hidden")
+
+            # Non-codex provider: standard rows visible, status row hidden.
+            assert not row_hidden("#cfg-key")
+            assert not row_hidden("#cfg-base")
+            assert not row_hidden("#cfg-fetch")
+            assert row_hidden("#cfg-codex-status")
+
+            # Switch to Codex: key/base/fetch hidden, login status shown.
+            screen.query_one("#cfg-provider", Select).value = "codex"
+            await pilot.pause()
+            assert row_hidden("#cfg-key")
+            assert row_hidden("#cfg-base")
+            assert row_hidden("#cfg-fetch")
+            assert not row_hidden("#cfg-codex-status")
+            status_text = screen._codex_status_text()
+            assert "✓" in status_text and "logged in" in status_text
+
+            # Switch back: the standard rows return and the status hides.
+            screen.query_one("#cfg-provider", Select).value = "anthropic"
+            await pilot.pause()
+            assert not row_hidden("#cfg-key")
+            assert not row_hidden("#cfg-base")
+            assert not row_hidden("#cfg-fetch")
+            assert row_hidden("#cfg-codex-status")
+            await pilot.press("escape")
+            await pilot.pause()
+
+
+@pytest.mark.asyncio
+async def test_codex_status_text_marks_logged_out(monkeypatch):
+    import riftor.tui.config_screen as cs
+    from riftor.codex_auth import CodexAuthStatus
+    with tempfile.TemporaryDirectory() as d:
+        _patch_paths(Path(d))
+        cfg = Config(model="anthropic/claude-opus-4-8")
+        screen = ConfigScreen(cfg)
+        monkeypatch.setattr(
+            cs, "auth_status",
+            lambda: CodexAuthStatus(logged_in=False, expires_in_s=None,
+                                    detail="not logged in — run `codex login`"))
+        text = screen._codex_status_text()
+        assert text.startswith("⚠") and "not logged in" in text
+        monkeypatch.setattr(
+            cs, "auth_status",
+            lambda: CodexAuthStatus(logged_in=True, expires_in_s=60, detail="token present"))
+        assert screen._codex_status_text().startswith("✓")
 
 
 @pytest.mark.asyncio

@@ -19,6 +19,7 @@ from riftor.providers import (
     fetch_models,
     provider_key_for_model,
 )
+from riftor.codex_auth import auth_status
 from riftor.config import REASONING_EFFORTS
 from riftor.tui.theme import THEMES
 
@@ -124,6 +125,8 @@ class ConfigScreen(ModalScreen[dict | None]):
                             value=base_val, placeholder="provider default", id="cfg-base"))
                         yield _row("API key", Input(
                             password=True, placeholder="leave blank to keep", id="cfg-key"))
+                        yield _row("Codex login", Label(
+                            self._codex_status_text(), id="cfg-codex-status"))
                         with Horizontal(classes="field-row"):
                             yield Label("", classes="field-label")
                             yield Button("Fetch models", id="cfg-fetch", variant="primary")
@@ -181,6 +184,25 @@ class ConfigScreen(ModalScreen[dict | None]):
         # Model is the default-visible section (the only panel composed without
         # the `hidden` class); focus its first field.
         self.query_one("#cfg-provider", Select).focus()
+        # Codex has no key/base/model-list — reflect that if it's the saved provider.
+        self._set_codex_mode(self._provider == "codex")
+
+    def _codex_status_text(self) -> str:
+        st = auth_status()
+        mark = "✓" if st.logged_in else "⚠"
+        return f"{mark} {st.detail}"
+
+    def _set_codex_mode(self, on: bool) -> None:
+        """Codex has no API key/base/model-list: hide those rows, show status."""
+        for wid in ("cfg-key", "cfg-base", "cfg-fetch"):
+            row = self.query_one(f"#{wid}").parent
+            if row is not None:
+                row.set_class(on, "hidden")
+        status_row = self.query_one("#cfg-codex-status").parent
+        if status_row is not None:
+            status_row.set_class(not on, "hidden")
+        if on:
+            self.query_one("#cfg-codex-status", Label).update(self._codex_status_text())
 
     def show_section(self, key: str) -> None:
         """Show the named section panel, hide the rest. All panels stay mounted
@@ -215,6 +237,7 @@ class ConfigScreen(ModalScreen[dict | None]):
             return
         if event.select.id == "cfg-provider" and isinstance(event.value, str):
             self._provider = event.value
+            self._set_codex_mode(event.value == "codex")
             meta = PROVIDERS[event.value]
             self.query_one("#cfg-base", Input).value = meta.default_base or ""
             if self._provider_initialized:
