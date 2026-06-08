@@ -18,7 +18,7 @@ class ProviderMeta:
     label: str
     prefix: str            # litellm prefix; "" for custom
     env: str | None        # env var holding the key, if any
-    list_kind: str         # "openai" | "ollama" | "none"
+    list_kind: str         # "openai" | "ollama" | "codex" | "none"
     default_base: str | None
 
 
