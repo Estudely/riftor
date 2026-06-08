@@ -306,6 +306,9 @@ StatusBar {
 }
 
 /* ──────────────────────────── command dropdown ──────────────────────── */
+/* Shares the modal language: rounded violet border, breathing room, and a
+   highlight that matches the config nav's active item (violet tint + a thick
+   violet left accent bar). */
 #cmd-dropdown {
     display: none;
     height: auto;
@@ -323,15 +326,17 @@ StatusBar {
 #cmd-dropdown ListView {
     background: $panel;
     color: $foreground;
-    padding: 0 1;
+    padding: 1 1;
+    scrollbar-color: $border;
 }
 
 #cmd-dropdown ListView > ListItem {
-    padding: 0 1;
+    padding: 0 2;
     color: $muted;
 }
 
 #cmd-dropdown ListView > ListItem.--highlight {
-    background: $violet 30%;
+    background: $violet 25%;
     color: $foreground;
+    border-left: thick $violet;
 }
