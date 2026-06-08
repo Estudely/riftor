@@ -18,7 +18,6 @@ def test_config_has_chakla_defaults():
     cfg = Config()
     assert cfg.chakla_model == ""
     assert cfg.chakla_max_workers == 5
-    assert cfg.chakla_max_steps == 8
     assert cfg.chakla_timeout_s == 300
     assert cfg.label_main == "Baaj"
     assert cfg.label_worker == "Chakla"
@@ -29,7 +28,6 @@ def test_config_toml_roundtrips_chakla_fields():
     toml = cfg._to_toml()
     assert 'chakla_model = "anthropic/claude-haiku-4-5-20251001"' in toml
     assert "chakla_max_workers = 3" in toml
-    assert "chakla_max_steps = 8" in toml
     assert "chakla_timeout_s = 300" in toml
     assert 'label_main = "Baaj"' in toml
     assert 'label_worker = "Chakla"' in toml
@@ -81,7 +79,7 @@ async def _run_one(task, *, cfg, engagement, grant, yolo=False, monkeypatch_env)
         toolctx=toolctx,
         permissions=toolctx.permissions,
         audit=toolctx.audit,
-        max_steps=cfg.chakla_max_steps,
+        max_steps=cfg.max_steps,
         yolo=yolo,
         db_lock=asyncio.Lock(),
         grant=grant,
@@ -499,7 +497,7 @@ def test_run_chakla_emits_detail_events(tmp_workdir, engagement):
         "recon 10.0.0.5",
         worker_provider=_StubProvider(),  # type: ignore[arg-type]
         toolctx=toolctx, permissions=toolctx.permissions, audit=toolctx.audit,
-        max_steps=cfg.chakla_max_steps, yolo=False,
+        max_steps=cfg.max_steps, yolo=False,
         db_lock=asyncio.Lock(), grant=set(),
         progress=lambda e: events.append(e),
     ))
@@ -553,7 +551,7 @@ def test_run_chakla_detail_usage_is_snapshot(tmp_workdir, engagement):
     result = _aio.run(run_chakla(
         "recon", worker_provider=_StubProvider(),  # type: ignore[arg-type]
         toolctx=toolctx, permissions=toolctx.permissions, audit=toolctx.audit,
-        max_steps=cfg.chakla_max_steps, yolo=False,
+        max_steps=cfg.max_steps, yolo=False,
         db_lock=_aio.Lock(), grant=set(), progress=_grab,
     ))
     # At emission time, only turn-1 usage (15) had accumulated. After the run,

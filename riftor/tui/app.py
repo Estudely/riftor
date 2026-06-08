@@ -567,6 +567,8 @@ class RiftorApp(App):
         self.config.model = result["model"]
         self.config.temperature = result["temperature"]
         self.config.max_tokens = result["max_tokens"]
+        self.config.max_steps = result.get("max_steps", self.config.max_steps)
+        self.max_steps = self.config.max_steps
         self.config.lore = result["lore"]
         self.config.show_thinking = result.get("show_thinking", self.config.show_thinking)
         self.config.show_tool_output = result.get("show_tool_output", self.config.show_tool_output)

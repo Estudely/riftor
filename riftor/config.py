@@ -80,7 +80,6 @@ class Config(BaseModel):
     # cheaper/different worker — its provider's creds must be configured.
     chakla_model: str = ""
     chakla_max_workers: int = 5
-    chakla_max_steps: int = 8
     chakla_timeout_s: int = 300
     label_main: str = "Baaj"
     label_worker: str = "Chakla"
@@ -232,7 +231,6 @@ class Config(BaseModel):
             f"onboarded = {str(self.onboarded).lower()}",
             f'chakla_model = "{self.chakla_model}"',
             f"chakla_max_workers = {self.chakla_max_workers}",
-            f"chakla_max_steps = {self.chakla_max_steps}",
             f"chakla_timeout_s = {self.chakla_timeout_s}",
             f'label_main = "{self.label_main}"',
             f'label_worker = "{self.label_worker}"',
