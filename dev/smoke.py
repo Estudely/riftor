@@ -213,7 +213,9 @@ async def main() -> None:
         #     next row. Assert each Select fits inside its row's height.
         screen.show_section("model")
         await pilot.pause()
-        for sel in screen.query("#section-model .field-row Select"):
+        # check every Select in every section (the height pin is a global rule;
+        # Workers has Selects too), not just the Model section's.
+        for sel in screen.query(".field-row Select"):
             row = sel.parent
             assert sel.outer_size.height <= row.outer_size.height, (
                 f"Select {sel.id} (h={sel.outer_size.height}) overflows its "

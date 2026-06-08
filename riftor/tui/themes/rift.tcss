@@ -86,12 +86,16 @@ ConfirmScreen, ConfigScreen {
     background: $panel;
     border: round $violet;
 }
+/* title bar — own background + divider, matching the config modal's title bar.
+   (The glyph text colour comes from the inline Rich style in permissions.py;
+   this rule controls the bar background, divider, and bold weight.) */
 #confirm-title {
     width: 1fr;
-    padding: 0 0 1 0;
+    height: auto;
+    padding: 1 2;
     margin-bottom: 1;
+    background: $surface;
     border-bottom: solid $border;
-    color: $violet;
     text-style: bold;
 }
 
@@ -137,7 +141,6 @@ ConfirmScreen, ConfigScreen {
     height: auto;
     background: $surface;
     padding: 1 0;
-    scrollbar-color: $border;
 }
 #config-nav > ListItem {
     padding: 0 2;
@@ -232,15 +235,26 @@ ConfirmScreen, ConfigScreen {
     scrollbar-color: $border;
 }
 
-/* — confirm footer: unchanged centered row — */
+/* — confirm footer: slim centered actions, matching the config footer — */
 #confirm-buttons {
     height: auto;
     align: center middle;
     padding-top: 1;
 }
+/* flat height-1 "text" buttons (no chunky bordered blocks), like the config
+   footer. The five decision keys keep their bindings; #once (Allow once, the
+   auto-focused safe default) is the filled primary. */
 #confirm-buttons Button {
+    height: 1;
+    min-height: 1;
     min-width: 12;
+    border: none;
     margin: 0 1;
+}
+#confirm-buttons #once {
+    background: $violet;
+    color: $background;
+    text-style: bold;
 }
 
 /* — config footer BAR: slim, right-aligned actions — */
