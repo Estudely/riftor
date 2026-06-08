@@ -39,6 +39,8 @@ PROVIDERS: dict[str, ProviderMeta] = {
                         "openai", "https://api.x.ai/v1"),
     "mistral": ProviderMeta("mistral", "Mistral", "mistral/", "MISTRAL_API_KEY",
                             "openai", "https://api.mistral.ai/v1"),
+    "codex": ProviderMeta("codex", "Codex (ChatGPT)", "codex/", None,
+                          "codex", None),
     "ollama": ProviderMeta("ollama", "Ollama", "ollama_chat/", None,
                            "ollama", "http://localhost:11434"),
     "custom": ProviderMeta("custom", "Custom…", "", None, "openai", None),
@@ -56,6 +58,7 @@ PROVIDER_DEFAULTS: dict[str, list[str]] = {
     "deepseek": ["deepseek-v4-pro", "deepseek-v4-flash"],
     "xai": ["grok-4.3"],
     "mistral": ["mistral-large-latest", "mistral-medium-latest", "mistral-small-latest"],
+    "codex": ["gpt-5.5-codex", "gpt-5.5", "gpt-5.4-codex"],
     "ollama": [],
     "custom": [],
 }
@@ -120,6 +123,10 @@ def fetch_models(provider_key: str, api_base: str | None, api_key: str | None) -
         return FetchResult(models=curated, source="curated")
 
     if meta.list_kind == "none":
+        return FetchResult(models=curated, source="curated")
+
+    if meta.list_kind == "codex":
+        # Codex backend has no public /models list; always use curated defaults.
         return FetchResult(models=curated, source="curated")
 
     base = (api_base or meta.default_base or "").rstrip("/")
