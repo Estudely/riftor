@@ -100,7 +100,7 @@ class DispatchChaklaTool(Tool):
         # We gate on api_key only: the reported failure mode is a missing/mismatched
         # key. A keyless custom endpoint (api_base but no key) is the rare exception
         # and is refused here; set any placeholder key or use the blank-reuse path.
-        is_local = worker_model.startswith(("ollama/", "ollama_chat/"))
+        is_local = worker_model.startswith(("ollama/", "ollama_chat/", "codex/"))
         api_key, _api_base = cfg.creds_for(worker_model)
         if not is_local and api_key is None:
             return ToolResult(

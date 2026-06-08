@@ -96,3 +96,31 @@ def test_fetch_curated_result_is_a_copy_not_the_module_list():
     res = pv.fetch_models("anthropic", None, None)
     assert res.models == pv.PROVIDER_DEFAULTS["anthropic"]
     assert res.models is not pv.PROVIDER_DEFAULTS["anthropic"]  # defensive copy
+
+
+def test_codex_provider_registered():
+    assert "codex" in pv.PROVIDERS
+    meta = pv.PROVIDERS["codex"]
+    assert meta.prefix == "codex/"
+    assert meta.env is None          # no API key env var
+    assert meta.list_kind == "codex"
+    assert meta.default_base is None
+    assert "codex" in pv.PROVIDER_DEFAULTS
+
+
+def test_codex_provider_key_and_prefix():
+    assert pv.provider_key_for_model("codex/gpt-5.5-codex") == "codex"
+    assert pv.apply_prefix("codex", "gpt-5.5-codex") == "codex/gpt-5.5-codex"
+    # an id that already carries the prefix passes through unchanged
+    assert pv.apply_prefix("codex", "codex/gpt-5.5") == "codex/gpt-5.5"
+
+
+def test_fetch_codex_returns_curated_without_network(monkeypatch):
+    def boom(*a, **k):
+        raise AssertionError("must not hit the network for list_kind=codex")
+    monkeypatch.setattr(pv.urllib.request, "urlopen", boom)
+    monkeypatch.setattr(pv, "_http_get_json", boom)
+    res = pv.fetch_models("codex", None, None)
+    assert res.source == "curated"
+    assert res.error is None
+    assert res.models == pv.PROVIDER_DEFAULTS["codex"]

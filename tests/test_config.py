@@ -211,6 +211,29 @@ def test_display_settings_default_and_roundtrip(tmp_path, monkeypatch):
     assert loaded.reasoning_effort == "high"
 
 
+def test_codex_creds_are_none(monkeypatch):
+    # Codex supplies no api_key/api_base from riftor; the litellm handler reads
+    # ~/.codex/auth.json itself. A stale global key must never leak to it.
+    cfg = Config(model="codex/gpt-5.5-codex", api_key="leftover-global")
+    assert cfg.creds_for("codex/gpt-5.5-codex") == (None, None)
+
+
+def test_codex_has_credentials_like_ollama():
+    # Treated like ollama: never block the UI on a key. Real login validity is
+    # surfaced as status, not a hard gate.
+    cfg = Config(model="codex/gpt-5.5-codex")
+    assert cfg.has_credentials()
+
+
+def test_codex_model_warning_is_none():
+    # codex/ is a known provider prefix; no spurious "unknown prefix" warning.
+    assert Config(model="codex/gpt-5.5-codex").model_warning() is None
+
+
+def test_codex_provider_env_is_none():
+    assert Config(model="codex/gpt-5.5-codex").provider_env() is None
+
+
 def test_creds_for_openrouter_routed_id_is_miskeyed_known_limitation(monkeypatch):
     # KNOWN LIMITATION (deferred to picker tasks): a slash-routed OpenRouter id like
     # "openai/gpt-5.5" is classified by prefix as the "openai" provider, so creds stored

@@ -36,6 +36,7 @@ _KNOWN_PROVIDERS = (
     "anthropic/", "openai/", "openrouter/", "ollama/", "ollama_chat/", "gemini/",
     "groq/", "mistral/", "cohere/", "azure/", "bedrock/", "vertex_ai/", "together_ai/",
     "deepseek/", "xai/", "perplexity/", "fireworks_ai/", "huggingface/", "replicate/",
+    "codex/",
 )
 
 # Valid reasoning-effort levels (litellm vocabulary). "none" => no reasoning request.
@@ -125,7 +126,7 @@ class Config(BaseModel):
         entry = self.providers.get(key_name)
         if entry and entry.api_key:
             return True
-        if self.model.startswith(("ollama/", "ollama_chat/")):
+        if self.model.startswith(("ollama/", "ollama_chat/", "codex/")):
             return True
         env = self.provider_env()
         if env and os.environ.get(env):
@@ -140,6 +141,9 @@ class Config(BaseModel):
         only) → (None, None). Model-keyed so a future multi-model feature can
         resolve each model's creds without touching this layer.
         """
+        if model.startswith("codex/"):
+            # Codex auth lives in ~/.codex/auth.json, read by the litellm handler.
+            return None, None
         # NOTE: slash-routed OpenRouter ids (e.g. "openai/gpt-5.5") are keyed to their
         # underlying provider ("openai"), not "openrouter". Resolved in the picker/store
         # layer (it prefixes/stores under the chosen provider); see Task 6/7.

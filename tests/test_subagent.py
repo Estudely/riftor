@@ -445,6 +445,20 @@ def test_dispatch_ollama_worker_needs_no_key(tmp_workdir, engagement, monkeypatc
     assert "no credentials for worker model" not in res.content
 
 
+def test_dispatch_codex_worker_needs_no_key(tmp_workdir, engagement, monkeypatch):
+    # codex/ worker auth lives in ~/.codex/auth.json; creds_for() returns (None, None)
+    # by design. The credential gate must treat codex/ as keyless, not refuse it.
+    monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "ok")
+    cfg = Config(model="anthropic/claude-sonnet-4-6", chakla_model="codex/gpt-5.5-codex")
+    cfg.providers["anthropic"] = ProviderCreds(api_key="sk-anth-xxx")
+    ctx = tools_mod.ToolContext(
+        workdir=tmp_workdir, engagement=engagement, config=cfg,
+        permissions=Permissions(), audit=AuditLog(),
+    )
+    res = asyncio.run(DispatchChaklaTool().execute({"tasks": ["x"], "tools": []}, ctx))
+    assert "no credentials for worker model" not in res.content
+
+
 def test_toolcontext_progress_defaults_to_none(tmp_workdir, engagement):
     ctx = ToolContext(workdir=tmp_workdir, engagement=engagement)
     assert ctx.progress is None

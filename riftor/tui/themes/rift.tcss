@@ -170,6 +170,9 @@ ConfirmScreen, ConfigScreen {
 .config-section-panel.hidden {
     display: none;
 }
+.field-row.hidden {
+    display: none;
+}
 
 .config-section {
     width: 1fr;

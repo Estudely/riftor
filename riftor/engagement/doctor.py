@@ -11,6 +11,8 @@ from __future__ import annotations
 import shutil
 from dataclasses import dataclass
 
+from riftor.codex_auth import auth_status
+
 # Tools the methodology + system prompt reference, grouped by RIFT stage.
 # (binary, one-line purpose). Kept in sync with prompts/system.md.
 TOOLCHAIN: dict[str, list[tuple[str, str]]] = {
@@ -112,4 +114,8 @@ def render_plain(statuses: list[ToolStatus]) -> str:
     lines.append(f"{summary['present']}/{summary['total']} present.")
     if summary["missing"]:
         lines.append("missing (not fatal): " + ", ".join(summary["missing_names"]))
+    st = auth_status()
+    mark = "ok " if st.logged_in else "MISSING"
+    lines.append("Codex subscription:")
+    lines.append(f"  [{mark}] {'codex login':<10} {st.detail}")
     return "\n".join(lines)

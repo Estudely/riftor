@@ -97,8 +97,9 @@ invocation and are not persisted to config.toml):
 ## Providers & models
 
 Open `/config` to pick a provider and model. The **Provider** dropdown lists
-Anthropic, OpenAI, OpenRouter, Gemini, Groq, DeepSeek, Mistral, Ollama, and
-Custom. Picking one prefills the **Base URL** with that provider's default and
+Anthropic, OpenAI, OpenRouter, Gemini, Groq, DeepSeek, Mistral, Ollama, Codex
+(ChatGPT), and Custom. Picking one prefills the **Base URL** with that
+provider's default and
 fills the **Model** dropdown with curated suggestions. The **Custom id** field
 overrides the dropdown with any litellm model id you type; the **Custom** provider
 is for self-hosted / OpenAI-compatible servers.
@@ -143,6 +144,57 @@ For a given model, riftor resolves the key/base in this order: the matching
 provider's environment variable (e.g. `ANTHROPIC_API_KEY`). Environment variables
 remain the recommended way to supply keys in shared or CI environments.
 
+## Codex / ChatGPT subscription login
+
+riftor can run inference through a **ChatGPT Plus, Pro, or Team subscription**
+instead of an API key by reusing the credentials from OpenAI's official
+[Codex CLI](https://github.com/openai/codex).
+
+### Prerequisites
+
+Install the Codex CLI and authenticate once:
+
+```sh
+npm install -g @openai/codex   # or follow the Codex CLI README
+codex login                    # opens a browser OAuth flow
+```
+
+This writes `~/.codex/auth.json` (or `$CODEX_HOME/auth.json` if that
+environment variable is set). riftor reads that file to obtain a token; it
+never writes it except to persist a refreshed token.
+
+### Selecting Codex in riftor
+
+**Via `/config`:** open `/config`, set **Provider** to **Codex (ChatGPT)**,
+and pick a model such as `codex/gpt-5.5-codex`. No API key is required — a
+**Codex login** status line in the panel shows whether you are authenticated
+and roughly when the token expires.
+
+**Via CLI flag:**
+
+```sh
+riftor --model codex/gpt-5.5-codex
+```
+
+Model ids use the `codex/<name>` prefix in all contexts.
+
+### Checking status
+
+`riftor --doctor` reports whether `~/.codex/auth.json` is present and the
+session is active. Re-run `codex login` whenever the token has expired or a
+call returns an authentication error.
+
+### Billing
+
+Usage is billed to your **ChatGPT subscription**, not to OpenAI API credits.
+
+### Caveat
+
+This feature relies on an **undocumented ChatGPT backend endpoint** that
+OpenAI may change without notice. riftor self-heals the required system prompt
+when online and falls back to a bundled copy offline. If calls start failing
+with auth errors, run `codex login` again to refresh the session.
+
 ## Permissions — `~/.config/riftor/permissions.toml`
 
 Trust choices persist here. `allow` rules auto-approve a tool (optionally only
@@ -186,7 +238,8 @@ quit  = "ctrl+q"
 
 - **`authentication failed`** — the key for your model's provider is missing or
   wrong. Check the right env var (e.g. `ANTHROPIC_API_KEY`), or set the key in
-  `/config` (stored under `[providers.<key>]`).
+  `/config` (stored under `[providers.<key>]`). For Codex / ChatGPT models, run
+  `codex login` to refresh the session token.
 - **`context ~NN% of window`** — the conversation is large. Run `/compact` to
   shrink old tool output, or `/clear` to start fresh.
 - **`model '…' has no known provider prefix`** — the id is likely a typo; use a
