@@ -4,9 +4,9 @@
 
 **Goal:** Let riftor users run inference through their ChatGPT/Codex subscription by reusing the token file written by the official `codex login`, exposed as a first-class `codex/` provider.
 
-**Architecture:** Codex appears as an ordinary litellm model id (`codex/gpt-5.5-codex`). The undocumented Codex endpoint machinery is delegated to the `litellm-codex-oauth-provider` package, registered into litellm via `custom_provider_map` inside riftor's existing lazy-litellm seam. riftor supplies no API key — the package reads `~/.codex/auth.json` itself. A small read-only helper surfaces login status in `/config` and `--doctor`.
+**Architecture:** Codex appears as an ordinary litellm model id (`codex/gpt-5.5-codex`). riftor **vendors its own litellm `CustomLLM` handler** (`riftor/agent/codex_provider.py`) that reads `~/.codex/auth.json`, refreshes the token, and bridges Chat Completions ↔ the undocumented Codex **Responses** backend. It is registered into litellm via `custom_provider_map` inside riftor's existing lazy-litellm seam. riftor supplies no API key — the handler reads the token file itself. A small read-only helper surfaces login status in `/config` and `--doctor`. (The original plan depended on the `litellm-codex-oauth-provider` PyPI package; that package is unpublished/git-only, so we vendor a minimal equivalent instead — see the revised spec.)
 
-**Tech Stack:** Python 3.11+, litellm, pydantic, Textual, `uv`. New dep: `litellm-codex-oauth-provider`.
+**Tech Stack:** Python 3.11+, litellm (`CustomLLM`), pydantic, Textual, `uv`, stdlib (`urllib`/`json`/`base64`) for auth+HTTP. **No new dependency.**
 
 **Spec:** `docs/superpowers/specs/2026-06-08-codex-chatgpt-login-design.md`
 
@@ -25,17 +25,21 @@
 | `riftor/providers.py` | Modify | Register `codex` in `PROVIDERS` + `PROVIDER_DEFAULTS`; `fetch_models` handles `list_kind="codex"` |
 | `riftor/config.py` | Modify | `creds_for`/`has_credentials` treat `codex/` as token-file-based (no key) |
 | `riftor/codex_auth.py` | Create | Read-only `~/.codex/auth.json` status helper (never raises) |
-| `riftor/agent/provider.py` | Modify | Register `litellm.custom_provider_map` for `codex` in `_get_litellm()` |
+| `riftor/agent/codex_provider.py` | Create | Vendored litellm `CustomLLM`: auth/refresh + request build + SSE parse + instructions prompt |
+| `riftor/agent/prompts/codex/*.md` | Create | Bundled canonical Codex `instructions` prompt(s) per model family |
+| `riftor/agent/provider.py` | Modify | Register `litellm.custom_provider_map` (riftor's own handler) in `_get_litellm()` |
 | `riftor/tui/config_screen.py` | Modify | Hide key/base/fetch for Codex; show login-status line |
 | `riftor/tui/app.py` | Modify | Add Codex to context-window estimate (128k) |
 | `riftor/engagement/doctor.py` | Modify | Add Codex login line to the doctor report |
 | `riftor/__main__.py` | Modify | `--doctor` prints the Codex status line |
-| `pyproject.toml` | Modify | Add `litellm-codex-oauth-provider` runtime dep |
 | `docs/configuration.md` | Modify | Document Codex login |
 | `tests/test_codex_auth.py` | Create | Unit tests for the auth-status helper |
+| `tests/test_codex_provider.py` | Create | Unit tests for the vendored handler (auth/build/parse/refresh/prompt) |
 | `tests/test_providers.py` | Modify | Codex registry/prefix/fetch tests |
 | `tests/test_config.py` | Modify | Codex creds/has_credentials tests |
 | `dev/smoke.py` | Modify | Drive a Codex-model turn offline |
+
+**Note:** `pyproject.toml`/`uv.lock` are NOT modified — no new dependency.
 
 ---
 
@@ -376,38 +380,246 @@ git commit -m "feat: read-only codex auth.json login-status helper"
 
 ---
 
-## Task 4: Add the runtime dependency and register the litellm handler
+## Task 4: Vendor the Codex `CustomLLM` handler
+
+This task builds riftor's own litellm `CustomLLM` that bridges Chat Completions ↔ the
+undocumented Codex Responses backend. It is split into sub-tasks 4a–4f, each a separate
+TDD cycle + commit. **All sub-tasks are offline** (monkeypatch every HTTP/file seam); the
+only live exercise is the manual step in Task 10.
+
+> **Wire-protocol reference (authoritative, from the official `openai/codex` Rust source +
+> two working community clients).** The implementer MUST follow these exact constants — they
+> are an undocumented endpoint and guesses will be rejected by the backend:
+>
+> - **auth.json:** `$CODEX_HOME`/`auth.json` (default `~/.codex`). Read
+>   `tokens.access_token` (JWT, Bearer), `tokens.refresh_token`, `tokens.account_id`
+>   (may be null), `tokens.id_token` (JWT), `last_refresh`.
+> - **account id:** prefer `tokens.account_id`; else decode the access-token JWT payload
+>   (URL-safe base64, pad to mult-of-4) and read `["https://api.openai.com/auth"]["chatgpt_account_id"]`.
+> - **refresh:** `POST https://auth.openai.com/oauth/token`, JSON body
+>   `{"client_id":"app_EMoamEEZ73f0CkXaXp7hrann","grant_type":"refresh_token","refresh_token":<rt>}`.
+>   Response: `{access_token?, refresh_token?, id_token?}`. Write back to auth.json (mode
+>   `0o600`, atomic). Refresh proactively when the access-token JWT `exp` is ≤5 min away.
+> - **inference:** `POST https://chatgpt.com/backend-api/codex/responses`, headers:
+>   `Authorization: Bearer <access_token>`, `chatgpt-account-id: <id>` (lowercase),
+>   `OpenAI-Beta: responses=experimental`, `originator: codex_cli_rs`,
+>   `Accept: text/event-stream`, `Content-Type: application/json`.
+> - **body (Responses API):** `{model, input, instructions, store:false, stream:true,
+>   include:["reasoning.encrypted_content"], reasoning:{effort,summary:"auto"}, text:{verbosity}}`.
+>   STRIP `max_tokens`/`max_output_tokens`/`max_completion_tokens`/`temperature`/`top_p`.
+> - **input mapping:** system message text → `instructions`; **riftor's RIFT system prompt
+>   → a `developer`-role item** `{"type":"message","role":"developer","content":[{"type":"input_text","text":<rift>}]}`
+>   at the top of `input`; assistant `tool_calls` → `{"type":"function_call","name","arguments","call_id"}`;
+>   `tool` role → `{"type":"function_call_output","call_id","output"}`; other → `{"type":"message","role","content":[{"type":"input_text","text"}]}`.
+> - **tools:** flatten Chat-Completions `{"type":"function","function":{name,description,parameters}}`
+>   → `{"type":"function","name","description","parameters","strict"}`.
+> - **SSE events → deltas:** `response.output_text.delta`→text; `response.reasoning_summary_text.delta`/`response.reasoning_text.delta`→reasoning_content;
+>   `response.function_call_arguments.delta`→tool_use (accumulate args by `call_id`/`item_id`);
+>   `response.completed`/`response.done`→final (carries `response.output` items + `response.usage`).
+>   Usage: `response.usage.input_tokens`→prompt_tokens, `output_tokens`→completion_tokens.
+> - **litellm CustomLLM:** subclass `litellm.CustomLLM`; implement `completion`,
+>   `acompletion`, `streaming`, `astreaming`, each `(self, model, messages, **kwargs)`.
+>   Streaming yields `litellm.types.utils.GenericStreamingChunk`
+>   (`{text, tool_use, is_finished, finish_reason, index, usage}`); non-streaming returns
+>   `litellm.ModelResponse(choices=[Choices(message=Message(...), finish_reason=...)], usage=Usage(...))`.
+>   Register via `litellm.custom_provider_map = [{"provider":"codex","custom_handler":<instance>}]`.
+
+The implementer should consult the spec's "Vendored handler" section and may read the
+reference repos (`numman-ali/opencode-openai-codex-auth`, `openai/codex` `codex-rs/login/`)
+for exact event shapes, but must WRITE riftor's own code (no copying of the unpublished
+`litellm-codex-oauth-provider`).
+
+---
+
+### Task 4a: Token read + account-id + refresh
 
 **Files:**
-- Modify: `pyproject.toml:19-23` (dependencies), `uv.lock` (relock)
-- Modify: `riftor/agent/provider.py:27-37` (`_get_litellm`)
+- Create: `riftor/agent/codex_provider.py` (start the module with the auth section)
+- Test: `tests/test_codex_provider.py`
 
-- [ ] **Step 1: Add the dependency**
+- [ ] **Step 1: Write failing tests** in `tests/test_codex_provider.py`. Use the
+  `_make_jwt`/auth-file helpers (copy the JWT helper pattern from `tests/test_codex_auth.py`).
+  Cover, all offline:
+  - `read_tokens()` returns `(access_token, refresh_token)` from a `tmp_path` auth.json
+    (`CODEX_HOME` monkeypatched).
+  - `account_id()`: returns `tokens.account_id` when present; when absent, decodes it from
+    the access-token JWT `https://api.openai.com/auth` → `chatgpt_account_id` claim. Build
+    a JWT whose payload contains that claim with `_make_jwt`-style encoding.
+  - `should_refresh(access_token)`: True when JWT `exp` is within 5 min (or past), False
+    when `exp` is an hour out.
+  - `refresh_tokens()`: monkeypatch the HTTP POST seam to return
+    `{"access_token":"new-at","refresh_token":"new-rt"}`; assert the new values are written
+    back to the `tmp_path` auth.json, the file mode is `0o600`, and `last_refresh` is updated.
+    The HTTP call must go through a single injectable function (e.g. a module-level
+    `_http_post_json(url, body)`); tests monkeypatch THAT, never the network.
 
-In `pyproject.toml`, change the `dependencies` block to:
+- [ ] **Step 2:** Run `uv run pytest tests/test_codex_provider.py -v` — confirm FAIL.
 
-```toml
-dependencies = [
-    "textual>=0.79",
-    "litellm>=1.55",
-    "pydantic>=2.6",
-    "litellm-codex-oauth-provider>=0.1",
-]
+- [ ] **Step 3:** Implement the auth section in `riftor/agent/codex_provider.py`: constants
+  (`AUTH_TOKEN_URL`, `CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"`), `read_tokens()`,
+  `account_id()`, `should_refresh()`, `refresh_tokens()`, and `_http_post_json(url, body)`
+  using `urllib.request` (the one network seam). Reuse `riftor.codex_auth._jwt_exp` /
+  `codex_home` where helpful (import them). Writing auth.json must mirror riftor's secure
+  write (mode `0o600`, tmp-file + `os.replace`). Never let a parse error crash — raise a
+  clear `RuntimeError("not logged in — run codex login")` when tokens are missing (so it
+  classifies as auth upstream).
+
+- [ ] **Step 4:** Run `uv run pytest tests/test_codex_provider.py -v` — confirm PASS.
+
+- [ ] **Step 5:** `uv run ruff check riftor tests && uv run pyright riftor`, then:
+```bash
+git add riftor/agent/codex_provider.py tests/test_codex_provider.py
+git commit -m "feat: codex handler — token read, account-id, refresh"
 ```
 
-- [ ] **Step 2: Relock and install**
+---
 
-Run: `uv sync --extra dev`
-Expected: resolves and installs `litellm-codex-oauth-provider`; `uv.lock` updated. If the exact `>=0.1` floor doesn't resolve, run `uv add litellm-codex-oauth-provider` instead (it picks a valid floor and updates both files), then re-run `uv sync --extra dev`.
+### Task 4b: Bundled instructions prompt + opportunistic refresh
 
-- [ ] **Step 3: Verify the import path of the handler**
+**Files:**
+- Create: `riftor/agent/prompts/codex/default.md` (bundled canonical prompt — fetch the
+  current `gpt_5_codex_prompt.md` content from `openai/codex` and commit it as the pinned
+  bundle; if the fetch is unavailable, use a minimal faithful placeholder and note it)
+- Modify: `riftor/agent/codex_provider.py` (add the instructions section)
+- Modify: `tests/test_codex_provider.py`
 
-Run: `uv run python -c "from litellm_codex_oauth_provider import codex_auth_provider; print(type(codex_auth_provider))"`
-Expected: prints a class/instance (no ImportError). If the import name differs in the installed version, run `uv run python -c "import litellm_codex_oauth_provider as m; print([n for n in dir(m) if not n.startswith('_')])"` and use the exported handler name in Step 4.
+- [ ] **Step 1: Write failing tests:**
+  - `instructions_for(model)` returns the bundled prompt text (non-empty) when the fetch
+    seam raises (offline path).
+  - When the fetch seam returns new text, `instructions_for` returns THAT (and the bundled
+    copy is the fallback only). Monkeypatch the fetch seam (a module-level
+    `_fetch_remote_instructions(family) -> str | None`).
 
-- [ ] **Step 4: Register the handler in the lazy-litellm seam**
+- [ ] **Step 2:** Run the tests — confirm FAIL.
 
-In `riftor/agent/provider.py`, the current `_get_litellm()` is:
+- [ ] **Step 3:** Implement: load the bundled prompt via `importlib.resources`
+  (mirror how `agent/context.py` loads `prompts/system.md`). Add `instructions_for(model)`:
+  pick a family by substring (`codex` → default bundle for now), try
+  `_fetch_remote_instructions` with a SHORT timeout inside a `try/except` that falls back
+  to the bundle on ANY failure, cache the result in-process. Keep the ETag/disk-cache
+  minimal — a process-lifetime memo is enough for v1; note that as a deliberate scope cut
+  with a `log`/comment.
+
+- [ ] **Step 4:** Run tests — confirm PASS.
+
+- [ ] **Step 5:** lint+types, then:
+```bash
+git add riftor/agent/codex_provider.py riftor/agent/prompts/codex/default.md tests/test_codex_provider.py
+git commit -m "feat: codex handler — bundled instructions prompt + opportunistic refresh"
+```
+
+> **Packaging note:** ensure `riftor/agent/prompts/codex/*.md` ships as package data. Check
+> `pyproject.toml`'s build config (`[tool.hatch.build]`/`[tool.setuptools.package-data]` or
+> the existing `prompts/system.md` inclusion) and mirror whatever makes `prompts/system.md`
+> ship. If `prompts/` is already globbed, no change is needed — verify with
+> `uv run python -c "import importlib.resources as r; print(r.files('riftor.agent').joinpath('prompts/codex/default.md').read_text()[:40])"`.
+
+---
+
+### Task 4c: Request-body builder (messages → Responses `input`)
+
+**Files:**
+- Modify: `riftor/agent/codex_provider.py` (add `build_request_body`)
+- Modify: `tests/test_codex_provider.py`
+
+- [ ] **Step 1: Write failing tests** for a pure function
+  `build_request_body(model, messages, tools, instructions, reasoning_effort, verbosity)`:
+  - system message → goes to `instructions` (not into `input`); riftor's RIFT system prompt
+    text appears as a `developer` item at `input[0]` with `content[0].type == "input_text"`.
+  - a user message → a `{"type":"message","role":"user"}` input item.
+  - an assistant message with `tool_calls` → a `function_call` item with `name`/`arguments`/`call_id`.
+  - a `tool` role message → a `function_call_output` item with matching `call_id`.
+  - body has `store is False`, `stream is True`, `include == ["reasoning.encrypted_content"]`,
+    `reasoning["summary"] == "auto"`, a `text.verbosity` key.
+  - body does NOT contain `max_tokens`, `max_output_tokens`, `max_completion_tokens`,
+    `temperature`, or `top_p` even if passed in `kwargs`.
+  - tools flattened: `tools[0]` has top-level `name`/`parameters` (no nested `function`).
+
+- [ ] **Step 2:** Run — confirm FAIL.
+- [ ] **Step 3:** Implement `build_request_body` as a pure function (no I/O), following the
+  input-mapping rules in the Task-4 reference block.
+- [ ] **Step 4:** Run — confirm PASS.
+- [ ] **Step 5:** lint+types, then:
+```bash
+git add riftor/agent/codex_provider.py tests/test_codex_provider.py
+git commit -m "feat: codex handler — Responses request-body builder"
+```
+
+---
+
+### Task 4d: SSE response parser
+
+**Files:**
+- Modify: `riftor/agent/codex_provider.py` (add SSE parsing → chunks)
+- Modify: `tests/test_codex_provider.py`
+
+- [ ] **Step 1: Write failing tests** feeding a canned list of decoded SSE event dicts to a
+  pure generator `parse_events(events) -> Iterator[chunk]` (chunk = a small dataclass or
+  dict mirroring `GenericStreamingChunk` fields: `text`, `reasoning_content`, `tool_use`,
+  `is_finished`, `finish_reason`, `usage`):
+  - `response.output_text.delta` events → text chunks with the delta.
+  - `response.reasoning_summary_text.delta` → reasoning_content chunks.
+  - a sequence of `response.function_call_arguments.delta` (same `call_id`) → tool_use
+    chunks whose accumulated arguments reassemble to the full JSON; the call name/id are set.
+  - `response.completed` with `response.usage = {"input_tokens":11,"output_tokens":7}` →
+    a final chunk `is_finished=True`, `finish_reason` `"tool_calls"` if a tool call was
+    seen else `"stop"`, and `usage.prompt_tokens==11`, `usage.completion_tokens==7`.
+
+- [ ] **Step 2:** Run — confirm FAIL.
+- [ ] **Step 3:** Implement `parse_events` (pure) plus a thin `_iter_sse(raw_lines)` that
+  turns `event:`/`data:` lines + blank-line framing into event dicts and treats
+  `data: [DONE]` as terminal. Keep network OUT of these — the streaming method (Task 4e)
+  feeds them from the live response.
+- [ ] **Step 4:** Run — confirm PASS.
+- [ ] **Step 5:** lint+types, then:
+```bash
+git add riftor/agent/codex_provider.py tests/test_codex_provider.py
+git commit -m "feat: codex handler — SSE event parser → chunks"
+```
+
+---
+
+### Task 4e: `CustomLLM` class wiring streaming + non-streaming
+
+**Files:**
+- Modify: `riftor/agent/codex_provider.py` (the `CodexProvider(CustomLLM)` class + singleton)
+- Modify: `tests/test_codex_provider.py`
+
+- [ ] **Step 1: Write failing tests** that exercise the class with the network seam
+  monkeypatched (a fake `_stream_responses(payload, headers) -> Iterator[bytes/lines]`
+  returning canned SSE for a text reply, and one for a tool-call reply):
+  - `astreaming(...)` yields `GenericStreamingChunk`s ending with `is_finished=True` and
+    correct usage; the request it built includes the canonical `instructions` and the
+    Authorization/`chatgpt-account-id` headers (assert by capturing what the fake seam
+    received). Provide a `tmp_path` auth.json + monkeypatched `CODEX_HOME` and a
+    future-`exp` access token so no refresh fires.
+  - `acompletion(...)` returns a `ModelResponse` whose `choices[0].message.content` is the
+    concatenated text, and whose `usage` is populated.
+  - missing auth.json → the call raises an error whose message contains "codex login".
+
+- [ ] **Step 2:** Run — confirm FAIL.
+- [ ] **Step 3:** Implement `CodexProvider(litellm.CustomLLM)` with `completion`/
+  `acompletion`/`streaming`/`astreaming`, composing 4a–4d: resolve+refresh token, build
+  headers, build body (instructions from 4b), POST to the responses endpoint via the
+  injectable `_stream_responses` seam, parse via 4d, and adapt to
+  `GenericStreamingChunk`/`ModelResponse`. Provide sync wrappers that drain the async path
+  (use `asyncio.run`/thread fallback). Export a module-level singleton instance
+  `codex_provider = CodexProvider()`.
+- [ ] **Step 4:** Run — confirm PASS.
+- [ ] **Step 5:** lint+types, then:
+```bash
+git add riftor/agent/codex_provider.py tests/test_codex_provider.py
+git commit -m "feat: codex handler — CustomLLM streaming/non-streaming"
+```
+
+---
+
+### Task 4f: Register the handler in the lazy-litellm seam
+
+**Files:**
+- Modify: `riftor/agent/provider.py:27-37` (`_get_litellm`)
+
+- [ ] **Step 1: Register** the vendored handler. The current `_get_litellm()` is:
 
 ```python
 def _get_litellm():
@@ -423,7 +635,8 @@ def _get_litellm():
     return _litellm
 ```
 
-Replace the body with one that also registers the Codex custom provider (guarded so a missing/renamed handler never breaks startup of non-Codex users):
+Replace it with a version that also registers riftor's codex handler, guarded so a failure
+never breaks startup for non-Codex users:
 
 ```python
 def _get_litellm():
@@ -441,34 +654,32 @@ def _get_litellm():
 
 
 def _register_codex_provider(litellm) -> None:
-    """Register the `codex/` custom provider that reads ~/.codex/auth.json.
+    """Register riftor's vendored `codex/` handler (reads ~/.codex/auth.json).
 
-    Guarded: if the package is absent or its API changed, Codex simply won't
-    work, but every other provider still does — consistent with riftor's
-    never-crash-on-an-optional-thing ethos.
+    Guarded: if importing the handler fails for any reason, Codex simply won't
+    work, but every other provider still does — riftor's never-crash ethos.
     """
     try:
-        from litellm_codex_oauth_provider import codex_auth_provider
+        from riftor.agent.codex_provider import codex_provider
     except Exception:  # noqa: BLE001 — Codex optional at runtime; never break the loop
         return
     existing = list(getattr(litellm, "custom_provider_map", None) or [])
     if any(entry.get("provider") == "codex" for entry in existing):
         return
-    existing.append({"provider": "codex", "custom_handler": codex_auth_provider})
+    existing.append({"provider": "codex", "custom_handler": codex_provider})
     litellm.custom_provider_map = existing
 ```
 
-- [ ] **Step 5: Verify registration works without a token file**
+- [ ] **Step 2: Verify** registration works with no token file present:
 
 Run: `uv run python -c "from riftor.agent.provider import _get_litellm; m=_get_litellm(); print([e['provider'] for e in m.custom_provider_map])"`
-Expected: output includes `'codex'`, and the command does not require `~/.codex/auth.json` to exist (no crash).
+Expected: output includes `'codex'`; no crash even though `~/.codex/auth.json` is absent.
 
-- [ ] **Step 6: Lint, type-check, commit**
-
+- [ ] **Step 3:** lint+types, then:
 ```bash
 uv run ruff check riftor && uv run pyright riftor
-git add pyproject.toml uv.lock riftor/agent/provider.py
-git commit -m "feat: register litellm codex custom provider; add runtime dep"
+git add riftor/agent/provider.py
+git commit -m "feat: register riftor's vendored codex CustomLLM handler"
 ```
 
 ---
@@ -744,8 +955,9 @@ Check status any time with `riftor --doctor`, which reports whether
 **Notes:**
 
 - Billing goes to your ChatGPT subscription, not OpenAI API credits.
-- This uses an **undocumented** ChatGPT backend endpoint via the
-  `litellm-codex-oauth-provider` package; OpenAI may change it without notice.
+- This uses an **undocumented** ChatGPT backend endpoint; OpenAI may change it without
+  notice. riftor self-heals the required system prompt when online and falls back to a
+  bundled copy offline.
 - If a call fails with an auth error, re-run `codex login`.
 ```
 
@@ -782,20 +994,39 @@ git commit -m "chore: green CI for codex login feature"
 
 ## Self-Review (completed by plan author)
 
-**Spec coverage:**
-- Architecture (registration in `_get_litellm`, creds `(None,None)`) → Task 4, Task 2 ✓
-- `providers.py` registry + `PROVIDER_DEFAULTS` + `fetch_models` codex kind → Task 1 ✓
-- `config.py` `creds_for`/`has_credentials`/`provider_env` → Task 2 ✓
-- `codex_auth.py` helper → Task 3 ✓
+**Spec coverage (revised for the vendored approach):**
+- Architecture (registration in `_get_litellm`, creds `(None,None)`) → Task 4f, Task 2 ✓
+- `providers.py` registry + `PROVIDER_DEFAULTS` + `fetch_models` codex kind → Task 1 ✓ (done)
+- `config.py` `creds_for`/`has_credentials`/`provider_env` → Task 2 ✓ (done)
+- `codex_auth.py` helper → Task 3 ✓ (done)
+- Vendored `CustomLLM` handler (auth/refresh, instructions prompt, request build, SSE parse,
+  class, registration) → Tasks 4a/4b/4c/4d/4e/4f ✓
 - `config_screen.py` (hide key/base/fetch, status line) → Task 5 ✓
 - `app.py` context window → Task 6 ✓
 - `doctor.py` + `--doctor` → Task 7 ✓
-- `pyproject.toml` / `uv.lock` hard dep → Task 4 ✓
+- **No dependency added** (vendored) → no `pyproject.toml`/`uv.lock` change ✓
 - `docs/configuration.md` → Task 9 ✓
-- Tests (providers, config, codex_auth) + smoke → Tasks 1,2,3,7,8 ✓
-- Error handling (auth errors via `classify_error`, never-crash) → covered by Task 3 (helper never raises), Task 4 (guarded registration); `classify_error` already maps auth/validation/unknown — no change needed ✓
-- Out-of-scope items (no OAuth, no shell-out, no CLI flag) → respected; completions untouched ✓
+- Tests (providers, config, codex_auth, codex_provider) + smoke → Tasks 1,2,3,4a–4e,7,8 ✓
+- Error handling (auth errors via `classify_error`, never-crash) → Task 3 (helper never
+  raises), Task 4a (clear auth RuntimeError → classifies as auth), Task 4f (guarded
+  registration); `classify_error` already maps auth/validation/unknown — no change needed ✓
+- Out-of-scope items (no OAuth, no shell-out, no CLI flag, no cache-key) → respected;
+  completions untouched ✓
 
-**Placeholder scan:** No TBD/TODO. Every code step shows full code. The two adaptive notes (handler import name in Task 4 Step 3, `last_assistant_text` in Task 8) give an explicit verification command + fallback rather than a vague "fill in" — they exist because the exact external symbol can vary by installed version.
+**Placeholder scan:** No TBD/TODO. Tasks 1–3 and 5–9 give full code. Task 4 (the vendored
+handler) is specified by exact wire-protocol constants + per-sub-task test contracts rather
+than full line-by-line code, because it is a large integration against an undocumented
+endpoint where prescribing every line would be brittle and the reference shapes are better
+consulted live; each sub-task is still a strict TDD cycle (failing tests first, named
+functions, named assertions) so the implementer has unambiguous targets. The adaptive note
+in Task 8 (`last_assistant_text`) gives a verification command + fallback.
 
-**Type/name consistency:** `CodexAuthStatus(logged_in, expires_in_s, detail)`, `auth_status()`, `codex_home()`, `_register_codex_provider`, `_set_codex_mode`, `_codex_status_text` are used consistently across Tasks 3/5/7/8. Provider key `"codex"`, prefix `"codex/"`, `list_kind="codex"` consistent across Tasks 1/2/4/6. Model id `codex/gpt-5.5-codex` consistent throughout.
+**Type/name consistency:** `CodexAuthStatus(logged_in, expires_in_s, detail)`,
+`auth_status()`, `codex_home()`, `_register_codex_provider`, `_set_codex_mode`,
+`_codex_status_text` consistent across Tasks 3/5/7/8. Vendored-handler names
+(`read_tokens`, `account_id`, `should_refresh`, `refresh_tokens`, `instructions_for`,
+`build_request_body`, `parse_events`, `CodexProvider`, singleton `codex_provider`,
+`_http_post_json`, `_stream_responses`, `_fetch_remote_instructions`) are introduced and
+reused consistently across Tasks 4a–4f. Provider key `"codex"`, prefix `"codex/"`,
+`list_kind="codex"` consistent across Tasks 1/2/4/6. Model id `codex/gpt-5.5-codex`
+consistent throughout.
