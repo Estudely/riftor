@@ -258,6 +258,11 @@ ConfirmScreen, ConfigScreen {
     color: $background;
     text-style: bold;
 }
+/* focus indication for the keyboard-driven decision buttons (a/s/w/d/esc).
+   `reverse` reads clearly on a flat height-1 button without changing its size. */
+#confirm-buttons Button:focus {
+    text-style: bold reverse;
+}
 
 /* — config footer BAR: slim, right-aligned actions — */
 /* The buttons are flat height-1 "text" buttons (border: none), not the default
