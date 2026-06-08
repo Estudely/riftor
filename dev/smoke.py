@@ -147,6 +147,43 @@ async def main() -> None:
         else:
             os.environ["RIFTOR_DEMO_RESPONSE"] = _saved_demo
 
+        # --- Codex (ChatGPT subscription) model: offline, mocked ---
+        # Proves a codex/ model can be selected and a turn driven with NO network
+        # and NO real ~/.codex/auth.json: RIFTOR_DEMO_RESPONSE short-circuits the
+        # provider before the codex handler runs, and CODEX_HOME points at the
+        # empty smoke workdir so no real auth is ever read. Save/restore every
+        # global+config we touch so later steps see a clean app.
+        _saved_model = app.config.model
+        _saved_demo2 = os.environ.get("RIFTOR_DEMO_RESPONSE")
+        _saved_codex_home = os.environ.get("CODEX_HOME")
+        os.environ["RIFTOR_DEMO_RESPONSE"] = "codex offline ok"
+        os.environ["CODEX_HOME"] = workdir  # guarantee NO real auth.json is read
+        try:
+            inp.value = "/model codex/gpt-5.5-codex"
+            await pilot.press("enter")
+            await pilot.pause()
+            assert app.status.model == "codex/gpt-5.5-codex", "codex model not selected"
+            inp.value = "hello codex"
+            await pilot.press("enter")
+            await pilot.pause()
+            # The mocked turn must complete and the canned reply must reach the
+            # model context (same mechanism the scope block uses above).
+            assert any(
+                m.get("role") == "assistant"
+                and "codex offline ok" in (m.get("content") or "")
+                for m in app.context._messages
+            ), "expected mocked codex turn reply in context"
+        finally:
+            app.config.model = _saved_model
+            if _saved_demo2 is None:
+                os.environ.pop("RIFTOR_DEMO_RESPONSE", None)
+            else:
+                os.environ["RIFTOR_DEMO_RESPONSE"] = _saved_demo2
+            if _saved_codex_home is None:
+                os.environ.pop("CODEX_HOME", None)
+            else:
+                os.environ["CODEX_HOME"] = _saved_codex_home
+
         # /theme switches the live theme
         inp.value = "/theme void"
         await pilot.press("enter")
