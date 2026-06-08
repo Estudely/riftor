@@ -12,15 +12,15 @@ sub-tasks; the public names here are what those depend on.
 
 from __future__ import annotations
 
-import base64
 import datetime as _dt
 import json
 import os
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
-from riftor.codex_auth import _jwt_exp, codex_home
+from riftor.codex_auth import _jwt_claims, _jwt_exp, codex_home
 
 # --- wire-protocol constants (undocumented endpoint — do not guess) ---------
 CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
@@ -75,21 +75,6 @@ def read_tokens() -> tuple[str, str]:
     return access, refresh
 
 
-def _decode_jwt_payload(token: str) -> dict | None:
-    """Decode a JWT payload (URL-safe base64, padded). None if unparseable."""
-    parts = token.split(".")
-    if len(parts) < 2:
-        return None
-    payload = parts[1]
-    payload += "=" * (-len(payload) % 4)  # restore base64 padding
-    try:
-        raw = base64.urlsafe_b64decode(payload.encode("ascii"))
-        claims = json.loads(raw)
-    except Exception:  # noqa: BLE001 — an unparseable JWT just means "unresolvable", never crash
-        return None
-    return claims if isinstance(claims, dict) else None
-
-
 def account_id() -> str | None:
     """The ChatGPT account id, or None if it cannot be resolved (never raises).
 
@@ -108,7 +93,10 @@ def account_id() -> str | None:
     access = tokens.get("access_token")
     if not isinstance(access, str) or not access:
         return None
-    claims = _decode_jwt_payload(access)
+    try:
+        claims = _jwt_claims(access)
+    except Exception:  # noqa: BLE001 — an unparseable JWT just means "unresolvable", never crash
+        return None
     if not claims:
         return None
     auth = claims.get("https://api.openai.com/auth")
@@ -137,14 +125,21 @@ def _write_auth_secure(data: dict) -> None:
     tmp = path.with_name(path.name + ".tmp")
     fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
-        os.write(fd, json.dumps(data, indent=2).encode("utf-8"))
-    finally:
-        os.close(fd)
-    try:
-        os.chmod(tmp, 0o600)
-    except OSError:
-        pass
-    os.replace(tmp, path)
+        try:
+            os.write(fd, json.dumps(data, indent=2).encode("utf-8"))
+        finally:
+            os.close(fd)
+        try:
+            os.chmod(tmp, 0o600)
+        except OSError:
+            pass
+        os.replace(tmp, path)
+    except Exception:  # noqa: BLE001 — re-raised after cleanup; just removes the stale tmp first
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def refresh_tokens() -> str:
@@ -162,14 +157,19 @@ def refresh_tokens() -> str:
     if not refresh:
         raise RuntimeError("not logged in — run `codex login`")
 
-    resp = _http_post_json(
-        AUTH_TOKEN_URL,
-        {
-            "client_id": CLIENT_ID,
-            "grant_type": "refresh_token",
-            "refresh_token": refresh,
-        },
-    )
+    try:
+        resp = _http_post_json(
+            AUTH_TOKEN_URL,
+            {
+                "client_id": CLIENT_ID,
+                "grant_type": "refresh_token",
+                "refresh_token": refresh,
+            },
+        )
+    except (urllib.error.URLError, json.JSONDecodeError, ValueError) as exc:
+        # A revoked/expired refresh token (HTTPError, a URLError subclass) or a
+        # non-JSON body becomes a clean auth error telling the user to re-login.
+        raise RuntimeError("token refresh failed — run `codex login`") from exc
 
     new_access = resp.get("access_token")
     if not new_access:

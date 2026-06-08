@@ -33,8 +33,12 @@ def _auth_file() -> Path:
     return codex_home() / "auth.json"
 
 
-def _jwt_exp(token: str) -> int | None:
-    """Read the ``exp`` claim from a JWT payload (no signature check)."""
+def _jwt_claims(token: str) -> dict | None:
+    """Decode a JWT payload into its claims dict (no signature check).
+
+    Returns ``None`` when the token has fewer than 2 segments. Raises on
+    genuinely malformed base64/JSON — callers already guard this.
+    """
     parts = token.split(".")
     if len(parts) < 2:
         return None
@@ -42,6 +46,14 @@ def _jwt_exp(token: str) -> int | None:
     payload += "=" * (-len(payload) % 4)  # restore base64 padding
     raw = base64.urlsafe_b64decode(payload.encode("ascii"))
     claims = json.loads(raw)
+    return claims if isinstance(claims, dict) else None
+
+
+def _jwt_exp(token: str) -> int | None:
+    """Read the ``exp`` claim from a JWT payload (no signature check)."""
+    claims = _jwt_claims(token)
+    if claims is None:
+        return None
     exp = claims.get("exp")
     return int(exp) if isinstance(exp, (int, float)) else None
 

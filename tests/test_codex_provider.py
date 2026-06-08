@@ -11,6 +11,7 @@ import base64
 import json
 import stat
 import time
+import urllib.error
 
 import pytest
 
@@ -173,3 +174,29 @@ def test_refresh_tokens_missing_access_token_raises(tmp_path, monkeypatch):
 
     with pytest.raises(RuntimeError):
         codex_provider.refresh_tokens()
+
+
+def test_refresh_http_error_becomes_auth_error(tmp_path, monkeypatch):
+    _write_auth(tmp_path, {"access_token": "old-at", "refresh_token": "old-rt"})
+
+    def fake_post(url, body, timeout=30.0):
+        raise urllib.error.HTTPError(url, 401, "unauthorized", hdrs=None, fp=None)
+
+    monkeypatch.setattr(codex_provider, "_http_post_json", fake_post)
+
+    with pytest.raises(RuntimeError) as ei:
+        codex_provider.refresh_tokens()
+    assert "codex login" in str(ei.value)
+
+
+def test_refresh_non_json_becomes_auth_error(tmp_path, monkeypatch):
+    _write_auth(tmp_path, {"access_token": "old-at", "refresh_token": "old-rt"})
+
+    def fake_post(url, body, timeout=30.0):
+        raise json.JSONDecodeError("x", "", 0)
+
+    monkeypatch.setattr(codex_provider, "_http_post_json", fake_post)
+
+    with pytest.raises(RuntimeError) as ei:
+        codex_provider.refresh_tokens()
+    assert "codex login" in str(ei.value)
