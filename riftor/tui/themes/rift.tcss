@@ -100,15 +100,16 @@ ConfirmScreen, ConfigScreen {
 }
 
 /* --- config modal: bars + sidebar; no card padding so bars span edge-to-edge --- */
-/* max-height 100% (not 90%): the densest section (Model, 6 fields) needs the
-   full ~30 rows. With everything height:auto the box hugs each section's
-   content (no stretch), but a 90% cap would clip the pinned footer off the
-   bottom on the tallest section. 100% lets it fit on any terminal >=30 rows. */
+/* Fixed height 30 (the densest section, Model, needs ~30 rows) with the content
+   pane scrolling inside (see #config-pane). This gives the modal a CONSISTENT
+   size across sections and keeps the title/footer bars pinned. max-height 100%
+   shrinks the box to fit terminals under 30 rows (the pane scrolls), so the
+   footer is never pushed off-screen even on short terminals. */
 #config-box {
     layout: vertical;
     width: 80;
     max-width: 92%;
-    height: auto;
+    height: 30;
     max-height: 100%;
     padding: 0;
     background: $panel;
@@ -126,19 +127,18 @@ ConfirmScreen, ConfigScreen {
 }
 
 /* — config sidebar: nav column + content pane — */
-/* Everything hugs content (height: auto) so the modal sizes to whichever
-   section is active rather than stretching to max-height. The vertical
-   divider is a border-LEFT on the content pane (always the taller of the two
-   columns), so it spans the full content height regardless of section. */
+/* The middle band flexes (1fr) to fill the fixed-height box between the title
+   and footer bars. Nav and pane both 1fr, so they share the same height and
+   the divider (border-left on the pane) spans the full band. */
 #config-main {
-    height: auto;
+    height: 1fr;
     layout: horizontal;
 }
 
 /* left nav — slightly-off background column */
 #config-nav {
     width: 20;
-    height: auto;
+    height: 1fr;
     background: $surface;
     padding: 1 0;
 }
@@ -152,12 +152,14 @@ ConfirmScreen, ConfigScreen {
     border-left: thick $violet;
 }
 
-/* right content pane — its left border is the nav/content divider */
+/* right content pane — scrolls when a section is taller than the band (so the
+   pinned footer stays visible); its left border is the nav/content divider. */
 #config-pane {
     width: 1fr;
-    height: auto;
+    height: 1fr;
     padding: 1 2;
     border-left: solid $border;
+    overflow-y: auto;
     scrollbar-color: $border;
 }
 
