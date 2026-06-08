@@ -22,8 +22,12 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from riftor.codex_auth import _jwt_claims, _jwt_exp, codex_home
+
+if TYPE_CHECKING:
+    from litellm import ModelResponse
 
 # --- wire-protocol constants (undocumented endpoint — do not guess) ---------
 CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
@@ -605,3 +609,293 @@ def iter_sse_lines(lines: Iterable[str]) -> Iterator[dict]:
 
     # Flush any trailing event not terminated by a blank line.
     yield from _flush()
+
+
+# --- live HTTP handler / litellm CustomLLM (Task 4e) -----------------------
+#
+# Wires the auth (4a), prompt (4b), request builder (4c), and SSE parser (4d)
+# to the live, undocumented Codex *Responses API* endpoint, exposed as a
+# litellm ``CustomLLM`` plus a module-level singleton. ``_stream_responses`` is
+# the SINGLE inference network seam — tests monkeypatch *that*, never the
+# socket. The translation helpers below stay small and litellm-isolated so the
+# wiring is independently testable.
+
+# Undocumented Codex/ChatGPT-backend Responses endpoint (POST).
+RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses"
+
+# The arguments fragments of a single Codex function call all carry one stable
+# tool_use index so the consumer (provider.stream_turn) reassembles one call.
+_TOOL_USE_INDEX = 0
+
+
+def _litellm_types() -> Any:
+    """Import litellm (via the shared lazy accessor) and return its types module.
+
+    Routing through ``provider._get_litellm`` keeps the fast-startup invariant:
+    litellm loads only once a Codex call is made, and the shared cache is set so
+    ``provider._litellm`` stays consistent. Returns the ``litellm.types.utils``
+    module, which carries ``Usage`` / ``Choices`` / ``Message``.
+    """
+    from riftor.agent.provider import _get_litellm
+
+    _get_litellm()  # ensures litellm is imported + configured + cached
+    import litellm.types.utils as _types
+
+    return _types
+
+
+def _custom_llm_base() -> type:
+    """Return litellm's ``CustomLLM`` base class (loaded lazily)."""
+    from riftor.agent.provider import _get_litellm
+
+    # getattr avoids pyright's reportPrivateImportUsage on the re-exported name.
+    return getattr(_get_litellm(), "CustomLLM")  # noqa: B009
+
+
+def _resolve_access_token() -> str:
+    """Return a usable access token, refreshing it first when near expiry.
+
+    Lets the clean "run `codex login`" ``RuntimeError`` from :func:`read_tokens`
+    propagate when the user isn't logged in.
+    """
+    access, _ = read_tokens()
+    if should_refresh(access):
+        access = refresh_tokens()
+    return access
+
+
+def _build_headers(access_token: str) -> dict:
+    """Build the request headers for the Codex Responses endpoint.
+
+    ``chatgpt-account-id`` is included only when :func:`account_id` resolves a
+    value (the endpoint tolerates its absence on personal accounts).
+    """
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "OpenAI-Beta": "responses=experimental",
+        "originator": "codex_cli_rs",
+        "Accept": "text/event-stream",
+        "Content-Type": "application/json",
+    }
+    acc = account_id()
+    if acc is not None:
+        headers["chatgpt-account-id"] = acc
+    return headers
+
+
+def _stream_responses(
+    payload: dict, headers: dict, timeout: float = 120.0
+) -> Iterator[str]:
+    """POST ``payload`` to the Responses endpoint and yield decoded body LINES.
+
+    The SINGLE inference network seam — tests monkeypatch *this* to feed canned
+    SSE lines. Uses stdlib ``urllib`` and streams the response line-by-line so
+    the SSE parser sees frames as they arrive.
+    """
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        RESPONSES_URL, data=data, headers=headers, method="POST"
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 — fixed https endpoint
+        for raw in resp:
+            yield raw.decode("utf-8", errors="replace")
+
+
+def _bare_model(model: str) -> str:
+    """Strip a leading ``codex/`` provider prefix if present."""
+    prefix = "codex/"
+    return model[len(prefix) :] if model.startswith(prefix) else model
+
+
+def _chunk_to_streaming(chunk: CodexChunk) -> dict:
+    """Translate a :class:`CodexChunk` into a litellm ``GenericStreamingChunk``.
+
+    Reasoning deltas are surfaced via ``provider_specific_fields`` so the UI can
+    show thinking, mirroring litellm's ``reasoning_content`` convention. The
+    terminal chunk carries ``is_finished``/``finish_reason`` and a litellm
+    ``Usage``.
+    """
+    tool_use = None
+    if chunk.tool_call is not None:
+        tool_use = {
+            "id": chunk.tool_call.get("id"),
+            "type": "function",
+            "index": _TOOL_USE_INDEX,
+            "function": {
+                "name": chunk.tool_call.get("name"),
+                "arguments": chunk.tool_call.get("arguments_delta") or "",
+            },
+        }
+
+    usage = None
+    if chunk.usage is not None:
+        usage = _litellm_types().Usage(
+            prompt_tokens=chunk.usage.get("prompt_tokens", 0),
+            completion_tokens=chunk.usage.get("completion_tokens", 0),
+            total_tokens=chunk.usage.get("total_tokens", 0),
+        )
+
+    provider_specific = None
+    if chunk.reasoning:
+        provider_specific = {"reasoning_content": chunk.reasoning}
+
+    return {
+        "text": chunk.text or "",
+        "tool_use": tool_use,
+        "is_finished": chunk.is_finished,
+        "finish_reason": chunk.finish_reason or "",
+        "usage": usage,
+        "index": 0,
+        "provider_specific_fields": provider_specific,
+    }
+
+
+def _model_response_from_chunks(
+    model: str, chunks: Iterable[CodexChunk]
+) -> "ModelResponse":
+    """Assemble a non-streaming ``ModelResponse`` from the full chunk stream.
+
+    Accumulates assistant text and per-id tool-call arguments (reasoning is
+    dropped from the message), reconciling each tool call's name from the first
+    non-None name seen for that id. The terminal chunk supplies finish_reason
+    and usage.
+    """
+    types = _litellm_types()
+    ModelResponse = types.ModelResponse
+    Choices = types.Choices
+    Message = types.Message
+    Usage = types.Usage
+
+    text_parts: list[str] = []
+    # call id -> {"name": str|None, "args": str}; ordered by first appearance.
+    calls: dict[str, dict] = {}
+    finish_reason = "stop"
+    usage: dict | None = None
+
+    for chunk in chunks:
+        if chunk.text:
+            text_parts.append(chunk.text)
+        if chunk.tool_call is not None:
+            call_id = chunk.tool_call.get("id")
+            if call_id is not None:
+                slot = calls.setdefault(call_id, {"name": None, "args": ""})
+                name = chunk.tool_call.get("name")
+                if name and not slot["name"]:
+                    slot["name"] = name
+                slot["args"] += chunk.tool_call.get("arguments_delta") or ""
+        if chunk.is_finished:
+            finish_reason = chunk.finish_reason or "stop"
+            usage = chunk.usage
+
+    tool_calls = [
+        {
+            "id": call_id,
+            "type": "function",
+            "function": {"name": slot["name"], "arguments": slot["args"]},
+        }
+        for call_id, slot in calls.items()
+    ]
+
+    content = "".join(text_parts)
+    message = Message(
+        role="assistant",
+        content=content or None,
+        tool_calls=tool_calls or None,
+    )
+    choice = Choices(finish_reason=finish_reason, index=0, message=message)
+
+    usage = usage or {}
+    response_usage = Usage(
+        prompt_tokens=usage.get("prompt_tokens", 0),
+        completion_tokens=usage.get("completion_tokens", 0),
+        total_tokens=usage.get("total_tokens", 0),
+    )
+    return ModelResponse(
+        choices=[choice], usage=response_usage, model=_bare_model(model)
+    )
+
+
+def _build_payload(model: str, messages: list[dict], optional_params: dict) -> dict:
+    """Build the Responses request body from litellm's call inputs."""
+    tools = optional_params.get("tools")
+    reasoning_effort = optional_params.get("reasoning_effort") or "medium"
+    verbosity = optional_params.get("verbosity") or "medium"
+    bare = _bare_model(model)
+    return build_request_body(
+        bare,
+        messages,
+        tools=tools,
+        instructions=instructions_for(bare),
+        reasoning_effort=reasoning_effort,
+        verbosity=verbosity,
+    )
+
+
+def _iter_codex_chunks(model: str, messages: list[dict], optional_params: dict) -> Iterator[CodexChunk]:
+    """Resolve auth, fire the request, and yield parsed :class:`CodexChunk`s.
+
+    The shared spine of streaming and non-streaming: auth/headers/body, then
+    ``_stream_responses`` → ``iter_sse_lines`` → ``parse_events``.
+    """
+    access = _resolve_access_token()
+    headers = _build_headers(access)
+    payload = _build_payload(model, messages, optional_params)
+    lines = _stream_responses(payload, headers)
+    yield from parse_events(iter_sse_lines(lines))
+
+
+# The mixin holds all behavior; ``_build_codex_provider_class`` stitches it onto
+# litellm's ``CustomLLM`` base lazily (so importing this module never loads
+# litellm — the fast-startup invariant ``provider.py`` depends on).
+class _CodexProviderMixin:
+    """litellm ``CustomLLM`` handler for OpenAI's undocumented Codex backend."""
+
+    def streaming(self, model, messages, *args, **kwargs) -> Iterator[dict]:
+        optional_params = kwargs.get("optional_params") or {}
+        for chunk in _iter_codex_chunks(model, messages, optional_params):
+            yield _chunk_to_streaming(chunk)
+
+    async def astreaming(self, model, messages, *args, **kwargs):
+        # ``_stream_responses`` is sync (and monkeypatched in tests); driving the
+        # sync generator directly keeps this simple and correct. A real run can
+        # offload the blocking I/O via asyncio.to_thread later if needed.
+        for chunk in self.streaming(model, messages, *args, **kwargs):
+            yield chunk
+
+    def completion(self, model, messages, *args, **kwargs) -> "ModelResponse":
+        optional_params = kwargs.get("optional_params") or {}
+        chunks = _iter_codex_chunks(model, messages, optional_params)
+        return _model_response_from_chunks(model, chunks)
+
+    async def acompletion(self, model, messages, *args, **kwargs) -> "ModelResponse":
+        return self.completion(model, messages, *args, **kwargs)
+
+
+_CODEX_PROVIDER_CLASS: type | None = None
+_CODEX_PROVIDER_SINGLETON: "_CodexProviderMixin | None" = None
+
+
+def _build_codex_provider_class() -> type:
+    """Build (once) the concrete ``CodexProvider`` subclassing litellm CustomLLM."""
+    global _CODEX_PROVIDER_CLASS
+    if _CODEX_PROVIDER_CLASS is None:
+        _CODEX_PROVIDER_CLASS = type(
+            "CodexProvider", (_CodexProviderMixin, _custom_llm_base()), {}
+        )
+    return _CODEX_PROVIDER_CLASS
+
+
+def __getattr__(name: str):
+    """Lazily expose ``CodexProvider`` / ``codex_provider`` (PEP 562).
+
+    Resolving either triggers the (lazy) litellm import, so accessing the
+    handler is what loads litellm — never the bare module import.
+    """
+    if name == "CodexProvider":
+        return _build_codex_provider_class()
+    if name == "codex_provider":
+        global _CODEX_PROVIDER_SINGLETON
+        if _CODEX_PROVIDER_SINGLETON is None:
+            _CODEX_PROVIDER_SINGLETON = _build_codex_provider_class()()
+        return _CODEX_PROVIDER_SINGLETON
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

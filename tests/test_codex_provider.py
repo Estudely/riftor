@@ -683,3 +683,285 @@ def test_iter_sse_lines_skips_blank_data_frame():
     ]
     events = list(codex_provider.iter_sse_lines(lines))
     assert events == [{"type": "response.output_text.delta", "delta": "y"}]
+
+
+# --- CustomLLM handler (Task 4e) -------------------------------------------
+
+
+def _future_auth(tmp_path) -> str:
+    """Write an auth.json with a far-future access token (no refresh fires)."""
+    at = _make_jwt(
+        {
+            "https://api.openai.com/auth": {"chatgpt_account_id": "acc-xyz"},
+            "exp": int(time.time()) + 3600,
+        }
+    )
+    _write_auth(tmp_path, {"access_token": at, "refresh_token": "rt-1"})
+    return at
+
+
+def _sse(event: dict) -> list[str]:
+    return [f"data: {json.dumps(event)}", ""]
+
+
+def test_bare_model_strips_prefix():
+    assert codex_provider._bare_model("codex/gpt-5.5-codex") == "gpt-5.5-codex"
+    assert codex_provider._bare_model("gpt-5.5-codex") == "gpt-5.5-codex"
+
+
+def test_streaming_text_reply(tmp_path, monkeypatch):
+    _future_auth(tmp_path)
+    captured: dict = {}
+
+    lines: list[str] = []
+    lines += _sse({"type": "response.output_text.delta", "delta": "Hel"})
+    lines += _sse({"type": "response.output_text.delta", "delta": "lo"})
+    lines += _sse(
+        {
+            "type": "response.completed",
+            "response": {
+                "output": [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "Hello"}],
+                    }
+                ],
+                "usage": {"input_tokens": 11, "output_tokens": 2, "total_tokens": 13},
+            },
+        }
+    )
+
+    def fake_stream(payload, headers, timeout=120.0):
+        captured["payload"] = payload
+        captured["headers"] = headers
+        return iter(lines)
+
+    monkeypatch.setattr(codex_provider, "_stream_responses", fake_stream)
+
+    chunks = list(
+        codex_provider.codex_provider.streaming(
+            "codex/gpt-5.5-codex", [{"role": "user", "content": "hi"}]
+        )
+    )
+
+    text = "".join(c["text"] or "" for c in chunks)
+    assert text == "Hello"
+
+    final = chunks[-1]
+    assert final["is_finished"] is True
+    usage = final["usage"]
+    assert usage is not None
+    assert int(usage["prompt_tokens"]) == 11
+    assert int(usage["completion_tokens"]) == 2
+
+    # The request body carried the bundled instructions prompt.
+    assert captured["payload"]["instructions"]
+    # Headers carry auth + the responses beta header.
+    assert captured["headers"]["Authorization"].startswith("Bearer ")
+    assert captured["headers"]["OpenAI-Beta"] == "responses=experimental"
+    # Account id resolved from the JWT becomes the chatgpt-account-id header.
+    assert captured["headers"]["chatgpt-account-id"] == "acc-xyz"
+    # Model prefix stripped before going on the wire.
+    assert captured["payload"]["model"] == "gpt-5.5-codex"
+
+
+async def test_astreaming_text_reply(tmp_path, monkeypatch):
+    _future_auth(tmp_path)
+
+    lines: list[str] = []
+    lines += _sse({"type": "response.output_text.delta", "delta": "foo"})
+    lines += _sse({"type": "response.output_text.delta", "delta": "bar"})
+    lines += _sse(
+        {
+            "type": "response.completed",
+            "response": {"usage": {"input_tokens": 4, "output_tokens": 2}},
+        }
+    )
+
+    monkeypatch.setattr(
+        codex_provider, "_stream_responses", lambda payload, headers, timeout=120.0: iter(lines)
+    )
+
+    collected = []
+    async for c in codex_provider.codex_provider.astreaming(
+        "gpt-5.5-codex", [{"role": "user", "content": "hi"}]
+    ):
+        collected.append(c)
+
+    assert "".join(c["text"] or "" for c in collected) == "foobar"
+    assert collected[-1]["is_finished"] is True
+
+
+def test_streaming_tool_call_reply(tmp_path, monkeypatch):
+    _future_auth(tmp_path)
+
+    lines: list[str] = []
+    lines += _sse(
+        {
+            "type": "response.output_item.added",
+            "item": {
+                "type": "function_call",
+                "name": "bash",
+                "call_id": "call_1",
+                "id": "item_1",
+            },
+        }
+    )
+    lines += _sse(
+        {
+            "type": "response.function_call_arguments.delta",
+            "item_id": "item_1",
+            "delta": '{"cmd"',
+        }
+    )
+    lines += _sse(
+        {
+            "type": "response.function_call_arguments.delta",
+            "item_id": "item_1",
+            "delta": ':"ls"}',
+        }
+    )
+    lines += _sse(
+        {
+            "type": "response.completed",
+            "response": {
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "bash",
+                        "arguments": '{"cmd":"ls"}',
+                        "call_id": "call_1",
+                    }
+                ],
+                "usage": {"input_tokens": 9, "output_tokens": 5},
+            },
+        }
+    )
+
+    monkeypatch.setattr(
+        codex_provider, "_stream_responses", lambda payload, headers, timeout=120.0: iter(lines)
+    )
+
+    chunks = list(
+        codex_provider.codex_provider.streaming(
+            "gpt-5.5-codex", [{"role": "user", "content": "list files"}]
+        )
+    )
+
+    tool_chunks = [c for c in chunks if c["tool_use"]]
+    assert tool_chunks
+    names = [c["tool_use"]["function"]["name"] for c in tool_chunks if c["tool_use"]["function"]["name"]]
+    assert "bash" in names
+    args = "".join(c["tool_use"]["function"]["arguments"] or "" for c in tool_chunks)
+    assert args == '{"cmd":"ls"}'
+    # tool_use index is stable so the consumer reassembles one call.
+    assert all(c["tool_use"]["index"] == tool_chunks[0]["tool_use"]["index"] for c in tool_chunks)
+
+    final = chunks[-1]
+    assert final["is_finished"] is True
+    assert final["finish_reason"] == "tool_calls"
+
+
+def test_completion_non_stream_text(tmp_path, monkeypatch):
+    _future_auth(tmp_path)
+
+    lines: list[str] = []
+    lines += _sse({"type": "response.output_text.delta", "delta": "Hel"})
+    lines += _sse({"type": "response.output_text.delta", "delta": "lo!"})
+    lines += _sse(
+        {
+            "type": "response.completed",
+            "response": {"usage": {"input_tokens": 6, "output_tokens": 3}},
+        }
+    )
+
+    monkeypatch.setattr(
+        codex_provider, "_stream_responses", lambda payload, headers, timeout=120.0: iter(lines)
+    )
+
+    resp = codex_provider.codex_provider.completion(
+        "gpt-5.5-codex", [{"role": "user", "content": "hi"}]
+    )
+    assert resp.choices[0].message.content == "Hello!"
+    assert int(resp.usage.prompt_tokens) == 6
+    assert int(resp.usage.completion_tokens) == 3
+
+
+def test_completion_non_stream_tool_calls(tmp_path, monkeypatch):
+    _future_auth(tmp_path)
+
+    lines: list[str] = []
+    lines += _sse(
+        {
+            "type": "response.output_item.added",
+            "item": {
+                "type": "function_call",
+                "name": "bash",
+                "call_id": "call_1",
+                "id": "item_1",
+            },
+        }
+    )
+    lines += _sse(
+        {
+            "type": "response.function_call_arguments.delta",
+            "item_id": "item_1",
+            "delta": '{"cmd":"ls"}',
+        }
+    )
+    lines += _sse(
+        {
+            "type": "response.completed",
+            "response": {
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "bash",
+                        "arguments": '{"cmd":"ls"}',
+                        "call_id": "call_1",
+                    }
+                ],
+                "usage": {"input_tokens": 9, "output_tokens": 5},
+            },
+        }
+    )
+
+    monkeypatch.setattr(
+        codex_provider, "_stream_responses", lambda payload, headers, timeout=120.0: iter(lines)
+    )
+
+    resp = codex_provider.codex_provider.completion(
+        "gpt-5.5-codex", [{"role": "user", "content": "list"}]
+    )
+    calls = resp.choices[0].message.tool_calls
+    assert calls
+    assert calls[0].function.name == "bash"
+    assert calls[0].function.arguments == '{"cmd":"ls"}'
+    assert calls[0].id == "call_1"
+    assert resp.choices[0].finish_reason == "tool_calls"
+
+
+def test_streaming_auth_required_raises(tmp_path, monkeypatch):
+    # Empty CODEX_HOME -> no auth.json -> RuntimeError on iteration.
+    with pytest.raises(RuntimeError) as ei:
+        list(
+            codex_provider.codex_provider.streaming(
+                "gpt-5.5-codex", [{"role": "user", "content": "hi"}]
+            )
+        )
+    assert "codex login" in str(ei.value)
+
+
+def test_build_headers_omits_account_id_when_none(tmp_path, monkeypatch):
+    monkeypatch.setattr(codex_provider, "account_id", lambda: None)
+    headers = codex_provider._build_headers("tok-1")
+    assert headers["Authorization"] == "Bearer tok-1"
+    assert "chatgpt-account-id" not in headers
+
+
+def test_resolve_access_token_refreshes_when_stale(tmp_path, monkeypatch):
+    _write_auth(tmp_path, {"access_token": "stale", "refresh_token": "rt-1"})
+    monkeypatch.setattr(codex_provider, "should_refresh", lambda at: True)
+    monkeypatch.setattr(codex_provider, "refresh_tokens", lambda: "fresh-token")
+    assert codex_provider._resolve_access_token() == "fresh-token"
