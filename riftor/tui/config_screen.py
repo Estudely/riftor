@@ -132,6 +132,7 @@ class ConfigScreen(ModalScreen[dict | None]):
                         yield Label("Generation", classes="config-section")
                         yield _row("Temperature", Input(value=str(self.config.temperature), id="cfg-temp"))
                         yield _row("Max tokens", Input(value=str(self.config.max_tokens), id="cfg-maxtok"))
+                        yield _row("Tool call steps", Input(value=str(self.config.max_steps), id="cfg-maxsteps"))
 
                     with Vertical(id="section-workers", classes="config-section-panel hidden"):
                         yield Label("Workers", classes="config-section")
@@ -288,6 +289,14 @@ class ConfigScreen(ModalScreen[dict | None]):
         except ValueError:
             self._fail("max tokens must be an integer")
             return
+        try:
+            max_steps = int(self.query_one("#cfg-maxsteps", Input).value)
+        except ValueError:
+            self._fail("tool call steps must be an integer")
+            return
+        if max_steps < 1:
+            self._fail("tool call steps must be at least 1")
+            return
 
         provider = self._provider
         custom = self.query_one("#cfg-model", Input).value.strip()
@@ -309,6 +318,7 @@ class ConfigScreen(ModalScreen[dict | None]):
             "api_base": self.query_one("#cfg-base", Input).value.strip() or None,
             "temperature": temperature,
             "max_tokens": max_tokens,
+            "max_steps": max_steps,
             "theme": self.query_one("#cfg-theme", Select).value,
             "lore": self.query_one("#cfg-lore", Switch).value,
             "show_thinking": self.query_one("#cfg-show-thinking", Switch).value,

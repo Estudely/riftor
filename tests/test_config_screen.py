@@ -37,7 +37,7 @@ async def test_config_modal_renders_all_fields():
             for fid, kind in [
                 ("#cfg-provider", Select), ("#cfg-model-select", Select),
                 ("#cfg-model", Input), ("#cfg-base", Input), ("#cfg-key", Input),
-                ("#cfg-temp", Input), ("#cfg-maxtok", Input),
+                ("#cfg-temp", Input), ("#cfg-maxtok", Input), ("#cfg-maxsteps", Input),
                 ("#cfg-chakla-provider", Select), ("#cfg-chakla-model-select", Select),
                 ("#cfg-chakla-custom", Input),
                 ("#cfg-label-main", Input), ("#cfg-label-worker", Input),
@@ -50,8 +50,9 @@ async def test_config_modal_renders_all_fields():
             assert len(list(screen.query(".config-section"))) == 5
             # aligned label column: one .field-label per field row. WORKERS now has
             # 3 picker rows + 2 label rows (was 1 plain input + 2 labels) => +2.
-            # +3 field rows for the DISPLAY section => 15 + 3 = 18
-            assert len(list(screen.query(".field-label"))) == 18
+            # +3 field rows for the DISPLAY section => 15 + 3 = 18, plus the
+            # GENERATION "Tool call steps" row => 19.
+            assert len(list(screen.query(".field-label"))) == 19
             await pilot.press("escape")
             await pilot.pause()
 
@@ -109,10 +110,14 @@ async def test_config_modal_saves_changes():
             await pilot.pause()
             app.screen.query_one("#cfg-temp", Input).value = "0.7"
             app.screen.query_one("#cfg-maxtok", Input).value = "4096"
+            app.screen.query_one("#cfg-maxsteps", Input).value = "24"
             app.screen.query_one("#save").press()
             await pilot.pause()
             assert app.config.temperature == 0.7
             assert app.config.max_tokens == 4096
+            # max_steps flows to both the persisted config and the live loop budget.
+            assert app.config.max_steps == 24
+            assert app.max_steps == 24
 
 
 @pytest.mark.asyncio

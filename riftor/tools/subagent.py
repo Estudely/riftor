@@ -140,7 +140,7 @@ class DispatchChaklaTool(Tool):
                         toolctx=ctx,
                         permissions=perms,
                         audit=audit,
-                        max_steps=cfg.chakla_max_steps,
+                        max_steps=cfg.max_steps,
                         yolo=ctx.yolo,
                         db_lock=db_lock,
                         grant=grant,
