@@ -58,3 +58,12 @@ def test_codex_home_defaults_to_home(monkeypatch):
     monkeypatch.delenv("CODEX_HOME", raising=False)
     from pathlib import Path
     assert ca.codex_home() == Path.home() / ".codex"
+
+
+def test_expired_token_is_not_logged_in(tmp_path, monkeypatch):
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    _write_auth(tmp_path, _make_jwt(int(time.time()) - 1))
+    status = ca.auth_status()
+    assert status.logged_in is False
+    assert status.expires_in_s == 0
+    assert "expired" in status.detail

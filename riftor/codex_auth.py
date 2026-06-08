@@ -48,7 +48,10 @@ def _jwt_exp(token: str) -> int | None:
 
 def auth_status() -> CodexAuthStatus:
     """Best-effort login status. Never raises."""
-    path = _auth_file()
+    try:
+        path = _auth_file()
+    except Exception:  # noqa: BLE001 — Path.home() raises RuntimeError in homedir-less envs
+        return CodexAuthStatus(False, None, "cannot resolve auth path — run `codex login`")
     if not path.exists():
         return CodexAuthStatus(False, None, "not logged in — run `codex login`")
     try:
