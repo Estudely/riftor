@@ -55,7 +55,7 @@ _COMMANDS = [
     "/edit-finding", "/delete-finding", "/hosts", "/services", "/report",
     "/sessions", "/resume", "/new", "/theme", "/config", "/tools", "/permissions",
     "/lore", "/cost", "/retry", "/continue", "/compact", "/copy", "/show",
-    "/timeline", "/audit", "/export", "/doctor", "/review", "/hypotheses", "/lesson", "/lessons", "/exit",
+    "/timeline", "/audit", "/export", "/doctor", "/review", "/hypotheses", "/lesson", "/lessons", "/browser", "/exit",
 ]
 
 HELP = """\
@@ -83,6 +83,7 @@ _Settings & sessions_
 - `/config` — settings panel · `/permissions` — review allow/deny rules
 - `/lore` — toggle the rift persona · `/audit` — recent tool-call audit log
 - `/doctor` — check which external recon tools (nmap/httpx/…) are installed
+- `/browser [headed|headless|close]` — browser status / mode / teardown
 - `/review` — self-critique findings for false positives before reporting
 - `/hypotheses` — list tracked hypotheses (open leads)
 - `/lesson <text>` — teach a durable lesson (persists across sessions)
@@ -184,6 +185,7 @@ class RiftorApp(App):
         )
         self._rate_times: list[float] = []
         self._autoscroll = True
+        self._browser_hint_shown = False
 
     def compose(self) -> ComposeResult:
         yield Banner(id="banner")
@@ -235,6 +237,14 @@ class RiftorApp(App):
             self._note(
                 "rift online · set scope with /scope add <target> before tasking the agent"
             )
+
+    async def on_unmount(self) -> None:
+        mgr = self.toolctx.browser
+        if mgr is not None and mgr.launched:
+            try:
+                await mgr.close()
+            except Exception:  # noqa: BLE001
+                pass
 
     def _toolchain_heads_up(self) -> None:
         """One-line note if recon tools are missing — surfaced up front, not mid-task."""
@@ -499,6 +509,7 @@ class RiftorApp(App):
             "/audit": self._audit_cmd,
             "/export": self._export_cmd,
             "/doctor": self._doctor_cmd,
+            "/browser": lambda: self._browser_cmd(arg),
             "/review": self._review_cmd,
             "/hypotheses": self._hypotheses_cmd,
             "/lesson": lambda: self._lesson_cmd(arg),
@@ -962,6 +973,26 @@ class RiftorApp(App):
 
         self._markdown(render_markdown(check_toolchain()))
 
+    def _browser_cmd(self, arg: str) -> None:
+        sub = (arg or "").strip().lower()
+        mgr = self.toolctx.browser
+        if sub in ("headed", "headless"):
+            self.config.browser_headless = sub == "headless"
+            self.config.save()
+            self._note(f"browser mode → {sub} (applies on next launch)")
+            return
+        if sub == "close":
+            if mgr is not None and mgr.launched:
+                self.run_worker(mgr.close(), exclusive=False)
+                self._note("browser closed")
+            else:
+                self._note("no browser running")
+            return
+        mode = "headless" if self.config.browser_headless else "headed"
+        profile = "persistent" if self.config.browser_persistent_profile else "incognito"
+        state = "running" if (mgr and mgr.launched) else "not launched"
+        self._note(f"browser: {state} · {mode} · {profile} (toggle in /config)")
+
     def _export_cmd(self) -> None:
         import json
         import shutil
@@ -1378,6 +1409,13 @@ class RiftorApp(App):
             # "once" → approve this single call, remember nothing
 
         audit_preview = preview + (" [scope-override]" if scope_warning else "")
+        if call.name.startswith("browser_") and not self._browser_hint_shown:
+            self._browser_hint_shown = True
+            if not self.config.browser_persistent_profile:
+                self._note(
+                    "browser running in incognito (nothing saved) · enable persistent "
+                    "profile in /config to keep cookies/logins across runs"
+                )
         start = time.monotonic()
         try:
             result = await tool.execute(call.arguments, self.toolctx)
