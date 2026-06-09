@@ -164,6 +164,38 @@ async def test_snapshot_text_tags_interactive_nodes(monkeypatch, tmp_workdir):
 
 
 @pytest.mark.asyncio
+async def test_snapshot_drops_noise_text_leaves(tmp_workdir):
+    from riftor.tools import browser as bmod
+
+    tree = {
+        "role": "WebArea",
+        "name": "",
+        "children": [
+            {"role": "button", "name": "Submit", "children": [
+                {"role": "StaticText", "name": "Submit", "children": [
+                    {"role": "InlineTextBox", "name": "Submit"},
+                ]},
+            ]},
+            {"role": "ListMarker", "name": "•"},
+        ],
+    }
+
+    class _AxPage:
+        class accessibility:
+            @staticmethod
+            async def snapshot(interesting_only=False):
+                return tree
+
+    mgr = bmod.BrowserManager(tmp_workdir, headless=True, persistent=False)
+    mgr._page = _AxPage()
+    text = await mgr.snapshot_text()
+    assert "button \"Submit\" [ref=e" in text
+    assert "StaticText" not in text
+    assert "InlineTextBox" not in text
+    assert "ListMarker" not in text
+
+
+@pytest.mark.asyncio
 async def test_resolve_unknown_ref_raises(tmp_workdir):
     from riftor.tools import browser as bmod
 

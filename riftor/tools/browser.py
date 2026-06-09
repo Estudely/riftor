@@ -112,6 +112,11 @@ class BrowserManager:
         "menuitem", "tab", "switch", "searchbox", "slider",
     }
 
+    # Low-value text leaves the legacy accessibility.snapshot() folded into the
+    # parent's name; CDP's getFullAXTree surfaces them as separate nodes. Drop
+    # them so the model-facing snapshot stays compact (token economy).
+    _NOISE_ROLES = {"StaticText", "InlineTextBox", "ListMarker", "LineBreak"}
+
     async def _ax_tree(self, page: "Page") -> dict | None:
         """Return a nested ``{role, name, level?, children}`` accessibility tree.
 
@@ -182,6 +187,11 @@ class BrowserManager:
             role = node.get("role", "")
             if role in ("WebArea", "RootWebArea", "", "generic", "none"):
                 # elided container: keep children at the parent's depth (no extra indent)
+                for child in node.get("children", []) or []:
+                    walk(child, depth)
+                return
+            if role in self._NOISE_ROLES:
+                # drop redundant text leaves; recurse children defensively
                 for child in node.get("children", []) or []:
                     walk(child, depth)
                 return
