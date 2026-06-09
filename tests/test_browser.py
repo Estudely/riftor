@@ -74,3 +74,43 @@ async def test_manager_close_idempotent(monkeypatch, tmp_workdir):
     assert ctx_obj.closed
     await mgr.close()  # second close must not raise
     assert not mgr.launched
+
+
+@pytest.mark.asyncio
+async def test_launch_failure_reaps_driver_and_raises(monkeypatch, tmp_workdir):
+    from riftor.tools import browser as bmod
+
+    started = {"stopped": False}
+
+    class _FakePW:
+        async def stop(self):
+            started["stopped"] = True
+
+    async def fake_start():
+        return _FakePW()
+
+    async def boom(self, profile):
+        raise RuntimeError("no chromium")
+
+    async def install_fails(self):
+        return False
+
+    # async_playwright().start() → our fake driver
+    class _FakeAP:
+        def start(self):
+            return fake_start()
+
+    # _launch does `from playwright.async_api import async_playwright` at call
+    # time, so patch the attribute on the playwright.async_api module itself —
+    # the `from ... import` re-reads it each call.
+    monkeypatch.setattr("playwright.async_api.async_playwright", lambda: _FakeAP())
+    monkeypatch.setattr(bmod.BrowserManager, "_do_launch", boom)
+    monkeypatch.setattr(bmod.BrowserManager, "_try_install", install_fails)
+
+    mgr = bmod.BrowserManager(tmp_workdir, headless=True, persistent=False)
+    with pytest.raises(bmod.BrowserError):
+        await mgr.page()
+    # driver was reaped (close() called _pw.stop() and reset handles)
+    assert mgr._pw is None
+    assert started["stopped"] is True
+    assert not mgr.launched

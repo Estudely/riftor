@@ -52,6 +52,7 @@ class BrowserManager:
             context, page = await self._do_launch(profile)
         except Exception as exc:  # noqa: BLE001 — likely missing browser binaries
             if not await self._try_install():
+                await self.close()  # reap the dangling driver before raising
                 raise BrowserError(
                     "Chromium not available and auto-install failed. "
                     "Run: playwright install chromium"
@@ -79,7 +80,11 @@ class BrowserManager:
                 sys.executable, "-m", "playwright", "install", "chromium",
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
             )
-            await proc.communicate()
+            try:
+                await asyncio.wait_for(proc.communicate(), timeout=300)
+            except asyncio.TimeoutError:
+                proc.kill()
+                return False
             return proc.returncode == 0
         except Exception:  # noqa: BLE001
             return False
