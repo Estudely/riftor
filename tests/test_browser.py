@@ -114,3 +114,42 @@ async def test_launch_failure_reaps_driver_and_raises(monkeypatch, tmp_workdir):
     assert mgr._pw is None
     assert started["stopped"] is True
     assert not mgr.launched
+
+
+@pytest.mark.asyncio
+async def test_snapshot_text_tags_interactive_nodes(monkeypatch, tmp_workdir):
+    from riftor.tools import browser as bmod
+
+    tree = {
+        "role": "WebArea",
+        "name": "",
+        "children": [
+            {"role": "heading", "name": "Sign in", "level": 1},
+            {"role": "textbox", "name": "Username"},
+            {"role": "button", "name": "Submit"},
+        ],
+    }
+
+    class _AxPage:
+        class accessibility:
+            @staticmethod
+            async def snapshot(interesting_only=False):
+                return tree
+
+    mgr = bmod.BrowserManager(tmp_workdir, headless=True, persistent=False)
+    mgr._page = _AxPage()  # inject a fake page
+    text = await mgr.snapshot_text()
+    assert "heading \"Sign in\"" in text
+    assert "textbox \"Username\" [ref=e" in text
+    assert "button \"Submit\" [ref=e" in text
+    # non-interactive heading gets no ref
+    assert "heading \"Sign in\" [ref=" not in text
+
+
+@pytest.mark.asyncio
+async def test_resolve_unknown_ref_raises(tmp_workdir):
+    from riftor.tools import browser as bmod
+
+    mgr = bmod.BrowserManager(tmp_workdir, headless=True, persistent=False)
+    with pytest.raises(KeyError):
+        mgr.resolve_ref("e99")

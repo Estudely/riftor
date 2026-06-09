@@ -104,6 +104,60 @@ class BrowserManager:
             lambda r: self.network_log.append(f"{r.method} {r.url}"),
         )
 
+    # roles the model can act on → these get a [ref=eN] tag
+    _INTERACTIVE = {
+        "button", "link", "textbox", "checkbox", "radio", "combobox",
+        "menuitem", "tab", "switch", "searchbox", "slider",
+    }
+
+    async def snapshot_text(self) -> str:
+        """Compact, ref-tagged accessibility tree of the current page. Interactive
+        nodes get a stable [ref=eN] id used by click/type. Refs reset each call."""
+        page = await self.page()
+        tree = await page.accessibility.snapshot(interesting_only=False)
+        self._refs.clear()
+        self._ref_targets: dict[str, dict] = {}
+        lines: list[str] = []
+        counter = {"n": 0}
+
+        def walk(node: dict, depth: int) -> None:
+            role = node.get("role", "")
+            if role in ("WebArea", "RootWebArea", "", "generic", "none"):
+                for child in node.get("children", []) or []:
+                    walk(child, depth)
+                return
+            name = node.get("name", "") or ""
+            indent = "  " * depth
+            label = f'{role} "{name}"' if name else role
+            if node.get("level"):
+                label += f" [level={node['level']}]"
+            if role in self._INTERACTIVE:
+                counter["n"] += 1
+                ref = f"e{counter['n']}"
+                self._ref_targets[ref] = node
+                label += f" [ref={ref}]"
+            lines.append(f"{indent}- {label}")
+            for child in node.get("children", []) or []:
+                walk(child, depth + 1)
+
+        if tree:
+            walk(tree, 0)
+        return "\n".join(lines) if lines else "(empty page)"
+
+    def resolve_ref(self, ref: str) -> "Locator":
+        """Map a ref id from the last snapshot to a Playwright locator. The
+        accessibility node carries role+name; we locate by ARIA role+name."""
+        node = getattr(self, "_ref_targets", {}).get(ref)
+        if node is None:
+            raise KeyError(ref)
+        role = node.get("role", "")
+        name = node.get("name", "") or ""
+        page = self._page
+        assert page is not None
+        if name:
+            return page.get_by_role(role, name=name).first
+        return page.get_by_role(role).first
+
     async def close(self) -> None:
         """Idempotent teardown."""
         try:
