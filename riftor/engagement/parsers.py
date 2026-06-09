@@ -35,6 +35,15 @@ def _sev(value: str) -> str:
     return value if value in _SEVERITIES else "info"
 
 
+def _valid_port(raw: str) -> bool:
+    """A TCP/UDP port is 0..65535. Reject anything outside so malformed scan
+    output doesn't persist garbage services into the engagement DB."""
+    try:
+        return 0 <= int(raw) <= 65535
+    except (TypeError, ValueError):
+        return False
+
+
 def _host_port(url: str) -> tuple[str, int | None]:
     if "://" not in url:
         url = "//" + url
@@ -70,6 +79,9 @@ def parse_nmap(text: str) -> ParsedScan:
             for chunk in grep.group(2).split(","):
                 fields = chunk.strip().split("/")
                 if len(fields) >= 7 and fields[1] == "open":
+                    if not _valid_port(fields[0]):
+                        scan.skipped += 1
+                        continue
                     scan.services.append(
                         {
                             "host": ghost,
@@ -87,6 +99,9 @@ def parse_nmap(text: str) -> ParsedScan:
         if port and host:
             number, proto, state, service, version = port.groups()
             if state != "open":
+                continue
+            if not _valid_port(number):
+                scan.skipped += 1
                 continue
             scan.services.append(
                 {

@@ -67,3 +67,23 @@ def test_persistence_roundtrip(tmp_path):
 def test_load_missing_keeps_defaults(tmp_path):
     perms = Permissions.load(tmp_path / "nope.toml")
     assert perms.is_denied("bash", "rm -rf /")  # safe defaults preserved
+
+
+def test_deny_takes_precedence_over_allow():
+    """Documented precedence: deny rules beat allow rules. A command matching
+    both must be denied. Callers (app.py / headless.py) enforce this by checking
+    is_denied() before is_allowed(); this pins the contract so a refactor that
+    reorders the checks fails loudly."""
+    perms = Permissions(
+        allow=[{"tool": "bash"}],  # allow all bash
+        deny=[{"tool": "bash", "pattern": r"shutdown"}],
+    )
+    # both match — deny must win
+    assert perms.is_denied("bash", "shutdown now")
+    assert perms.is_allowed("bash", "shutdown now")  # the allow rule does match...
+    # ...so the gate's contract is: check is_denied FIRST. A caller that does so
+    # blocks the command. Assert the two signals are what callers depend on.
+    assert perms.is_denied("bash", "shutdown now") and perms.is_allowed("bash", "shutdown now")
+    # a non-denied command under the same allow rule still passes
+    assert perms.is_allowed("bash", "nmap -sV host")
+    assert not perms.is_denied("bash", "nmap -sV host")

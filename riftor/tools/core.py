@@ -13,7 +13,13 @@ import shutil
 import urllib.request
 from pathlib import Path
 
-from riftor.tools.base import Tool, ToolContext, ToolResult, resolve_path
+from riftor.tools.base import (
+    PathOutsideWorkdir,
+    Tool,
+    ToolContext,
+    ToolResult,
+    resolve_path,
+)
 
 
 def _unified_diff(old: str, new: str, path: str, max_lines: int = 200) -> str:
@@ -91,7 +97,10 @@ class ReadTool(Tool):
         return str(args.get("path", ""))
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
-        path = resolve_path(ctx, args["path"])
+        try:
+            path = resolve_path(ctx, args["path"])
+        except PathOutsideWorkdir as exc:
+            return ToolResult(f"error: {exc}", is_error=True)
         if not path.exists():
             return ToolResult(f"error: no such file: {path}", is_error=True)
         if path.is_dir():
@@ -128,7 +137,10 @@ class WriteTool(Tool):
         return f"{args.get('path', '')}  ({len(content)} bytes)"
 
     def confirm_detail(self, args: dict, ctx: ToolContext) -> str | None:
-        path = resolve_path(ctx, str(args.get("path", "")))
+        try:
+            path = resolve_path(ctx, str(args.get("path", "")))
+        except PathOutsideWorkdir:
+            return None  # execute() refuses it; no diff to preview
         new = str(args.get("content", ""))
         old = ""
         if path.exists() and path.is_file():
@@ -143,7 +155,10 @@ class WriteTool(Tool):
         return _unified_diff(old, new, path.name)
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
-        path = resolve_path(ctx, args["path"])
+        try:
+            path = resolve_path(ctx, args["path"])
+        except PathOutsideWorkdir as exc:
+            return ToolResult(f"error: {exc}", is_error=True)
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(args.get("content", ""), encoding="utf-8")
@@ -175,7 +190,10 @@ class EditTool(Tool):
         return str(args.get("path", ""))
 
     def confirm_detail(self, args: dict, ctx: ToolContext) -> str | None:
-        path = resolve_path(ctx, str(args.get("path", "")))
+        try:
+            path = resolve_path(ctx, str(args.get("path", "")))
+        except PathOutsideWorkdir:
+            return None  # execute() refuses it; no diff to preview
         if not path.exists() or not path.is_file():
             return None
         try:
@@ -190,7 +208,10 @@ class EditTool(Tool):
         return _unified_diff(text, updated, path.name)
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
-        path = resolve_path(ctx, args["path"])
+        try:
+            path = resolve_path(ctx, args["path"])
+        except PathOutsideWorkdir as exc:
+            return ToolResult(f"error: {exc}", is_error=True)
         if not path.exists():
             return ToolResult(f"error: no such file: {path}", is_error=True)
         old = args.get("old_string", "")
@@ -229,7 +250,10 @@ class GlobTool(Tool):
     }
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
-        base = resolve_path(ctx, args.get("path", "."))
+        try:
+            base = resolve_path(ctx, args.get("path", "."))
+        except PathOutsideWorkdir as exc:
+            return ToolResult(f"error: {exc}", is_error=True)
         try:
             matches = [p for p in base.glob(args["pattern"]) if p.is_file()]
         except Exception as exc:  # noqa: BLE001
@@ -255,7 +279,10 @@ class GrepTool(Tool):
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         pattern = args["pattern"]
-        base = resolve_path(ctx, args.get("path", "."))
+        try:
+            base = resolve_path(ctx, args.get("path", "."))
+        except PathOutsideWorkdir as exc:
+            return ToolResult(f"error: {exc}", is_error=True)
         glob = args.get("glob")
         if shutil.which("rg"):
             cmd = ["rg", "--line-number", "--no-heading", "--color", "never"]

@@ -60,11 +60,31 @@ class ToolContext:
     browser: "BrowserManager | None" = None
 
 
+class PathOutsideWorkdir(ValueError):
+    """A tool was asked to touch a path outside the engagement working dir."""
+
+
 def resolve_path(ctx: ToolContext, raw: str) -> Path:
+    """Resolve ``raw`` against the engagement workdir and keep it contained there.
+
+    File tools (read/write/edit/glob/grep) are sandboxed to ``ctx.workdir`` so the
+    agent can't reach ``/etc/passwd`` or climb out with ``../``. Containment is a
+    guardrail, so — like scope and the permission engine — YOLO mode bypasses it.
+    Raises :class:`PathOutsideWorkdir` for an escaping path; callers turn that into
+    an error ``ToolResult``.
+    """
     path = Path(raw).expanduser()
     if not path.is_absolute():
         path = ctx.workdir / path
-    return path
+    if ctx.yolo:
+        return path
+    workdir = ctx.workdir.resolve()
+    resolved = path.resolve()
+    if resolved != workdir and workdir not in resolved.parents:
+        raise PathOutsideWorkdir(
+            f"path is outside the working directory ({ctx.workdir}): {raw}"
+        )
+    return resolved
 
 
 class Tool(ABC):
