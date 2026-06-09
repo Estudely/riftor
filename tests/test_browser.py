@@ -187,3 +187,14 @@ async def test_navigate_without_browser_errors_cleanly(toolctx):
     # toolctx.browser is None and config is None → tool must error, not crash
     r = await tools.get("browser_navigate").execute({"url": "https://example.com"}, toolctx)
     assert r.is_error
+
+
+def test_config_browser_defaults_and_toml():
+    from riftor.config import Config
+
+    cfg = Config()
+    assert cfg.browser_headless is True
+    assert cfg.browser_persistent_profile is False
+    toml = cfg._to_toml()
+    assert "browser_headless = true" in toml
+    assert "browser_persistent_profile = false" in toml
