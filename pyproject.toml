@@ -20,6 +20,7 @@ dependencies = [
     "textual>=0.79",
     "litellm>=1.55",
     "pydantic>=2.6",
+    "playwright>=1.44",
 ]
 
 [project.optional-dependencies]
@@ -29,6 +30,9 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "pyright>=1.1.380",
+]
+browser-ui = [
+    "textual-image[textual]>=0.13; python_version >= '3.12'",
 ]
 
 [project.urls]
