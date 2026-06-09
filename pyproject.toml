@@ -20,19 +20,26 @@ dependencies = [
     "textual>=0.79",
     "litellm>=1.55",
     "pydantic>=2.6",
-    "playwright>=1.44",
 ]
 
 [project.optional-dependencies]
+# Browser automation (the browser_* tools). Optional because Playwright pulls in
+# ~hundreds of MB of Chromium binaries that a terminal-only run never needs; the
+# tools degrade with a clear "install riftor[browser]" hint when it's absent.
+browser = [
+    "playwright>=1.44",
+]
+# Inline screenshot rendering in the terminal (Python 3.12+).
+browser-ui = [
+    "textual-image[textual]>=0.13; python_version >= '3.12'",
+]
 dev = [
+    "riftor[browser]",  # so the browser tests/smoke actually exercise Playwright
     "textual-dev>=1.5",
     "ruff>=0.6",
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "pyright>=1.1.380",
-]
-browser-ui = [
-    "textual-image[textual]>=0.13; python_version >= '3.12'",
 ]
 
 [project.urls]

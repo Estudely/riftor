@@ -15,7 +15,8 @@ name: release
 #   2. open a PR with the bump, get CI green, and merge it to main
 #   3. tag the merged commit: git checkout main && git pull
 #                             git tag vX.Y.Z && git push origin vX.Y.Z
-#   4. this workflow builds + publishes; PyPI rejects duplicate versions.
+#   4. this workflow re-runs the full CI suite on the tag, then builds +
+#      publishes; PyPI rejects duplicate versions.
 # See CONTRIBUTING.md "Releases" for why tagging before the merge is unsafe.
 
 on:
@@ -24,7 +25,14 @@ on:
       - "v*"
 
 jobs:
+  # Run the full CI suite (lint/typecheck/test/smoke on 3.11+3.12, plus the
+  # docker build) against the tagged commit BEFORE building/publishing. The
+  # "land the bump, get CI green, then tag" flow is procedure; this enforces it.
+  ci:
+    uses: ./.github/workflows/ci.yml
+
   build:
+    needs: ci
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
