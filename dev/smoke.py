@@ -328,6 +328,38 @@ async def main() -> None:
         assert app.query_one("#prompt", Input).value == "first task", app.query_one("#prompt", Input).value
         app.query_one("#prompt", Input).clear()
 
+        # multi-line paste collapses to a chip; submit expands to the full text
+        from textual.events import Paste
+
+        from riftor.tui.app import PromptInput
+
+        prompt = app.query_one("#prompt", PromptInput)
+        prompt.focus()
+        pasted = "\n".join(f"line {i}" for i in range(29))
+        prompt.post_message(Paste(pasted))
+        await pilot.pause()
+        assert prompt.value == "[Pasted ~29 lines]", prompt.value
+        await pilot.press("enter")
+        await pilot.pause()
+        app.action_cancel()
+        # the full 29-line text — not just the first line — reaches the agent
+        assert app._history[-1] == pasted, repr(app._history[-1])
+        assert prompt.value == "", prompt.value  # field cleared after submit
+        # recalling it shows the chip again, and re-submitting still expands
+        prompt.focus()
+        await pilot.press("up")
+        await pilot.pause()
+        assert prompt.value == "[Pasted ~29 lines]", prompt.value
+        prompt.clear()
+        prompt.reset_pastes()
+
+        # a single-line paste is unchanged (native Input behavior)
+        prompt.post_message(Paste("just one line"))
+        await pilot.pause()
+        assert prompt.value == "just one line", prompt.value
+        prompt.clear()
+        app.query_one("#prompt", Input).clear()
+
         # /export writes an archive
         inp.value = "/export"
         await pilot.press("enter")

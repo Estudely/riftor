@@ -10,12 +10,14 @@ findings live in the engagement state and show in the status bar.
 from __future__ import annotations
 
 import difflib
+import re
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from rich.highlighter import RegexHighlighter
 from rich.text import Text
-from textual import work
+from textual import events, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.command import Hit, Hits
@@ -48,6 +50,94 @@ _CONTEXT_WINDOWS = {
     "gemini/": 1_000_000, "groq/": 128_000, "ollama": 8_192,
 }
 _DEFAULT_WINDOW = 128_000
+
+
+class _ChipHighlighter(RegexHighlighter):
+    """Paints the ``[Pasted ~N lines]`` chip in the active riftor palette.
+
+    The style is read from the live theme on each render (via ``palette``) so the
+    chip tracks the rift glow and re-tints when the operator switches themes.
+    """
+
+    _CHIP_RE = re.compile(r"\[Pasted ~\d+ lines(?: \(\d+\))?\]")
+
+    def __init__(self, widget) -> None:
+        super().__init__()
+        self._widget = widget
+
+    def highlight(self, text: Text) -> None:  # type: ignore[override]
+        p = palette(self._widget.app)
+        # Violet-on-panel chip with a faint border tint — matches the user/banner
+        # accent rather than a clashing flat orange.
+        style = f"{p['violet']} on {p['user-bg']}"
+        for match in self._CHIP_RE.finditer(text.plain):
+            text.stylize(style, match.start(), match.end())
+
+
+class PromptInput(Input):
+    """Single-line prompt that collapses a multi-line paste into a chip.
+
+    Textual's ``Input`` keeps only the first line of a pasted block. Instead we
+    show a compact ``[Pasted ~N lines]`` placeholder in the field and stash the
+    full text, expanding it back on submit. Single-line pastes are unchanged.
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        # placeholder chip text -> the full pasted/recalled text it stands for
+        self._pastes: dict[str, str] = {}
+        self.highlighter = _ChipHighlighter(self)
+
+    def _chip_for(self, text: str) -> str:
+        """Register ``text`` under a unique chip placeholder and return the chip."""
+        n = len(text.splitlines())
+        base = f"[Pasted ~{n} lines]"
+        placeholder = base
+        counter = 2
+        # Reuse the chip if it already maps to this exact text; otherwise pick a
+        # fresh, unique placeholder so distinct pastes never collide.
+        while placeholder in self._pastes and self._pastes[placeholder] != text:
+            placeholder = f"[Pasted ~{n} lines ({counter})]"
+            counter += 1
+        self._pastes[placeholder] = text
+        return placeholder
+
+    def _on_paste(self, event: events.Paste) -> None:
+        text = event.text
+        if text and len(text.splitlines()) > 1:
+            placeholder = self._chip_for(text)
+            selection = self.selection
+            if selection.is_empty:
+                self.insert_text_at_cursor(placeholder)
+            else:
+                self.replace(placeholder, *selection)
+            # Stop both bubbling and the base Input._on_paste (which would
+            # otherwise also run via the MRO and insert the first line).
+            event.stop()
+            event.prevent_default()
+        # Single-line paste: do nothing here and let the base Input._on_paste
+        # run via the normal MRO dispatch (native behavior, unchanged).
+
+    def expand(self, value: str) -> str:
+        """Replace any known chip placeholders in ``value`` with their full text."""
+        for placeholder, full in self._pastes.items():
+            if placeholder in value:
+                value = value.replace(placeholder, full)
+        return value
+
+    def register_recall(self, value: str) -> str:
+        """Return a single-line view of ``value`` for history recall.
+
+        Multi-line history entries are shown as a chip so the field stays on one
+        line; ``expand`` turns the chip back into the full text on submit.
+        """
+        if "\n" in value:
+            return self._chip_for(value)
+        return value
+
+    def reset_pastes(self) -> None:
+        self._pastes.clear()
+
 
 # Commands offered for fuzzy "did you mean" suggestions.
 _COMMANDS = [
@@ -190,7 +280,7 @@ class RiftorApp(App):
         yield VerticalScroll(id="chat")
         yield StatusBar(self.config.model, lore=self.config.lore, yolo=self.yolo)
         yield CommandDropdown(_COMMANDS, id="cmd-dropdown")
-        yield Input(placeholder="task riftor — or /help", id="prompt")
+        yield PromptInput(placeholder="task riftor — or /help", id="prompt")
 
     def get_css_variables(self) -> dict[str, str]:
         variables = dict(css_variable_defaults())
@@ -224,7 +314,7 @@ class RiftorApp(App):
             self.register_theme(theme)
         self._apply_keybindings()
         self._apply_theme(self.config.theme)
-        self.query_one("#prompt", Input).focus()
+        self.query_one("#prompt", PromptInput).focus()
         self.status.set_stage(self.engagement.stage)
         self._refresh_status()
         warning = self.config.model_warning()
@@ -371,15 +461,18 @@ class RiftorApp(App):
             if text not in _COMMANDS:
                 cmd = self.cmd_dropdown.highlighted_command
                 if cmd:
-                    inp = self.query_one("#prompt", Input)
+                    inp = self.query_one("#prompt", PromptInput)
                     inp.value = cmd + " "
                     inp.cursor_position = len(inp.value)
                     self.cmd_dropdown.hide()
                 return
             self.cmd_dropdown.hide()
 
-        text = event.value.strip()
-        self.query_one("#prompt", Input).clear()
+        inp = self.query_one("#prompt", PromptInput)
+        # Expand any [Pasted ~N lines] chip back to its full text before use.
+        text = inp.expand(event.value).strip()
+        inp.clear()
+        inp.reset_pastes()
         self._history_idx = None
         if not text:
             return
@@ -400,7 +493,7 @@ class RiftorApp(App):
             self.cmd_dropdown.hide()
 
     def on_key(self, event) -> None:
-        inp = self.query_one("#prompt", Input)
+        inp = self.query_one("#prompt", PromptInput)
 
         # Dropdown navigation — takes priority over history recall.
         if self.cmd_dropdown.visible and inp.has_focus:
@@ -444,7 +537,8 @@ class RiftorApp(App):
                 inp.value = ""
                 event.prevent_default()
                 return
-        inp.value = self._history[self._history_idx]
+        # Multi-line history entries recall as a chip so the field stays one line.
+        inp.value = inp.register_recall(self._history[self._history_idx])
         inp.cursor_position = len(inp.value)
         event.prevent_default()
 
