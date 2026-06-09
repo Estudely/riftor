@@ -101,33 +101,40 @@ async def _run(cfg: Config, workdir: Path, prompt: str, scope_file: str | None, 
 
     context.add_user(prompt)
     max_steps = 10**9 if yolo else cfg.max_steps
-    for _ in range(max_steps):
-        context.repair()
-        text_parts: list[str] = []
-        turn = None
-        try:
-            async for event, payload in provider.stream_turn(context.messages, schemas):
-                if event == "thinking":
-                    if cfg.show_thinking:
-                        # reasoning goes to stderr so stdout stays the clean answer
-                        sys.stderr.write(str(payload))
-                        sys.stderr.flush()
-                elif event == "text":
-                    sys.stdout.write(str(payload))
-                    sys.stdout.flush()
-                    text_parts.append(str(payload))
-                elif event == "done":
-                    turn = payload  # type: ignore[assignment]  # ("done", Turn)
-        except ProviderError as exc:
-            print(f"\nriftor: provider error [{exc.kind}] — {exc}", file=sys.stderr)
-            return 1
-        if turn is None:
-            break
-        context.add_message(turn.assistant_message)
-        if not turn.tool_calls:
-            break
-        for call in turn.tool_calls:
-            await _run_tool_headless(call, engagement, permissions, audit, toolctx, context, yolo=yolo)
+    try:
+        for _ in range(max_steps):
+            context.repair()
+            text_parts: list[str] = []
+            turn = None
+            try:
+                async for event, payload in provider.stream_turn(context.messages, schemas):
+                    if event == "thinking":
+                        if cfg.show_thinking:
+                            # reasoning goes to stderr so stdout stays the clean answer
+                            sys.stderr.write(str(payload))
+                            sys.stderr.flush()
+                    elif event == "text":
+                        sys.stdout.write(str(payload))
+                        sys.stdout.flush()
+                        text_parts.append(str(payload))
+                    elif event == "done":
+                        turn = payload  # type: ignore[assignment]  # ("done", Turn)
+            except ProviderError as exc:
+                print(f"\nriftor: provider error [{exc.kind}] — {exc}", file=sys.stderr)
+                return 1
+            if turn is None:
+                break
+            context.add_message(turn.assistant_message)
+            if not turn.tool_calls:
+                break
+            for call in turn.tool_calls:
+                await _run_tool_headless(call, engagement, permissions, audit, toolctx, context, yolo=yolo)
+    finally:
+        if toolctx.browser is not None and toolctx.browser.launched:
+            try:
+                await toolctx.browser.close()
+            except Exception:  # noqa: BLE001
+                pass
     print()  # trailing newline
     return 0
 
