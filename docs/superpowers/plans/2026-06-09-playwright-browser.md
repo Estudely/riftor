@@ -1267,6 +1267,11 @@ async def test_real_navigate_snapshot_click(tmp_workdir):
     assert refs, r.content
     rc = await tools.get("browser_click").execute({"ref": refs[0]}, ctx)
     assert not rc.is_error
+    # HARDENING (from Task 4 review): the click must actually ACTUATE — not just
+    # return without error — to catch any AX-role vs ARIA-role mismatch in
+    # resolve_ref. The fixture's Submit button sets document.title='clicked'.
+    rt = await tools.get("browser_eval").execute({"js": "document.title"}, ctx)
+    assert "clicked" in rt.content
     # screenshot writes a file
     rs = await tools.get("browser_screenshot").execute({}, ctx)
     assert not rs.is_error
