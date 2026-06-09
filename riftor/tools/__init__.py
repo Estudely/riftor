@@ -31,6 +31,16 @@ from riftor.tools.engagement import (
     SetStageTool,
 )
 from riftor.tools.subagent import DispatchChaklaTool
+from riftor.tools.browser import (
+    BrowserClickTool,
+    BrowserConsoleMessagesTool,
+    BrowserEvalTool,
+    BrowserNavigateTool,
+    BrowserNetworkRequestsTool,
+    BrowserScreenshotTool,
+    BrowserSnapshotTool,
+    BrowserTypeTool,
+)
 
 # Order is roughly safe -> mutating; it's also the order shown to the model.
 ALL_TOOLS: list[Tool] = [
@@ -40,6 +50,13 @@ ALL_TOOLS: list[Tool] = [
     GlobTool(),
     GrepTool(),
     WebFetchTool(),
+    BrowserNavigateTool(),
+    BrowserSnapshotTool(),
+    BrowserClickTool(),
+    BrowserTypeTool(),
+    BrowserScreenshotTool(),
+    BrowserConsoleMessagesTool(),
+    BrowserNetworkRequestsTool(),
     SetStageTool(),
     ImportScanTool(),
     RecordServiceTool(),
@@ -58,6 +75,7 @@ ALL_TOOLS: list[Tool] = [
     WriteTool(),
     EditTool(),
     BashTool(),
+    BrowserEvalTool(),
 ]
 
 _BY_NAME = {t.name: t for t in ALL_TOOLS}

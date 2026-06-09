@@ -11,6 +11,8 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from riftor.tools.base import Tool, ToolContext, ToolResult
+
 if TYPE_CHECKING:
     from playwright.async_api import Locator, Page
 
@@ -181,3 +183,218 @@ class BrowserManager:
         self._page = None
         self._pw = None
         self._ref_targets.clear()
+
+
+def _ensure_manager(ctx: ToolContext) -> "BrowserManager | None":
+    """Get-or-create the session BrowserManager from ctx. Returns None if there's
+    no config to derive settings from (bare test contexts)."""
+    if ctx.browser is not None:
+        return ctx.browser
+    if ctx.config is None:
+        return None
+    mgr = BrowserManager(
+        ctx.workdir,
+        headless=getattr(ctx.config, "browser_headless", True),
+        persistent=getattr(ctx.config, "browser_persistent_profile", False),
+    )
+    ctx.browser = mgr
+    return mgr
+
+
+class _BrowserTool(Tool):
+    """Shared error handling for browser tools."""
+
+    async def _manager(self, ctx: ToolContext) -> "BrowserManager":
+        mgr = _ensure_manager(ctx)
+        if mgr is None:
+            raise BrowserError("no active browser context (config unavailable)")
+        return mgr
+
+
+class BrowserNavigateTool(_BrowserTool):
+    name = "browser_navigate"
+    description = "Navigate the browser to a URL. Returns load status and a ref-tagged accessibility snapshot of the resulting page."
+    scope_sensitive = True
+    parameters = {
+        "type": "object",
+        "properties": {"url": {"type": "string", "description": "Absolute URL to load."}},
+        "required": ["url"],
+    }
+
+    def preview(self, args: dict) -> str:
+        return str(args.get("url", ""))[:300]
+
+    async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        url = str(args.get("url", "")).strip()
+        if not url:
+            return ToolResult("error: empty url", is_error=True)
+        try:
+            mgr = await self._manager(ctx)
+            page = await mgr.page()
+            resp = await page.goto(url, wait_until="domcontentloaded")
+            status = resp.status if resp else "?"
+            snap = await mgr.snapshot_text()
+            return ToolResult(f"navigated → {page.url} [{status}]\n\n{snap}").truncated(
+                ctx.max_result_chars
+            )
+        except BrowserError as exc:
+            return ToolResult(f"error: {exc}", is_error=True)
+        except Exception as exc:  # noqa: BLE001
+            return ToolResult(f"error: navigation failed: {exc}", is_error=True)
+
+
+class BrowserSnapshotTool(_BrowserTool):
+    name = "browser_snapshot"
+    description = "Return a ref-tagged accessibility snapshot of the current page."
+    parameters = {"type": "object", "properties": {}}
+
+    async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        try:
+            mgr = await self._manager(ctx)
+            if not mgr.launched:
+                return ToolResult("error: no page loaded; use browser_navigate first", is_error=True)
+            return ToolResult(await mgr.snapshot_text()).truncated(ctx.max_result_chars)
+        except Exception as exc:  # noqa: BLE001
+            return ToolResult(f"error: {exc}", is_error=True)
+
+
+class BrowserClickTool(_BrowserTool):
+    name = "browser_click"
+    description = "Click an element by its [ref=eN] id from the latest snapshot. Returns the new page snapshot."
+    parameters = {
+        "type": "object",
+        "properties": {"ref": {"type": "string", "description": "Element ref, e.g. e9."}},
+        "required": ["ref"],
+    }
+
+    def preview(self, args: dict) -> str:
+        return f"ref={args.get('ref', '')}"
+
+    async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        ref = str(args.get("ref", "")).strip()
+        try:
+            mgr = await self._manager(ctx)
+            try:
+                locator = mgr.resolve_ref(ref)
+            except KeyError:
+                return ToolResult(f"error: unknown ref '{ref}' — snapshot may be stale", is_error=True)
+            await locator.click()
+            snap = await mgr.snapshot_text()
+            return ToolResult(f"clicked {ref}\n\n{snap}").truncated(ctx.max_result_chars)
+        except Exception as exc:  # noqa: BLE001
+            return ToolResult(f"error: click failed: {exc}", is_error=True)
+
+
+class BrowserTypeTool(_BrowserTool):
+    name = "browser_type"
+    description = "Type text into an element by its [ref=eN] id. Set submit=true to press Enter after. Returns the new page snapshot."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "ref": {"type": "string"},
+            "text": {"type": "string"},
+            "submit": {"type": "boolean", "description": "Press Enter after typing."},
+        },
+        "required": ["ref", "text"],
+    }
+
+    def preview(self, args: dict) -> str:
+        return f"ref={args.get('ref', '')} text={str(args.get('text', ''))[:40]!r}"
+
+    async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        ref = str(args.get("ref", "")).strip()
+        text = str(args.get("text", ""))
+        try:
+            mgr = await self._manager(ctx)
+            try:
+                locator = mgr.resolve_ref(ref)
+            except KeyError:
+                return ToolResult(f"error: unknown ref '{ref}' — snapshot may be stale", is_error=True)
+            await locator.fill(text)
+            if args.get("submit"):
+                await locator.press("Enter")
+            snap = await mgr.snapshot_text()
+            return ToolResult(f"typed into {ref}\n\n{snap}").truncated(ctx.max_result_chars)
+        except Exception as exc:  # noqa: BLE001
+            return ToolResult(f"error: type failed: {exc}", is_error=True)
+
+
+class BrowserScreenshotTool(_BrowserTool):
+    name = "browser_screenshot"
+    description = "Save a PNG screenshot of the current page to .riftor/screenshots/ and return its path."
+    parameters = {
+        "type": "object",
+        "properties": {"full_page": {"type": "boolean", "description": "Capture full scrollable page."}},
+    }
+
+    async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        try:
+            mgr = await self._manager(ctx)
+            if not mgr.launched:
+                return ToolResult("error: no page loaded; use browser_navigate first", is_error=True)
+            page = await mgr.page()
+            shots = ctx.workdir / ".riftor" / "screenshots"
+            shots.mkdir(parents=True, exist_ok=True)
+            n = len(list(shots.glob("*.png"))) + 1
+            path = shots / f"{n:03d}.png"
+            await page.screenshot(path=str(path), full_page=bool(args.get("full_page")))
+            size = path.stat().st_size
+            return ToolResult(f"screenshot saved → {path} ({size} bytes)\npage: {page.url}")
+        except Exception as exc:  # noqa: BLE001
+            return ToolResult(f"error: screenshot failed: {exc}", is_error=True)
+
+
+class BrowserEvalTool(_BrowserTool):
+    name = "browser_eval"
+    description = "Execute arbitrary JavaScript in the current page and return its result. Powerful and dangerous — like running shell code in the browser."
+    scope_sensitive = True
+    requires_permission = True
+    danger = True
+    parameters = {
+        "type": "object",
+        "properties": {"js": {"type": "string", "description": "JavaScript expression to evaluate."}},
+        "required": ["js"],
+    }
+
+    def preview(self, args: dict) -> str:
+        return str(args.get("js", ""))[:300]
+
+    async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        js = str(args.get("js", ""))
+        try:
+            mgr = await self._manager(ctx)
+            page = await mgr.page()
+            value = await page.evaluate(js)
+            return ToolResult(f"{value!r}").truncated(ctx.max_result_chars)
+        except Exception as exc:  # noqa: BLE001
+            return ToolResult(f"error: eval failed: {exc}", is_error=True)
+
+
+class BrowserConsoleMessagesTool(_BrowserTool):
+    name = "browser_console_messages"
+    description = "Return console messages captured from the current page (errors, warnings, logged values)."
+    parameters = {"type": "object", "properties": {}}
+
+    async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        mgr = _ensure_manager(ctx)
+        if mgr is None or not mgr.launched:
+            return ToolResult("(no browser activity)")
+        log = mgr.console_log[-200:]
+        return ToolResult("\n".join(log) if log else "(no console messages)").truncated(
+            ctx.max_result_chars
+        )
+
+
+class BrowserNetworkRequestsTool(_BrowserTool):
+    name = "browser_network_requests"
+    description = "Return the network requests (method + URL) captured from the current page."
+    parameters = {"type": "object", "properties": {}}
+
+    async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        mgr = _ensure_manager(ctx)
+        if mgr is None or not mgr.launched:
+            return ToolResult("(no browser activity)")
+        log = mgr.network_log[-200:]
+        return ToolResult("\n".join(log) if log else "(no requests captured)").truncated(
+            ctx.max_result_chars
+        )

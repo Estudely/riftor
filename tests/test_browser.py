@@ -153,3 +153,37 @@ async def test_resolve_unknown_ref_raises(tmp_workdir):
     mgr = bmod.BrowserManager(tmp_workdir, headless=True, persistent=False)
     with pytest.raises(KeyError):
         mgr.resolve_ref("e99")
+
+
+def test_browser_tools_registered_with_correct_flags():
+    from riftor import tools
+
+    names = {t.name for t in tools.all_tools()}
+    expected = {
+        "browser_navigate", "browser_snapshot", "browser_click", "browser_type",
+        "browser_screenshot", "browser_eval", "browser_console_messages",
+        "browser_network_requests",
+    }
+    assert expected <= names
+
+    nav = tools.get("browser_navigate")
+    assert nav.scope_sensitive is True
+    assert nav.requires_permission is False
+
+    ev = tools.get("browser_eval")
+    assert ev.scope_sensitive is True
+    assert ev.requires_permission is True
+    assert ev.danger is True
+
+    # action-on-loaded-page tools are NOT independently scope-sensitive
+    for n in ("browser_click", "browser_type", "browser_snapshot", "browser_screenshot"):
+        assert tools.get(n).scope_sensitive is False
+
+
+@pytest.mark.asyncio
+async def test_navigate_without_browser_errors_cleanly(toolctx):
+    from riftor import tools
+
+    # toolctx.browser is None and config is None → tool must error, not crash
+    r = await tools.get("browser_navigate").execute({"url": "https://example.com"}, toolctx)
+    assert r.is_error
