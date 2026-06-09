@@ -164,9 +164,6 @@ low-effort parallel tasks (e.g. recon). Naming terminology is config-renameable
 - [x] CLI `--chakla-model` + bash/zsh completions + docs; offline tests via `RIFTOR_DEMO_RESPONSE`
 
 **7b — live worker visibility (Approach B, follow-up)**
-> Full handoff doc: `docs/superpowers/specs/2026-06-04-subagents-phase-7b-live-visibility.md`
-> (motivation, the tool→UI channel problem, per-sub-feature design with file:line
-> anchors, open decisions, and a test plan — enough to pick up cold).
 - [x] Tool→UI progress channel (none exists today): thread a progress callback into
       `run_chakla` so workers emit status events
 - [x] TUI "flock" panel: per-Chakla live status (running / done / N findings / error)

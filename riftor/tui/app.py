@@ -1387,8 +1387,11 @@ class RiftorApp(App):
                 else:
                     _barren_rounds += 1
                 if _barren_rounds >= 8:
-                    self._note("⚠ circuit breaker: 8 rounds with no new findings — consider pivoting or stopping.")
-                    _barren_rounds = 0
+                    self._note(
+                        "⚠ circuit breaker: 8 rounds with no new findings — "
+                        "stopping. /continue to resume or change approach."
+                    )
+                    break
             else:
                 self._note(
                     f"reached step limit ({budget}); stopping — /continue to extend"
