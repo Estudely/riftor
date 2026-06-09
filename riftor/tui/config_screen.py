@@ -137,6 +137,11 @@ class ConfigScreen(ModalScreen[dict | None]):
                         yield _row("Temperature", Input(value=str(self.config.temperature), id="cfg-temp"))
                         yield _row("Max tokens", Input(value=str(self.config.max_tokens), id="cfg-maxtok"))
                         yield _row("Tool call steps", Input(value=str(self.config.max_steps), id="cfg-maxsteps"))
+                        _effort = (self.config.reasoning_effort
+                                   if self.config.reasoning_effort in REASONING_EFFORTS else "medium")
+                        yield _row("Reasoning effort", Select(
+                            [(e, e) for e in REASONING_EFFORTS],
+                            value=_effort, allow_blank=False, id="cfg-reasoning-effort"))
 
                     with Vertical(id="section-workers", classes="config-section-panel hidden"):
                         yield Label("Workers", classes="config-section")
@@ -172,11 +177,6 @@ class ConfigScreen(ModalScreen[dict | None]):
                             value=self.config.browser_headless, id="cfg-browser-headless"))
                         yield _row("Persistent profile", Switch(
                             value=self.config.browser_persistent_profile, id="cfg-browser-persistent"))
-                        _effort = (self.config.reasoning_effort
-                                   if self.config.reasoning_effort in REASONING_EFFORTS else "medium")
-                        yield _row("Reasoning effort", Select(
-                            [(e, e) for e in REASONING_EFFORTS],
-                            value=_effort, allow_blank=False, id="cfg-reasoning-effort"))
             with Horizontal(id="config-buttons"):
                 yield Button("Cancel", id="cancel", variant="error")
                 yield Button("Save", id="save", variant="success")
