@@ -31,6 +31,10 @@ def main() -> None:
     parser.add_argument("--workdir", help="engagement working directory (default: cwd)")
     parser.add_argument("--scope-file", dest="scope_file", help="load scope targets from a file")
     parser.add_argument(
+        "--browser-headed", dest="browser_headed", action="store_true",
+        help="run the Playwright browser headed (visible) for this run",
+    )
+    parser.add_argument(
         "-p", "--prompt",
         help="run a single task non-interactively and exit (headless one-shot)",
     )
@@ -65,6 +69,8 @@ def main() -> None:
         cfg.chakla_model = args.chakla_model
     if args.api_key:
         cfg.api_key = args.api_key
+    if args.browser_headed:
+        cfg.browser_headless = False  # this run only; not written to config.toml
 
     workdir = Path(args.workdir).expanduser() if args.workdir else Path.cwd()
 
