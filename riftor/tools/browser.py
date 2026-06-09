@@ -30,7 +30,7 @@ class BrowserManager:
         self._pw = None  # async_playwright context manager instance
         self._context = None  # BrowserContext
         self._page: "Page | None" = None
-        self._refs: dict[str, "Locator"] = {}
+        self._ref_targets: dict[str, dict] = {}
         self.console_log: list[str] = []
         self.network_log: list[str] = []
 
@@ -115,14 +115,15 @@ class BrowserManager:
         nodes get a stable [ref=eN] id used by click/type. Refs reset each call."""
         page = await self.page()
         tree = await page.accessibility.snapshot(interesting_only=False)
-        self._refs.clear()
-        self._ref_targets: dict[str, dict] = {}
+        self._ref_targets = {}
         lines: list[str] = []
-        counter = {"n": 0}
+        counter = 0
 
         def walk(node: dict, depth: int) -> None:
+            nonlocal counter
             role = node.get("role", "")
             if role in ("WebArea", "RootWebArea", "", "generic", "none"):
+                # elided container: keep children at the parent's depth (no extra indent)
                 for child in node.get("children", []) or []:
                     walk(child, depth)
                 return
@@ -132,8 +133,8 @@ class BrowserManager:
             if node.get("level"):
                 label += f" [level={node['level']}]"
             if role in self._INTERACTIVE:
-                counter["n"] += 1
-                ref = f"e{counter['n']}"
+                counter += 1
+                ref = f"e{counter}"
                 self._ref_targets[ref] = node
                 label += f" [ref={ref}]"
             lines.append(f"{indent}- {label}")
@@ -147,13 +148,19 @@ class BrowserManager:
     def resolve_ref(self, ref: str) -> "Locator":
         """Map a ref id from the last snapshot to a Playwright locator. The
         accessibility node carries role+name; we locate by ARIA role+name."""
-        node = getattr(self, "_ref_targets", {}).get(ref)
+        node = self._ref_targets.get(ref)
         if node is None:
             raise KeyError(ref)
         role = node.get("role", "")
         name = node.get("name", "") or ""
         page = self._page
         assert page is not None
+        # NOTE: accessibility.snapshot() returns platform-flavored AX role names;
+        # we assume they coincide with ARIA roles for the _INTERACTIVE set (true in
+        # practice for button/link/textbox/etc). get_by_role does not validate the
+        # role, so an out-of-vocabulary role would match nothing → a later action
+        # times out rather than erroring here. Task 11 asserts a resolved locator
+        # actually actuates, which is what catches a mismatch.
         if name:
             return page.get_by_role(role, name=name).first
         return page.get_by_role(role).first
@@ -173,4 +180,4 @@ class BrowserManager:
         self._context = None
         self._page = None
         self._pw = None
-        self._refs.clear()
+        self._ref_targets.clear()
