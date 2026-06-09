@@ -38,6 +38,14 @@ from riftor.tui.config_screen import ConfigScreen
 from riftor.tui.theme import THEMES, css_variable_defaults, palette
 from riftor.tui.widgets import STAGE_NAMES, Banner, CommandDropdown, FlockPane, StatusBar
 
+# Optional inline image rendering. textual-image needs Python >= 3.12 and a
+# graphics-capable terminal (Kitty/Sixel); import at module top per its detection
+# requirement. A failed import simply means we show the screenshot path instead.
+try:
+    from textual_image.widget import Image as _InlineImage  # type: ignore
+except Exception:  # noqa: BLE001 — never let a missing optional dep break startup
+    _InlineImage = None
+
 if TYPE_CHECKING:
     from riftor.config import Config
 
@@ -1438,6 +1446,22 @@ class RiftorApp(App):
             result_len=len(result.content),
         )
         await self._show_tool_result(result.content, is_error=result.is_error)
+        if (
+            call.name == "browser_screenshot"
+            and not result.is_error
+            and _InlineImage is not None
+        ):
+            # parse "screenshot saved → <path> (...)" from the result content
+            import re
+
+            m = re.search(r"saved → (\S+\.png)", result.content)
+            if m:
+                shot = Path(m.group(1))
+                if shot.exists():
+                    try:
+                        await self._mount(_InlineImage(str(shot)))
+                    except Exception:  # noqa: BLE001 — fall back to the path line already shown
+                        pass
         self.context.add_tool_result(call.id, result.content)
         self._last_output = result.content
         self._refresh_status()
