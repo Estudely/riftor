@@ -30,6 +30,14 @@ async def main() -> None:
         assert app.query_one("#chat")
         inp = app.query_one("#prompt", Input)
 
+        # ctrl+y is wired to Textual's copy-selection action (ctrl+c is quit,
+        # so the built-in copy lives on ctrl+y) — drag-select + ctrl+y copies.
+        copy_binding = app.active_bindings.get("ctrl+y")
+        assert copy_binding is not None, "ctrl+y binding missing"
+        assert copy_binding.binding.action == "screen.copy_text", (
+            f"ctrl+y should copy the selection, got {copy_binding.binding.action}"
+        )
+
         # /help renders a Markdown block
         inp.value = "/help"
         await pilot.press("enter")

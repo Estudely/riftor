@@ -265,6 +265,27 @@ clear = "ctrl+k"      # rebind the clear action
 quit  = "ctrl+q"
 ```
 
+### Copying text
+
+While riftor is running it captures the mouse (like `vim`, `lazygit`, and other
+full-screen TUIs), so a plain click-drag is consumed by riftor instead of doing
+your terminal's native selection. Two ways to copy:
+
+- **Drag to select, then `Ctrl+Y`** — riftor copies the selection to your
+  clipboard over OSC-52. Works locally and over SSH, in any terminal that
+  honors OSC-52 clipboard writes (most modern ones: Ghostty, kitty, WezTerm,
+  iTerm2, recent GNOME Terminal/VTE).
+- **`Shift`+drag, then your terminal's copy** (`Ctrl+Shift+C`) — most terminals
+  treat `Shift` as a "bypass mouse capture" modifier, giving you their *own*
+  native selection. This is local-only. (Ghostty: default `mouse-shift-capture`;
+  set it to `never` to make `Shift` always select.)
+
+To copy the *last* agent/tool output without selecting at all, use the `/copy`
+command.
+
+`Ctrl+Y` maps to Textual's `screen.copy_text` action; rebind it like any other
+hotkey, e.g. `screen.copy_text = "ctrl+shift+c"`.
+
 ## Troubleshooting
 
 - **`authentication failed`** — the key for your model's provider is missing or
