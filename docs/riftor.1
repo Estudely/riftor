@@ -38,10 +38,15 @@ Run a single task non-interactively and exit (headless one-shot).
 .TP
 .B \-\-headless
 Non-interactive mode; reads the prompt from \fB\-\-prompt\fR or stdin.
+.TP
+.B \-\-browser\-headed
+Run the Playwright browser visibly for this run only (not persisted; default is headless).
 .SH IN-APP COMMANDS
 Type \fB/help\fR inside riftor for the full list, including \fB/scope\fR,
 \fB/stage\fR, \fB/findings\fR, \fB/report\fR, \fB/permissions\fR, \fB/cost\fR,
-\fB/retry\fR, \fB/continue\fR, \fB/compact\fR, \fB/timeline\fR and \fB/export\fR.
+\fB/retry\fR, \fB/continue\fR, \fB/compact\fR, \fB/timeline\fR, \fB/browser\fR and \fB/export\fR.
+\fB/browser\fR shows browser status; \fB/browser headed\fR / \fB/browser headless\fR
+switch the mode (persisted) and \fB/browser close\fR tears it down.
 .SH FILES
 .TP
 .I ~/.config/riftor/config.toml
@@ -72,6 +77,12 @@ Display name for the orchestrator agent (default: \fIBaaj\fR).
 .TP
 .B label_worker
 Display name for worker subagents (default: \fIChakla\fR).
+.TP
+.B browser_headless
+Run the Playwright browser headless (default: \fItrue\fR).
+.TP
+.B browser_persistent_profile
+Persist a browser profile at \fI.riftor/browser-profile/\fR; default is incognito (default: \fIfalse\fR).
 .SH ENVIRONMENT
 .TP
 .B ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY

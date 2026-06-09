@@ -26,6 +26,8 @@ falls back to detected defaults (it won't overwrite your file) and launches.
 | `max_result_chars` | int | `30000` | Cap on tool output fed back to the model. |
 | `result_preview_lines` | int | `25` | Lines of a tool result shown before `…/show <id>`. |
 | `rate_limit_per_min` | int | `0` | Cap model calls per minute (`0` = unlimited). |
+| `browser_headless` | bool | `true` | Run the Playwright browser headless (good for servers/SSH). Set `false` to launch it visibly. |
+| `browser_persistent_profile` | bool | `false` | Reuse a profile at `.riftor/browser-profile/` (persists cookies/sessions). Default is incognito — a fresh context per launch. |
 | `chakla_model` | string | `anthropic/claude-haiku-4-5-20251001` | The cheap worker model used by dispatched Chakla subagents. |
 | `chakla_max_workers` | int | `5` | Max number of Chakla workers per dispatch batch. |
 | `chakla_timeout_s` | int | `300` | Per-worker wall-clock timeout in seconds. |
@@ -93,6 +95,35 @@ invocation and are not persisted to config.toml):
 | `--model MODEL` | `model` | Override the main-agent model. |
 | `--chakla-model MODEL` | `chakla_model` | Override the Chakla worker model. |
 | `--api-key KEY` | `api_key` | Override the API key. |
+| `--browser-headed` | `browser_headless` | Run the browser visibly for this run only (does not persist). |
+
+## Browser
+
+riftor can drive a real Chromium browser (via Playwright) for SPA recon and
+authenticated flows. The agent navigates pages, reads them as accessibility
+snapshots, clicks/types, screenshots, and inspects console + network traffic.
+
+Two `[riftor]` fields control how the browser launches:
+
+- `browser_headless` (default `true`) — headless is the default so it works on
+  servers and over SSH. Toggle it in `/config` (Display section), or run a single
+  visible session with the `--browser-headed` flag.
+- `browser_persistent_profile` (default `false`) — incognito by default, so a
+  pentest does not retain a client's session cookies between runs. Enable it (also
+  in the `/config` Display section) to persist a profile at `.riftor/browser-profile/`.
+
+Manage the browser at runtime with `/browser`: it prints status, `/browser headed`
+and `/browser headless` switch the mode (persisted to config), and `/browser close`
+tears the browser down.
+
+The browser launches lazily on first use, and Chromium binaries auto-install the
+first time a browser tool runs (`playwright install chromium`, ~150 MB, once).
+`riftor --doctor` and `/doctor` report browser readiness.
+
+Screenshots are saved to `.riftor/screenshots/`. They render inline in the terminal
+if the optional extra is installed (`pip install 'riftor[browser-ui]'`) on Python
+≥3.12 and the terminal supports Kitty or Sixel graphics; otherwise riftor shows the
+saved file path.
 
 ## Providers & models
 
