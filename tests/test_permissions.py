@@ -12,6 +12,23 @@ def test_default_deny_blocks_rm_rf():
     assert not perms.is_denied("bash", "ls -la")
 
 
+def test_default_deny_catches_fork_bomb_variants():
+    """The fork-bomb guard must match the readable spaced form, not just the
+    compact one — shells accept whitespace between every token."""
+    perms = Permissions()
+    variants = [
+        ":(){:|:&};:",  # compact, classic
+        ": () { : | : & }",  # readable / how it's usually written
+        ":() { :|:& };:",  # partial spacing
+        ":()  {  : | : &  }",  # extra spacing
+    ]
+    for v in variants:
+        assert perms.is_denied("bash", v), f"fork bomb not caught: {v!r}"
+    # Must not flag innocuous commands that merely contain a colon or braces.
+    assert not perms.is_denied("bash", "awk '{print $1}' file")
+    assert not perms.is_denied("bash", "ls -la")
+
+
 def test_allow_rule_skips_prompt():
     perms = Permissions(allow=[{"tool": "bash"}])
     assert not perms.needs_prompt("bash", True, "nmap -sV host")

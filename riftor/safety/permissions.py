@@ -32,7 +32,7 @@ def _default_deny() -> list[dict]:
         {"tool": "bash", "pattern": r"\brm\s+-[a-z]*r[a-z]*f|\brm\s+-[a-z]*f[a-z]*r"},
         {"tool": "bash", "pattern": r"\bdd\s+.*of=/dev/"},
         {"tool": "bash", "pattern": r"\bmkfs(\.\w+)?\b"},
-        {"tool": "bash", "pattern": r":\(\)\s*\{\s*:\|:&\s*\}"},  # fork bomb
+        {"tool": "bash", "pattern": r":\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&"},  # fork bomb
         {"tool": "bash", "pattern": r">\s*/dev/sd[a-z]"},
     ]
 

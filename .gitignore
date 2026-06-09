@@ -25,3 +25,6 @@ reports/
 
 # brainstorming visual companion scratch
 .superpowers/
+
+# internal AI planning/spec docs — kept locally, not shipped or tracked
+docs/superpowers/

@@ -85,8 +85,9 @@ class Target:
             except ValueError:
                 return False
         if self.kind == "wildcard":
+            # ``*.example.com`` covers subdomains only — not the bare base domain.
             base = self.raw[2:]
-            return host == base or host.endswith("." + base)
+            return host.endswith("." + base)
         # domain: the host itself and any subdomain
         return host == self.raw or host.endswith("." + self.raw)
 
