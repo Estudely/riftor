@@ -237,7 +237,11 @@ class Provider:
         """
         response = await self._acompletion(**self._kwargs(messages, tools))
         text_parts: list[str] = []
-        acc: dict[int, dict] = {}
+        # Keyed by the provider's tool-call ``index`` when present. Insertion order
+        # (dict guarantees it) preserves emission order, so we never sort mixed key
+        # types. ``_seq`` mints unique keys for streams that omit ``index``.
+        acc: dict[object, dict] = {}
+        _seq = 0
         usage = Usage()
 
         async for chunk in response:  # type: ignore[union-attr]  # litellm stream is async-iterable
@@ -262,10 +266,30 @@ class Provider:
                 yield ("thinking", reasoning)
 
             for tc in getattr(delta, "tool_calls", None) or []:
-                idx = getattr(tc, "index", 0) or 0
-                slot = acc.setdefault(idx, {"id": None, "name": None, "args": ""})
-                if getattr(tc, "id", None):
-                    slot["id"] = tc.id
+                tc_id = getattr(tc, "id", None)
+                # Spec-conformant streams (OpenAI/litellm) tag every fragment with a
+                # stable ``index`` so fragments of one call reassemble correctly.
+                # Some providers omit it; defaulting all of them to 0 (the old bug)
+                # collapsed distinct calls onto one slot — only the last survived and
+                # the args concatenated into invalid JSON. When ``index`` is absent we
+                # start a fresh slot on each new ``id`` and otherwise append to the
+                # most recent one (a continuation fragment of the same call).
+                raw_idx = getattr(tc, "index", None)
+                if raw_idx is not None:
+                    key: object = ("idx", raw_idx)
+                elif tc_id is not None and not any(
+                    s.get("id") == tc_id for s in acc.values()
+                ):
+                    key = ("seq", _seq)
+                    _seq += 1
+                elif acc:
+                    key = next(reversed(acc))
+                else:
+                    key = ("seq", _seq)
+                    _seq += 1
+                slot = acc.setdefault(key, {"id": None, "name": None, "args": ""})
+                if tc_id:
+                    slot["id"] = tc_id
                 fn = getattr(tc, "function", None)
                 if fn is not None:
                     if getattr(fn, "name", None):
@@ -275,8 +299,9 @@ class Provider:
 
         tool_calls: list[ToolCall] = []
         raw_tool_calls: list[dict] = []
-        for idx in sorted(acc):
-            slot = acc[idx]
+        # Iterate in insertion order — the order fragments first appeared, which is
+        # emission order. (Keys are tuples now, so they aren't directly sortable.)
+        for n, slot in enumerate(acc.values()):
             if not slot["name"]:
                 continue
             raw_args = slot["args"] or "{}"
@@ -284,7 +309,7 @@ class Provider:
                 parsed = json.loads(raw_args)
             except json.JSONDecodeError:
                 parsed = {"__parse_error__": raw_args}
-            call_id = slot["id"] or f"call_{idx}"
+            call_id = slot["id"] or f"call_{n}"
             tool_calls.append(
                 ToolCall(id=call_id, name=slot["name"], arguments=parsed, raw_arguments=raw_args)
             )

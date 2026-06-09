@@ -551,13 +551,17 @@ def parse_events(events: Iterable[dict]) -> Iterator[CodexChunk]:
             saw_function_call = True
             ref = event.get("item_id") or event.get("call_id")
             meta = call_meta.get(ref) if ref is not None else None
-            # Fall back to the referencing id as the call id when no added event
-            # supplied name/call_id; name stays None to be filled from output.
-            call_id = meta["id"] if meta else ref
-            name = meta["name"] if meta else None
             # Allocate (or reuse) the stable per-call streaming index. Deltas for
             # the same call share an index; a new call gets the next one.
             index = _index_for(ref) if ref is not None else 0
+            # Fall back to the referencing id as the call id when no added event
+            # supplied name/call_id; name stays None to be filled from output. If
+            # the delta carries neither item_id/call_id nor matching meta, synthesise
+            # a stable id from the index so the chunk isn't silently dropped
+            # downstream (``call_id is None`` skips it) and continuation deltas for
+            # the same (index-0, ref-None) call still coalesce.
+            call_id = (meta["id"] if meta else ref) or f"call_{index}"
+            name = meta["name"] if meta else None
             yield CodexChunk(
                 tool_call={
                     "id": call_id,

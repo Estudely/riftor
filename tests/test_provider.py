@@ -184,3 +184,103 @@ async def test_stream_turn_yields_thinking_and_excludes_it_from_message(monkeypa
     assert turn.assistant_message["content"] == "the answer"
     assert "reasoning_content" not in turn.assistant_message
     assert "let me think" not in (turn.assistant_message.get("content") or "")
+
+
+# --- tool-call stream reassembly (#72) ----------------------------------------
+
+class _TCFn:
+    def __init__(self, name=None, arguments=None):
+        self.name = name
+        self.arguments = arguments
+
+
+class _TC:
+    """A streamed tool-call fragment. ``index`` may be omitted (set to None) to
+    simulate a provider that doesn't tag fragments — the case that used to
+    collapse distinct calls onto one slot."""
+    def __init__(self, *, id=None, name=None, arguments=None, index=None):
+        self.id = id
+        self.index = index
+        self.function = _TCFn(name, arguments)
+
+
+class _TCDelta:
+    def __init__(self, tool_calls=None):
+        self.content = None
+        self.reasoning_content = None
+        self.tool_calls = tool_calls
+
+
+class _TCChoice:
+    def __init__(self, delta):
+        self.delta = delta
+
+
+class _TCChunk:
+    def __init__(self, tool_calls):
+        self.choices = [_TCChoice(_TCDelta(tool_calls))]
+        self.usage = None
+
+
+async def _run_tool_stream(monkeypatch, chunks):
+    async def _fake_stream():
+        for c in chunks:
+            yield c
+
+    async def _fake_acompletion(self, **kwargs):
+        return _fake_stream()
+
+    monkeypatch.setattr(prov.Provider, "_acompletion", _fake_acompletion)
+    p = Provider_for_test()
+    turn = None
+    async for event, payload in p.stream_turn([{"role": "user", "content": "go"}]):
+        if event == "done":
+            turn = payload
+    assert turn is not None
+    return turn
+
+
+@pytest.mark.asyncio
+async def test_tool_calls_reassemble_by_index(monkeypatch):
+    """Two interleaved calls, fragmented across chunks, tagged with index 0/1 —
+    they must reassemble into two calls with intact arguments."""
+    chunks = [
+        _TCChunk([_TC(id="a", name="nmap", arguments='{"ho', index=0)]),
+        _TCChunk([_TC(name="httpx", arguments='{"ur', index=1, id="b")]),
+        _TCChunk([_TC(arguments='st":"x"}', index=0)]),
+        _TCChunk([_TC(arguments='l":"y"}', index=1)]),
+    ]
+    turn = await _run_tool_stream(monkeypatch, chunks)
+    by_name = {c.name: c for c in turn.tool_calls}
+    assert set(by_name) == {"nmap", "httpx"}
+    assert by_name["nmap"].arguments == {"host": "x"}
+    assert by_name["httpx"].arguments == {"url": "y"}
+
+
+@pytest.mark.asyncio
+async def test_tool_calls_without_index_do_not_collide(monkeypatch):
+    """A provider that omits ``index`` must still yield two distinct calls — the
+    old `index or 0` default merged them onto slot 0 (last-wins + invalid JSON)."""
+    chunks = [
+        _TCChunk([_TC(id="a", name="nmap", arguments='{"host":"x"}')]),
+        _TCChunk([_TC(id="b", name="httpx", arguments='{"url":"y"}')]),
+    ]
+    turn = await _run_tool_stream(monkeypatch, chunks)
+    names = sorted(c.name for c in turn.tool_calls)
+    assert names == ["httpx", "nmap"], f"calls collided: {names}"
+    by_name = {c.name: c for c in turn.tool_calls}
+    assert by_name["nmap"].arguments == {"host": "x"}
+    assert by_name["httpx"].arguments == {"url": "y"}
+
+
+@pytest.mark.asyncio
+async def test_tool_call_fragments_without_index_coalesce_by_id(monkeypatch):
+    """Fragments of one indexless call (same id, args split across chunks) must
+    coalesce — not split into two calls."""
+    chunks = [
+        _TCChunk([_TC(id="a", name="nmap", arguments='{"ho')]),
+        _TCChunk([_TC(id="a", arguments='st":"x"}')]),
+    ]
+    turn = await _run_tool_stream(monkeypatch, chunks)
+    assert len(turn.tool_calls) == 1
+    assert turn.tool_calls[0].arguments == {"host": "x"}

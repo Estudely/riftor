@@ -548,6 +548,28 @@ def test_parse_events_function_call_sequence():
         assert c.tool_call["name"] == "bash"
 
 
+def test_parse_events_delta_without_ref_gets_stable_id():
+    """A function-call delta carrying neither item_id/call_id nor a matching
+    added-event must still produce a chunk with a non-None id, otherwise the
+    downstream reducer (``call_id is None`` skips it) silently drops the call's
+    arguments. Continuation deltas in this state must coalesce, not split."""
+    events = [
+        {"type": "response.function_call_arguments.delta", "delta": '{"cmd"'},
+        {"type": "response.function_call_arguments.delta", "delta": ':"ls"}'},
+    ]
+    chunks = list(codex_provider.parse_events(events))
+    assert len(chunks) == 2
+    assert all(c.tool_call["id"] is not None for c in chunks)
+    # both fragments share the same synthesised id (index-0 fallback)
+    assert chunks[0].tool_call["id"] == chunks[1].tool_call["id"]
+
+    # And the reducer must keep the call (not drop it on a None id).
+    response = codex_provider._model_response_from_chunks("codex/gpt-5.5", chunks)
+    calls = response.choices[0].message.tool_calls or []
+    assert len(calls) == 1
+    assert calls[0].function.arguments == '{"cmd":"ls"}'
+
+
 def test_parse_events_completed_with_usage_tool_calls():
     events = [
         {

@@ -160,3 +160,58 @@ def test_add_scope_blocked_headless_without_allow_rule():
     assert not perms.is_allowed(tool.name, preview)   # no allow-rule -> headless denies
     perms.add_allow_rule(tool.name)
     assert perms.is_allowed(tool.name, preview)        # operator opts in -> allowed
+
+
+# --- path containment within workdir (#70) ------------------------------------
+
+from riftor.tools import ToolContext  # noqa: E402
+
+
+@pytest.mark.asyncio
+async def test_read_blocks_absolute_path_outside_workdir(toolctx):
+    r = await tools.get("read").execute({"path": "/etc/passwd"}, toolctx)
+    assert r.is_error
+    assert "outside" in r.content.lower() or "workdir" in r.content.lower()
+
+
+@pytest.mark.asyncio
+async def test_read_blocks_traversal_outside_workdir(toolctx):
+    r = await tools.get("read").execute({"path": "../../../../etc/passwd"}, toolctx)
+    assert r.is_error
+
+
+@pytest.mark.asyncio
+async def test_read_allows_path_inside_workdir(toolctx, tmp_workdir):
+    (tmp_workdir / "in.txt").write_text("hello\n")
+    r = await tools.get("read").execute({"path": "in.txt"}, toolctx)
+    assert not r.is_error
+    assert "hello" in r.content
+
+
+@pytest.mark.asyncio
+async def test_write_blocks_outside_workdir(toolctx, tmp_workdir):
+    # A sibling of the workdir — outside it, but inside the auto-cleaned temp area.
+    target = tmp_workdir.parent / "riftor-escape-test.txt"
+    assert not target.exists()
+    r = await tools.get("write").execute({"path": str(target), "content": "x"}, toolctx)
+    assert r.is_error
+    # the file must NOT have been created outside the workdir
+    assert not target.exists()
+
+
+@pytest.mark.asyncio
+async def test_grep_and_glob_block_outside_workdir(toolctx):
+    rg = await tools.get("grep").execute({"pattern": "root", "path": "/etc"}, toolctx)
+    assert rg.is_error
+    gl = await tools.get("glob").execute({"pattern": "*", "path": "/etc"}, toolctx)
+    assert gl.is_error
+
+
+@pytest.mark.asyncio
+async def test_yolo_bypasses_workdir_containment(tmp_workdir, engagement):
+    """YOLO mode bypasses every guardrail — including workdir containment."""
+    ctx = ToolContext(workdir=tmp_workdir, engagement=engagement, yolo=True)
+    r = await tools.get("read").execute({"path": "/etc/hostname"}, ctx)
+    # Either it reads the real file, or errors for a non-containment reason
+    # (e.g. file missing) — but never the containment refusal.
+    assert "outside" not in r.content.lower()
