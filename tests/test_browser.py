@@ -2,9 +2,26 @@
 
 from __future__ import annotations
 
-import pytest  # noqa: F401  # used by browser tests added in later tasks
+import importlib.util
+from pathlib import Path
+
+import pytest
 
 from riftor.tools import ToolContext
+
+_FIXTURE = Path(__file__).parent / "fixtures" / "login.html"
+
+
+def _browser_available() -> bool:
+    if importlib.util.find_spec("playwright") is None:
+        return False
+    cache = Path.home() / ".cache" / "ms-playwright"
+    return cache.exists() and any(cache.glob("chromium-*"))
+
+
+requires_browser = pytest.mark.skipif(
+    not _browser_available(), reason="playwright/Chromium not installed"
+)
 
 
 def test_toolcontext_has_browser_field_default_none():
@@ -198,3 +215,34 @@ def test_config_browser_defaults_and_toml():
     toml = cfg._to_toml()
     assert "browser_headless = true" in toml
     assert "browser_persistent_profile = false" in toml
+
+
+@requires_browser
+@pytest.mark.asyncio
+async def test_real_navigate_snapshot_click(tmp_workdir):
+    from riftor.config import Config
+    from riftor.tools import ToolContext
+    from riftor import tools
+
+    ctx = ToolContext(workdir=tmp_workdir, config=Config(browser_headless=True))
+    url = _FIXTURE.as_uri()
+    r = await tools.get("browser_navigate").execute({"url": url}, ctx)
+    assert not r.is_error
+    assert "Sign in" in r.content
+    assert "[ref=e" in r.content  # interactive elements got refs
+    # find a ref for the Submit button from the snapshot text
+    import re
+    refs = re.findall(r"button \"Submit\" \[ref=(e\d+)\]", r.content)
+    assert refs, r.content
+    rc = await tools.get("browser_click").execute({"ref": refs[0]}, ctx)
+    assert not rc.is_error
+    # HARDENING (from Task 4 review): the click must actually ACTUATE — not just
+    # return without error — to catch any AX-role vs ARIA-role mismatch in
+    # resolve_ref. The fixture's Submit button sets document.title='clicked'.
+    rt = await tools.get("browser_eval").execute({"js": "document.title"}, ctx)
+    assert "clicked" in rt.content
+    # screenshot writes a file
+    rs = await tools.get("browser_screenshot").execute({}, ctx)
+    assert not rs.is_error
+    assert (tmp_workdir / ".riftor" / "screenshots" / "001.png").exists()
+    await ctx.browser.close()

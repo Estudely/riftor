@@ -112,11 +112,67 @@ class BrowserManager:
         "menuitem", "tab", "switch", "searchbox", "slider",
     }
 
+    async def _ax_tree(self, page: "Page") -> dict | None:
+        """Return a nested ``{role, name, level?, children}`` accessibility tree.
+
+        Playwright removed ``page.accessibility.snapshot()`` in 1.5x, so we source
+        the tree from the Chromium DevTools Protocol (``Accessibility.getFullAXTree``)
+        and rebuild the same nested-dict shape the old API produced — keeping
+        :meth:`snapshot_text` and :meth:`resolve_ref` unchanged. If the legacy API
+        is still present (or a test injects a fake page exposing it) we use it."""
+        legacy = getattr(page, "accessibility", None)
+        if legacy is not None and hasattr(legacy, "snapshot"):
+            return await legacy.snapshot(interesting_only=False)
+
+        cdp = await page.context.new_cdp_session(page)
+        try:
+            await cdp.send("Accessibility.enable")
+            raw = await cdp.send("Accessibility.getFullAXTree")
+        finally:
+            try:
+                await cdp.detach()
+            except Exception:  # noqa: BLE001
+                pass
+        nodes = {n["nodeId"]: n for n in raw.get("nodes", [])}
+        if not nodes:
+            return None
+
+        def convert_children(node: dict) -> list[dict]:
+            kids: list[dict] = []
+            for cid in node.get("childIds") or []:
+                child = nodes.get(cid)
+                if child is None:
+                    continue
+                if child.get("ignored"):
+                    # ignored container: drop the node but splice its (recursively
+                    # un-ignored) descendants up into the parent — matching how the
+                    # legacy snapshot API elided ignored/presentational wrappers.
+                    kids.extend(convert_children(child))
+                    continue
+                kids.append(convert(child))
+            return kids
+
+        def convert(node: dict) -> dict:
+            role = (node.get("role") or {}).get("value", "") or ""
+            name = (node.get("name") or {}).get("value", "") or ""
+            out: dict = {"role": role, "name": name}
+            for prop in node.get("properties") or []:
+                if prop.get("name") == "level":
+                    lvl = (prop.get("value") or {}).get("value")
+                    if lvl:
+                        out["level"] = lvl
+            out["children"] = convert_children(node)
+            return out
+
+        # The first node is the document root (RootWebArea).
+        root = raw["nodes"][0]
+        return convert(root)
+
     async def snapshot_text(self) -> str:
         """Compact, ref-tagged accessibility tree of the current page. Interactive
         nodes get a stable [ref=eN] id used by click/type. Refs reset each call."""
         page = await self.page()
-        tree = await page.accessibility.snapshot(interesting_only=False)
+        tree = await self._ax_tree(page)
         self._ref_targets = {}
         lines: list[str] = []
         counter = 0
@@ -157,12 +213,13 @@ class BrowserManager:
         name = node.get("name", "") or ""
         page = self._page
         assert page is not None
-        # NOTE: accessibility.snapshot() returns platform-flavored AX role names;
-        # we assume they coincide with ARIA roles for the _INTERACTIVE set (true in
-        # practice for button/link/textbox/etc). get_by_role does not validate the
-        # role, so an out-of-vocabulary role would match nothing → a later action
-        # times out rather than erroring here. Task 11 asserts a resolved locator
-        # actually actuates, which is what catches a mismatch.
+        # NOTE: the AX tree (CDP getFullAXTree, see _ax_tree) yields role names
+        # that coincide with ARIA roles for the _INTERACTIVE set (button/link/
+        # textbox/etc). get_by_role does not validate the role, so an out-of-
+        # vocabulary role would match nothing → a later action times out rather
+        # than erroring here. The Task 11 integration test asserts a resolved
+        # locator actually actuates (Submit sets document.title), catching a
+        # mismatch against a real browser.
         if name:
             return page.get_by_role(role, name=name).first
         return page.get_by_role(role).first
