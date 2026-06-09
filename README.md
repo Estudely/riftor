@@ -32,10 +32,13 @@ through [litellm](https://docs.litellm.ai/) and wrapped in a full-screen
 
 ## Install
 ```bash
-pip install riftor          # or: uv tool install riftor / pipx install riftor
+pip install riftor                 # or: uv tool install riftor / pipx install riftor
+pip install 'riftor[browser]'      # + Playwright, for the browser_* tools (SPA recon)
 ```
 Requires Python 3.11+ and a model — set one of `ANTHROPIC_API_KEY`,
 `OPENAI_API_KEY`, `OPENROUTER_API_KEY` (or run a local [Ollama](https://ollama.com/) server).
+The `[browser]` extra is optional (it adds ~hundreds of MB of Chromium binaries);
+without it the browser tools just print an install hint and everything else works.
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY, etc.

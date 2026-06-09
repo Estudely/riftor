@@ -45,8 +45,11 @@ class BrowserManager:
         Chromium binaries on first use; raises BrowserError on failure."""
         try:
             from playwright.async_api import async_playwright
-        except ImportError as exc:  # pragma: no cover - playwright is a core dep
-            raise BrowserError(f"playwright not installed: {exc}") from exc
+        except ImportError as exc:  # pragma: no cover - playwright is an optional extra
+            raise BrowserError(
+                "browser tools require Playwright — install it with: "
+                "pip install 'riftor[browser]' (then: playwright install chromium)"
+            ) from exc
 
         self._pw = await async_playwright().start()
         profile = self._workdir / ".riftor" / "browser-profile"

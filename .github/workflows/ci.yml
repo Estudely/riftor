@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Lets release.yml gate publishing on the full suite (lint/typecheck/test/smoke
+  # + docker) before it builds and pushes to PyPI.
+  workflow_call:
 
 concurrency:
   group: ci-${{ github.ref }}

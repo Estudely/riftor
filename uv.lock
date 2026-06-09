@@ -1813,16 +1813,19 @@ version = "1.0.1"
 source = { editable = "." }
 dependencies = [
     { name = "litellm" },
-    { name = "playwright" },
     { name = "pydantic" },
     { name = "textual" },
 ]
 
 [package.optional-dependencies]
+browser = [
+    { name = "playwright" },
+]
 browser-ui = [
     { name = "textual-image", extra = ["textual"], marker = "python_full_version >= '3.12'" },
 ]
 dev = [
+    { name = "playwright" },
     { name = "pyright" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -1833,17 +1836,18 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "litellm", specifier = ">=1.55" },
-    { name = "playwright", specifier = ">=1.44" },
+    { name = "playwright", marker = "extra == 'browser'", specifier = ">=1.44" },
     { name = "pydantic", specifier = ">=2.6" },
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.380" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
+    { name = "riftor", extras = ["browser"], marker = "extra == 'dev'" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
     { name = "textual", specifier = ">=0.79" },
     { name = "textual-dev", marker = "extra == 'dev'", specifier = ">=1.5" },
     { name = "textual-image", extras = ["textual"], marker = "python_full_version >= '3.12' and extra == 'browser-ui'", specifier = ">=0.13" },
 ]
-provides-extras = ["dev", "browser-ui"]
+provides-extras = ["browser", "browser-ui", "dev"]
 
 [[package]]
 name = "rpds-py"

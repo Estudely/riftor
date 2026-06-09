@@ -103,6 +103,16 @@ riftor can drive a real Chromium browser (via Playwright) for SPA recon and
 authenticated flows. The agent navigates pages, reads them as accessibility
 snapshots, clicks/types, screenshots, and inspects console + network traffic.
 
+Playwright is an **optional extra** (it pulls in ~hundreds of MB of Chromium
+binaries), so the browser tools are available only when it's installed:
+
+```bash
+pip install 'riftor[browser]'   # adds Playwright; Chromium auto-installs on first use
+```
+
+Without it, the `browser_*` tools return a clear "install riftor[browser]" hint
+instead of running. The rest of riftor works unchanged.
+
 Two `[riftor]` fields control how the browser launches:
 
 - `browser_headless` (default `true`) — headless is the default so it works on
