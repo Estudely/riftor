@@ -190,7 +190,7 @@ _Settings & sessions_
 - `/tools` — list tools · `/exit` — quit (`Ctrl+C`)
 
 Type anything else to task the agent. `↑/↓` recall input · `PgUp/PgDn` scroll ·
-`Esc` cancels a running response.
+`Esc` cancels a running response. Drag to select text, `Ctrl+Y` copies it.
 """
 
 
@@ -242,6 +242,10 @@ class RiftorApp(App):
         ("ctrl+c", "quit", "Quit"),
         ("ctrl+l", "clear", "Clear"),
         ("escape", "cancel", "Cancel"),
+        # Textual binds ctrl+c → copy-selection by default, but we use ctrl+c
+        # for quit; expose the built-in copy action on ctrl+y instead so a
+        # mouse drag-selection can be copied to the clipboard (via OSC-52).
+        Binding("ctrl+y", "screen.copy_text", "Copy selection", show=False),
         Binding("pageup", "scroll_chat('pageup')", "Scroll up", show=False),
         Binding("pagedown", "scroll_chat('pagedown')", "Scroll down", show=False),
         Binding("ctrl+home", "scroll_chat('home')", "Top", show=False),
