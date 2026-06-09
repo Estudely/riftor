@@ -584,6 +584,9 @@ class RiftorApp(App):
         self.config.lore = result["lore"]
         self.config.show_thinking = result.get("show_thinking", self.config.show_thinking)
         self.config.show_tool_output = result.get("show_tool_output", self.config.show_tool_output)
+        self.config.browser_headless = result.get("browser_headless", self.config.browser_headless)
+        self.config.browser_persistent_profile = result.get(
+            "browser_persistent_profile", self.config.browser_persistent_profile)
         self.config.reasoning_effort = result.get("reasoning_effort", self.config.reasoning_effort)
         self.config.chakla_model = result.get("chakla_model", self.config.chakla_model)
         self.config.label_main = result.get("label_main", self.config.label_main)
@@ -983,8 +986,8 @@ class RiftorApp(App):
             return
         if sub == "close":
             if mgr is not None and mgr.launched:
-                self.run_worker(mgr.close(), exclusive=False)
-                self._note("browser closed")
+                self.run_worker(mgr.close(), exclusive=False, exit_on_error=False)
+                self._note("closing browser…")
             else:
                 self._note("no browser running")
             return

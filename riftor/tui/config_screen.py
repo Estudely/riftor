@@ -168,6 +168,10 @@ class ConfigScreen(ModalScreen[dict | None]):
                             value=self.config.show_thinking, id="cfg-show-thinking"))
                         yield _row("Show tool output", Switch(
                             value=self.config.show_tool_output, id="cfg-show-tool-output"))
+                        yield _row("Browser headless", Switch(
+                            value=self.config.browser_headless, id="cfg-browser-headless"))
+                        yield _row("Persistent profile", Switch(
+                            value=self.config.browser_persistent_profile, id="cfg-browser-persistent"))
                         _effort = (self.config.reasoning_effort
                                    if self.config.reasoning_effort in REASONING_EFFORTS else "medium")
                         yield _row("Reasoning effort", Select(
@@ -347,6 +351,8 @@ class ConfigScreen(ModalScreen[dict | None]):
             "lore": self.query_one("#cfg-lore", Switch).value,
             "show_thinking": self.query_one("#cfg-show-thinking", Switch).value,
             "show_tool_output": self.query_one("#cfg-show-tool-output", Switch).value,
+            "browser_headless": self.query_one("#cfg-browser-headless", Switch).value,
+            "browser_persistent_profile": self.query_one("#cfg-browser-persistent", Switch).value,
             "reasoning_effort": self.query_one("#cfg-reasoning-effort", Select).value,
             "chakla_model": chakla_model,
             "chakla_provider": w_provider if w_chosen else None,
