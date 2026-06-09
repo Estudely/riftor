@@ -1121,6 +1121,7 @@ class RiftorApp(App):
         if not data:
             self._note(f"no such session: {sid}")
             return
+        self._reset_browser_for_session()
         self.session_id = data["id"]
         self.context.load(data.get("messages", []))
         self.context.repair()
@@ -1129,8 +1130,19 @@ class RiftorApp(App):
         self._replay_transcript(self.context.messages)
         self._note(f"resumed session {sid} ({len(data.get('messages', []))} messages)")
 
+    def _reset_browser_for_session(self) -> None:
+        """Close and forget the session's browser on a session switch (/new, /resume)
+        so a new session starts with no carried-over page/cookies, and the first-run
+        incognito hint fires again."""
+        mgr = self.toolctx.browser
+        if mgr is not None and mgr.launched:
+            self.run_worker(mgr.close(), exclusive=False, exit_on_error=False)
+        self.toolctx.browser = None
+        self._browser_hint_shown = False
+
     def _new_session(self) -> None:
         self._save_session()
+        self._reset_browser_for_session()
         self.session_id = sessions.new_id()
         self.context.clear()
         self.usage = Usage()
@@ -1446,22 +1458,27 @@ class RiftorApp(App):
             result_len=len(result.content),
         )
         await self._show_tool_result(result.content, is_error=result.is_error)
-        if (
-            call.name == "browser_screenshot"
-            and not result.is_error
-            and _InlineImage is not None
-        ):
-            # parse "screenshot saved → <path> (...)" from the result content
+        if call.name == "browser_screenshot" and not result.is_error:
             import re
 
             m = re.search(r"saved → (\S+\.png)", result.content)
             if m:
                 shot = Path(m.group(1))
                 if shot.exists():
-                    try:
-                        await self._mount(_InlineImage(str(shot)))
-                    except Exception:  # noqa: BLE001 — fall back to the path line already shown
-                        pass
+                    rendered_inline = False
+                    if _InlineImage is not None:
+                        try:
+                            await self._mount(_InlineImage(str(shot)))
+                            rendered_inline = True
+                        except Exception:  # noqa: BLE001 — terminal can't render; fall back
+                            rendered_inline = False
+                    if not rendered_inline:
+                        # OSC-8 clickable hyperlink to the PNG (works in modern
+                        # terminals; the plain path is also shown by the result line).
+                        uri = shot.resolve().as_uri()
+                        link = Text("open screenshot", style=f"underline {self._pal()['cyan']}")
+                        link.stylize(f"link {uri}")
+                        await self._mount(Static(link, classes="note"))
         self.context.add_tool_result(call.id, result.content)
         self._last_output = result.content
         self._refresh_status()
