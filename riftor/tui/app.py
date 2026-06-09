@@ -40,6 +40,14 @@ from riftor.tui.config_screen import ConfigScreen
 from riftor.tui.theme import THEMES, css_variable_defaults, palette
 from riftor.tui.widgets import STAGE_NAMES, Banner, CommandDropdown, FlockPane, StatusBar
 
+# Optional inline image rendering. textual-image needs Python >= 3.12 and a
+# graphics-capable terminal (Kitty/Sixel); import at module top per its detection
+# requirement. A failed import simply means we show the screenshot path instead.
+try:
+    from textual_image.widget import Image as _InlineImage  # type: ignore
+except Exception:  # noqa: BLE001 — never let a missing optional dep break startup
+    _InlineImage = None
+
 if TYPE_CHECKING:
     from riftor.config import Config
 
@@ -145,7 +153,7 @@ _COMMANDS = [
     "/edit-finding", "/delete-finding", "/hosts", "/services", "/report",
     "/sessions", "/resume", "/new", "/theme", "/config", "/tools", "/permissions",
     "/lore", "/cost", "/retry", "/continue", "/compact", "/copy", "/show",
-    "/timeline", "/audit", "/export", "/doctor", "/review", "/hypotheses", "/lesson", "/lessons", "/exit",
+    "/timeline", "/audit", "/export", "/doctor", "/review", "/hypotheses", "/lesson", "/lessons", "/browser", "/exit",
 ]
 
 HELP = """\
@@ -173,6 +181,7 @@ _Settings & sessions_
 - `/config` — settings panel · `/permissions` — review allow/deny rules
 - `/lore` — toggle the rift persona · `/audit` — recent tool-call audit log
 - `/doctor` — check which external recon tools (nmap/httpx/…) are installed
+- `/browser [headed|headless|close]` — browser status / mode / teardown
 - `/review` — self-critique findings for false positives before reporting
 - `/hypotheses` — list tracked hypotheses (open leads)
 - `/lesson <text>` — teach a durable lesson (persists across sessions)
@@ -274,6 +283,7 @@ class RiftorApp(App):
         )
         self._rate_times: list[float] = []
         self._autoscroll = True
+        self._browser_hint_shown = False
 
     def compose(self) -> ComposeResult:
         yield Banner(id="banner")
@@ -325,6 +335,14 @@ class RiftorApp(App):
             self._note(
                 "rift online · set scope with /scope add <target> before tasking the agent"
             )
+
+    async def on_unmount(self) -> None:
+        mgr = self.toolctx.browser
+        if mgr is not None and mgr.launched:
+            try:
+                await mgr.close()
+            except Exception:  # noqa: BLE001
+                pass
 
     def _toolchain_heads_up(self) -> None:
         """One-line note if recon tools are missing — surfaced up front, not mid-task."""
@@ -593,6 +611,7 @@ class RiftorApp(App):
             "/audit": self._audit_cmd,
             "/export": self._export_cmd,
             "/doctor": self._doctor_cmd,
+            "/browser": lambda: self._browser_cmd(arg),
             "/review": self._review_cmd,
             "/hypotheses": self._hypotheses_cmd,
             "/lesson": lambda: self._lesson_cmd(arg),
@@ -667,6 +686,9 @@ class RiftorApp(App):
         self.config.lore = result["lore"]
         self.config.show_thinking = result.get("show_thinking", self.config.show_thinking)
         self.config.show_tool_output = result.get("show_tool_output", self.config.show_tool_output)
+        self.config.browser_headless = result.get("browser_headless", self.config.browser_headless)
+        self.config.browser_persistent_profile = result.get(
+            "browser_persistent_profile", self.config.browser_persistent_profile)
         self.config.reasoning_effort = result.get("reasoning_effort", self.config.reasoning_effort)
         self.config.chakla_model = result.get("chakla_model", self.config.chakla_model)
         self.config.label_main = result.get("label_main", self.config.label_main)
@@ -1056,6 +1078,26 @@ class RiftorApp(App):
 
         self._markdown(render_markdown(check_toolchain()))
 
+    def _browser_cmd(self, arg: str) -> None:
+        sub = (arg or "").strip().lower()
+        mgr = self.toolctx.browser
+        if sub in ("headed", "headless"):
+            self.config.browser_headless = sub == "headless"
+            self.config.save()
+            self._note(f"browser mode → {sub} (applies on next launch)")
+            return
+        if sub == "close":
+            if mgr is not None and mgr.launched:
+                self.run_worker(mgr.close(), exclusive=False, exit_on_error=False)
+                self._note("closing browser…")
+            else:
+                self._note("no browser running")
+            return
+        mode = "headless" if self.config.browser_headless else "headed"
+        profile = "persistent" if self.config.browser_persistent_profile else "incognito"
+        state = "running" if (mgr and mgr.launched) else "not launched"
+        self._note(f"browser: {state} · {mode} · {profile} (toggle in /config)")
+
     def _export_cmd(self) -> None:
         import json
         import shutil
@@ -1173,6 +1215,7 @@ class RiftorApp(App):
         if not data:
             self._note(f"no such session: {sid}")
             return
+        self._reset_browser_for_session()
         self.session_id = data["id"]
         self.context.load(data.get("messages", []))
         self.context.repair()
@@ -1181,8 +1224,19 @@ class RiftorApp(App):
         self._replay_transcript(self.context.messages)
         self._note(f"resumed session {sid} ({len(data.get('messages', []))} messages)")
 
+    def _reset_browser_for_session(self) -> None:
+        """Close and forget the session's browser on a session switch (/new, /resume)
+        so a new session starts with no carried-over page/cookies, and the first-run
+        incognito hint fires again."""
+        mgr = self.toolctx.browser
+        if mgr is not None and mgr.launched:
+            self.run_worker(mgr.close(), exclusive=False, exit_on_error=False)
+        self.toolctx.browser = None
+        self._browser_hint_shown = False
+
     def _new_session(self) -> None:
         self._save_session()
+        self._reset_browser_for_session()
         self.session_id = sessions.new_id()
         self.context.clear()
         self.usage = Usage()
@@ -1472,6 +1526,13 @@ class RiftorApp(App):
             # "once" → approve this single call, remember nothing
 
         audit_preview = preview + (" [scope-override]" if scope_warning else "")
+        if call.name.startswith("browser_") and not self._browser_hint_shown:
+            self._browser_hint_shown = True
+            if not self.config.browser_persistent_profile:
+                self._note(
+                    "browser running in incognito (nothing saved) · enable persistent "
+                    "profile in /config to keep cookies/logins across runs"
+                )
         start = time.monotonic()
         try:
             result = await tool.execute(call.arguments, self.toolctx)
@@ -1491,6 +1552,27 @@ class RiftorApp(App):
             result_len=len(result.content),
         )
         await self._show_tool_result(result.content, is_error=result.is_error)
+        if call.name == "browser_screenshot" and not result.is_error:
+            import re
+
+            m = re.search(r"saved → (\S+\.png)", result.content)
+            if m:
+                shot = Path(m.group(1))
+                if shot.exists():
+                    rendered_inline = False
+                    if _InlineImage is not None:
+                        try:
+                            await self._mount(_InlineImage(str(shot)))
+                            rendered_inline = True
+                        except Exception:  # noqa: BLE001 — terminal can't render; fall back
+                            rendered_inline = False
+                    if not rendered_inline:
+                        # OSC-8 clickable hyperlink to the PNG (works in modern
+                        # terminals; the plain path is also shown by the result line).
+                        uri = shot.resolve().as_uri()
+                        link = Text("open screenshot", style=f"underline {self._pal()['cyan']}")
+                        link.stylize(f"link {uri}")
+                        await self._mount(Static(link, classes="note"))
         self.context.add_tool_result(call.id, result.content)
         self._last_output = result.content
         self._refresh_status()

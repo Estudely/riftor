@@ -5,7 +5,7 @@ _riftor() {
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
-    opts="--version --config --model --chakla-model --api-key --workdir --scope-file --prompt --headless --help"
+    opts="--version --config --model --chakla-model --api-key --workdir --scope-file --browser-headed --prompt --headless --help"
 
     case "$prev" in
         --workdir|--scope-file)

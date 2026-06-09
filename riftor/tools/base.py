@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from riftor.engagement import Engagement
     from riftor.safety.audit import AuditLog
     from riftor.safety.permissions import Permissions
+    from riftor.tools.browser import BrowserManager
 
 MAX_RESULT_CHARS = 30_000
 
@@ -53,6 +54,10 @@ class ToolContext:
     #: the UI task and may mutate widgets directly. If the agent loop ever moves
     #: to a thread, the callback must marshal via call_from_thread.
     progress: "Callable[[dict], None] | None" = None
+    #: Lazily-launched, session-scoped browser. The first long-lived resource in
+    #: riftor (every other tool is stateless per call). None until a browser_*
+    #: tool launches it. Mirrors how ``engagement`` persists across calls.
+    browser: "BrowserManager | None" = None
 
 
 def resolve_path(ctx: ToolContext, raw: str) -> Path:

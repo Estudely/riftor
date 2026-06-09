@@ -43,6 +43,7 @@ async def test_config_modal_renders_all_fields():
                 ("#cfg-label-main", Input), ("#cfg-label-worker", Input),
                 ("#cfg-theme", Select), ("#cfg-lore", Switch),
                 ("#cfg-show-thinking", Switch), ("#cfg-show-tool-output", Switch),
+                ("#cfg-browser-headless", Switch), ("#cfg-browser-persistent", Switch),
                 ("#cfg-reasoning-effort", Select),
             ]:
                 assert screen.query_one(fid, kind) is not None, fid
@@ -52,8 +53,8 @@ async def test_config_modal_renders_all_fields():
             # 3 picker rows + 2 label rows (was 1 plain input + 2 labels) => +2.
             # +3 field rows for the DISPLAY section => 15 + 3 = 18, plus the
             # GENERATION "Tool call steps" row => 19, plus the MODEL "Codex login"
-            # status row => 20.
-            assert len(list(screen.query(".field-label"))) == 20
+            # status row => 20, plus 2 DISPLAY browser switches => 22.
+            assert len(list(screen.query(".field-label"))) == 22
             await pilot.press("escape")
             await pilot.pause()
 

@@ -654,6 +654,32 @@ async def test_engagement() -> None:
     print("ENGAGEMENT OK")
 
 
+async def _browser_smoke() -> None:
+    """Lazy-launch → navigate (local fixture) → teardown. Skips if no Chromium."""
+    import importlib.util
+    from pathlib import Path
+
+    if importlib.util.find_spec("playwright") is None:
+        print("smoke: browser skipped (no playwright)")
+        return
+    cache = Path.home() / ".cache" / "ms-playwright"
+    if not (cache.exists() and any(cache.glob("chromium-*"))):
+        print("smoke: browser skipped (no Chromium binary)")
+        return
+    import tempfile
+    from riftor.config import Config
+    from riftor.tools import ToolContext
+    from riftor import tools
+
+    fixture = Path(__file__).parent.parent / "tests" / "fixtures" / "login.html"
+    with tempfile.TemporaryDirectory() as d:
+        ctx = ToolContext(workdir=Path(d), config=Config(browser_headless=True))
+        r = await tools.get("browser_navigate").execute({"url": fixture.as_uri()}, ctx)
+        assert not r.is_error and "Sign in" in r.content, r.content
+        await ctx.browser.close()
+    print("smoke: browser ok")
+
+
 if __name__ == "__main__":
     asyncio.run(main())
     asyncio.run(test_tools())
@@ -665,3 +691,4 @@ if __name__ == "__main__":
     test_cvss()
     test_report()
     test_session()
+    asyncio.run(_browser_smoke())

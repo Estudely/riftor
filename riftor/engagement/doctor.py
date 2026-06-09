@@ -72,6 +72,30 @@ def summarize(statuses: list[ToolStatus]) -> dict:
     }
 
 
+def browser_status() -> tuple[bool, bool, str]:
+    """Return (package_ok, binary_ok, detail) for the Playwright browser."""
+    try:
+        import importlib.util
+
+        pkg_ok = importlib.util.find_spec("playwright") is not None
+    except Exception:  # noqa: BLE001
+        pkg_ok = False
+    binary_ok = False
+    if pkg_ok:
+        from pathlib import Path
+
+        # Playwright caches browsers under ~/.cache/ms-playwright (Linux/macOS).
+        cache = Path.home() / ".cache" / "ms-playwright"
+        binary_ok = cache.exists() and any(cache.glob("chromium-*"))
+    if not pkg_ok:
+        detail = "playwright package not installed"
+    elif not binary_ok:
+        detail = "Chromium not installed — run: playwright install chromium"
+    else:
+        detail = "ready (chromium installed)"
+    return pkg_ok, binary_ok, detail
+
+
 def render_markdown(statuses: list[ToolStatus]) -> str:
     """A grouped, human-readable report for the TUI / CLI."""
     by_stage: dict[str, list[ToolStatus]] = {}
@@ -90,6 +114,12 @@ def render_markdown(statuses: list[ToolStatus]) -> str:
             where = f" `{s.path}`" if s.present else " — *not on PATH*"
             lines.append(f"- {mark} `{s.name}` — {s.purpose}{where}")
         lines.append("")
+
+    pkg_ok, binary_ok, detail = browser_status()
+    bmark = "✓" if (pkg_ok and binary_ok) else "✗"
+    lines.append("_Browser_")
+    lines.append(f"- {bmark} `browser` (Playwright) — {detail}")
+    lines.append("")
 
     summary = summarize(statuses)
     lines.append(
@@ -118,4 +148,8 @@ def render_plain(statuses: list[ToolStatus]) -> str:
     mark = "ok " if st.logged_in else "MISSING"
     lines.append("Codex subscription:")
     lines.append(f"  [{mark}] {'codex login':<10} {st.detail}")
+    pkg_ok, binary_ok, detail = browser_status()
+    mark = "ok " if (pkg_ok and binary_ok) else "MISSING"
+    lines.append("Browser (Playwright):")
+    lines.append(f"  [{mark}] {'browser':<10} {detail}")
     return "\n".join(lines)

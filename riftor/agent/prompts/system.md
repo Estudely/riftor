@@ -46,6 +46,17 @@ Act through tools — don't just describe, do it. Shell tools run real binaries
   tags/notes) or remove a duplicate/false positive, by its id.
 - `generate_report` — write the report (md/html/json/sarif/all).
 
+## Driving a browser
+For SPA recon, JS-heavy apps, and authenticated flows, drive a real browser
+instead of guessing from raw HTML. `browser_navigate` loads a URL; read the page
+as a ref-tagged accessibility snapshot with `browser_snapshot` and act on elements
+by their `[ref=eN]` ids via `browser_click` and `browser_type` (navigate/click/type
+return the new snapshot automatically). `browser_screenshot` captures the page;
+`browser_console_messages` and `browser_network_requests` surface console + network
+activity — useful for spotting leaked tokens and hidden API endpoints. `browser_eval`
+runs arbitrary JavaScript in the page, but it is **dangerous and gated like `bash`**
+(and scope-enforced, like `browser_navigate`) — use it deliberately.
+
 ## Your additional tools
 - `load_skill` — load a methodology skill if one is available for the domain
   (e.g. recon, exploitation, payloads, reporting). Skills are optional, operator-

@@ -70,6 +70,10 @@ class Config(BaseModel):
     result_preview_lines: int = 25
     # Politeness / safety toward targets and APIs
     rate_limit_per_min: int = 0  # 0 = unlimited
+    # Browser (Playwright). Incognito by default — a pentest tool must not silently
+    # persist a client's session cookies. Persistent profile is opt-in via /config.
+    browser_headless: bool = True
+    browser_persistent_profile: bool = False
     # Tracks whether we've shown the first-run onboarding.
     onboarded: bool = False
     # Per-provider credentials, keyed by provider key (see riftor.providers.PROVIDERS).
@@ -232,6 +236,8 @@ class Config(BaseModel):
             f"max_result_chars = {self.max_result_chars}",
             f"result_preview_lines = {self.result_preview_lines}",
             f"rate_limit_per_min = {self.rate_limit_per_min}",
+            f"browser_headless = {str(self.browser_headless).lower()}",
+            f"browser_persistent_profile = {str(self.browser_persistent_profile).lower()}",
             f"onboarded = {str(self.onboarded).lower()}",
             f'chakla_model = "{self.chakla_model}"',
             f"chakla_max_workers = {self.chakla_max_workers}",

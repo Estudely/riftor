@@ -48,3 +48,11 @@ def test_render_plain(monkeypatch):
     plain = doctor.render_plain(doctor.check_toolchain())
     assert "MISSING" in plain and "ok" in plain
     assert "missing (not fatal):" in plain
+
+
+def test_browser_status_in_plain_report():
+    from riftor.engagement import doctor
+
+    text = doctor.render_plain(doctor.check_toolchain())
+    assert "browser" in text.lower()
+    assert "playwright" in text.lower()
