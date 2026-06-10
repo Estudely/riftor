@@ -328,6 +328,7 @@ class RiftorApp(App):
             audit=self.audit,
             yolo=self.yolo,
             progress=self._on_chakla_progress,
+            telemetry=self.telemetry,
         )
         self._rate_times: list[float] = []
         self._autoscroll = True
