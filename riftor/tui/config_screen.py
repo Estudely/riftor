@@ -65,6 +65,8 @@ class ConfigScreen(ModalScreen[dict | None]):
         self._worker_provider = provider_key_for_model(
             self.config.chakla_model or self.config.model)
         self._worker_provider_initialized = False
+        self._full_models: list[tuple[str, str]] = []
+        self._full_chakla_models: list[tuple[str, str]] = []
 
     def compose(self) -> ComposeResult:
         theme = self.config.theme if self.config.theme in THEMES else "rift"
@@ -83,6 +85,7 @@ class ConfigScreen(ModalScreen[dict | None]):
         # 8.x and would crash on mount with InvalidSelectValueError.
         if bare and bare not in [v for _, v in model_opts]:
             model_opts = [(bare, bare), *model_opts]
+        self._full_models = model_opts
         model_val = bare if bare else Select.NULL
         # --- worker (Chakla) picker display values, mirroring the main model ---
         wkey = self._worker_provider
@@ -95,6 +98,7 @@ class ConfigScreen(ModalScreen[dict | None]):
         w_model_opts = _model_options(wkey)
         if wbare and wbare not in [v for _, v in w_model_opts]:
             w_model_opts = [(wbare, wbare), *w_model_opts]
+        self._full_chakla_models = w_model_opts
         # Empty chakla_model => "reuse main" => show nothing selected.
         w_model_val = wbare if self.config.chakla_model and wbare else Select.NULL
         with Vertical(id="config-box"):
@@ -117,6 +121,8 @@ class ConfigScreen(ModalScreen[dict | None]):
                         yield _row("Provider", Select(
                             [(m.label, k) for k, m in PROVIDERS.items()],
                             value=pkey, allow_blank=False, id="cfg-provider"))
+                        yield _row("Search", Input(
+                            placeholder="filter models…", id="cfg-model-filter"))
                         yield _row("Model", Select(
                             model_opts, value=model_val, allow_blank=True, id="cfg-model-select"))
                         yield _row("Custom id", Input(
@@ -148,6 +154,8 @@ class ConfigScreen(ModalScreen[dict | None]):
                         yield _row("Provider", Select(
                             [(m.label, k) for k, m in PROVIDERS.items()],
                             value=wkey, allow_blank=False, id="cfg-chakla-provider"))
+                        yield _row("Search", Input(
+                            placeholder="filter models…", id="cfg-chakla-model-filter"))
                         yield _row("Model", Select(
                             w_model_opts, value=w_model_val, allow_blank=True,
                             id="cfg-chakla-model-select"))
@@ -261,12 +269,35 @@ class ConfigScreen(ModalScreen[dict | None]):
                 self._worker_provider_initialized = True
 
     def _set_model_options(self, options: list[tuple[str, str]]) -> None:
-        sel = self.query_one("#cfg-model-select", Select)
-        sel.set_options(options or [("(type a custom id below)", "")])
+        self._full_models = options or [("(type a custom id below)", "")]
+        filt = self.query_one("#cfg-model-filter", Input).value
+        self._apply_model_filter(filt, self._full_models, "#cfg-model-select")
 
     def _set_chakla_model_options(self, options: list[tuple[str, str]]) -> None:
-        sel = self.query_one("#cfg-chakla-model-select", Select)
-        sel.set_options(options or [("(type a custom id below)", "")])
+        self._full_chakla_models = options or [("(type a custom id below)", "")]
+        filt = self.query_one("#cfg-chakla-model-filter", Input).value
+        self._apply_model_filter(filt, self._full_chakla_models, "#cfg-chakla-model-select")
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        """Filter the model list on each keystroke."""
+        if event.input.id == "cfg-model-filter":
+            self._apply_model_filter(event.value, self._full_models, "#cfg-model-select")
+        elif event.input.id == "cfg-chakla-model-filter":
+            self._apply_model_filter(event.value, self._full_chakla_models, "#cfg-chakla-model-select")
+
+    def _apply_model_filter(
+        self, query: str, full: list[tuple[str, str]], select_id: str
+    ) -> None:
+        """Update *select_id* options to only those matching *query* (case-insensitive)."""
+        sel = self.query_one(select_id, Select)
+        q = query.strip().lower()
+        if not q:
+            sel.set_options(full)
+            return
+        filtered = [(label, value) for label, value in full if q in value.lower()]
+        if not filtered:
+            filtered = [("(no matches)", "")]
+        sel.set_options(filtered)
 
     @work(thread=True, exclusive=True, group="fetch")
     def _fetch_models_worker(self, provider: str, base: str, key: str | None) -> None:
