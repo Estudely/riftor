@@ -63,8 +63,13 @@ class Telemetry:
         self._init_posthog()
 
     @classmethod
-    def from_config(cls, config: "Config", version: str = "0.0.0") -> "Telemetry":
-        t = cls(version=version)
+    def from_config(
+        cls,
+        config: "Config",
+        version: str = "0.0.0",
+        **kwargs: object,
+    ) -> "Telemetry":
+        t = cls(version=version, **kwargs)  # type: ignore[arg-type]
         if not config.telemetry:
             t._disabled = True
         return t
