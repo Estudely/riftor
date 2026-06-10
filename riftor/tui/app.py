@@ -26,7 +26,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Markdown, Static
 
-from riftor import tools
+from riftor import __version__, tools
 from riftor.agent import antiloop
 from riftor.agent import session as sessions
 from riftor.agent.context import Context
@@ -306,7 +306,7 @@ class RiftorApp(App):
         self.engagement = Engagement(self.workdir)
         self.permissions = Permissions.load(PERMISSIONS_PATH)
         self.audit = AuditLog()
-        self.telemetry = Telemetry.from_config(config)
+        self.telemetry = Telemetry.from_config(config, version=__version__)
         self.max_steps = config.max_steps
         self.session_id = sessions.new_id()
         # input history + last-output tracking + rate limiting
@@ -1562,6 +1562,7 @@ class RiftorApp(App):
                         self.context.add_tool_result(
                             call.id, "[anti-loop] skipped — stopping this turn."
                         )
+                        self.telemetry.track_tool_call(call.name, allowed=False)
                         continue
                     sig = antiloop.call_signature(call.name, call.arguments)
                     decision = antiloop.classify(_recent_cmds, sig)
@@ -1578,6 +1579,7 @@ class RiftorApp(App):
                             "times. STOP and try a completely different approach.",
                         )
                         anti_loop_stop = True
+                        self.telemetry.track_tool_call(call.name, allowed=False)
                         continue
                     if decision.warn:
                         # Operator-only notice; still run the tool so the call gets
@@ -1687,6 +1689,7 @@ class RiftorApp(App):
             msg = f"error: unknown tool '{call.name}'"
             await self._show_tool_result(msg, is_error=True)
             self.context.add_tool_result(call.id, msg)
+            self.telemetry.track_tool_call(call.name, allowed=False, is_error=True)
             return
 
         preview = tool.preview(call.arguments)
