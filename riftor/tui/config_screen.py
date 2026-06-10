@@ -174,6 +174,7 @@ class ConfigScreen(ModalScreen[dict | None]):
                         yield _row("Theme", Select([(n, n) for n in THEMES], value=theme,
                                                    allow_blank=False, id="cfg-theme"))
                         yield _row("Lore", Switch(value=self.config.lore, id="cfg-lore"))
+                        yield _row("Genz", Switch(value=self.config.genz, id="cfg-genz"))
 
                     with Vertical(id="section-display", classes="config-section-panel hidden"):
                         yield Label("Display", classes="config-section")
@@ -380,6 +381,7 @@ class ConfigScreen(ModalScreen[dict | None]):
             "max_steps": max_steps,
             "theme": self.query_one("#cfg-theme", Select).value,
             "lore": self.query_one("#cfg-lore", Switch).value,
+            "genz": self.query_one("#cfg-genz", Switch).value,
             "show_thinking": self.query_one("#cfg-show-thinking", Switch).value,
             "show_tool_output": self.query_one("#cfg-show-tool-output", Switch).value,
             "browser_headless": self.query_one("#cfg-browser-headless", Switch).value,

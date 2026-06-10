@@ -44,6 +44,7 @@ async def test_config_modal_renders_all_fields():
                 ("#cfg-chakla-custom", Input),
                 ("#cfg-label-main", Input), ("#cfg-label-worker", Input),
                 ("#cfg-theme", Select), ("#cfg-lore", Switch),
+                ("#cfg-genz", Switch),
                 ("#cfg-show-thinking", Switch), ("#cfg-show-tool-output", Switch),
                 ("#cfg-browser-headless", Switch), ("#cfg-browser-persistent", Switch),
                 ("#cfg-reasoning-effort", Select),
@@ -56,8 +57,9 @@ async def test_config_modal_renders_all_fields():
             # +3 field rows for the DISPLAY section => 15 + 3 = 18, plus the
             # GENERATION "Tool call steps" row => 19, plus the MODEL "Codex login"
             # status row => 20, plus 2 DISPLAY browser switches => 22,
-            # plus 2 model search/filter rows (MODEL + WORKERS) => 24.
-            assert len(list(screen.query(".field-label"))) == 24
+            # plus 2 model search/filter rows (MODEL + WORKERS) => 24,
+            # plus the genz switch in APPEARANCE => 25.
+            assert len(list(screen.query(".field-label"))) == 25
             await pilot.press("escape")
             await pilot.pause()
 
