@@ -101,6 +101,7 @@ async def _run(cfg: Config, workdir: Path, prompt: str, scope_file: str | None, 
         audit=audit,
         yolo=yolo,
         progress=_make_progress_printer(),
+        telemetry=telemetry,
     )
     schemas = tools.schemas()
 

@@ -3,7 +3,7 @@
 Disabled when:
   1. ``RIFTOR_TELEMETRY_DISABLED=1`` env var is set
   2. ``config.telemetry`` is ``False``
-  3. Keys are empty / SDK import fails
+  3. No API key is available
 
 All operations are wrapped in try/except — telemetry errors never propagate.
 """
@@ -36,18 +36,32 @@ class Telemetry:
         self._disabled = bool(os.environ.get("RIFTOR_TELEMETRY_DISABLED"))
         self._queue: queue.Queue = queue.Queue()
         self._started_at = time.monotonic()
+        self._posthog_client = None
 
         if self._disabled:
             return
 
-        try:
-            from riftor._telemetry_keys import POSTHOG_API_KEY, POSTHOG_HOST
-        except ImportError:
-            self._disabled = True
-            return
+        # Resolve key: explicit kwarg → POSTHOG_PROJECT_TOKEN env → RIFTOR_POSTHOG_KEY env → _telemetry_keys.py
+        key = posthog_api_key or os.environ.get("POSTHOG_PROJECT_TOKEN") or os.environ.get("RIFTOR_POSTHOG_KEY")
+        if not key:
+            try:
+                from riftor._telemetry_keys import POSTHOG_API_KEY
+                key = POSTHOG_API_KEY
+            except ImportError:
+                pass
 
-        self._posthog_key = posthog_api_key or POSTHOG_API_KEY
-        self._posthog_host = posthog_host or POSTHOG_HOST
+        # Resolve host: explicit kwarg → POSTHOG_HOST env → RIFTOR_POSTHOG_HOST env → _telemetry_keys.py
+        host = posthog_host or os.environ.get("POSTHOG_HOST") or os.environ.get("RIFTOR_POSTHOG_HOST")
+        if not host:
+            try:
+                from riftor._telemetry_keys import POSTHOG_HOST as _baked_host
+                host = _baked_host
+            except ImportError:
+                pass
+        host = host or ""
+
+        self._posthog_key = key
+        self._posthog_host = host
 
         if not self._posthog_key:
             self._disabled = True
@@ -73,10 +87,16 @@ class Telemetry:
         if not self._posthog_key:
             return
         try:
-            import posthog  # type: ignore[import-untyped]
+            import atexit
 
-            posthog.api_key = self._posthog_key
-            posthog.host = self._posthog_host
+            from posthog import Posthog
+
+            self._posthog_client = Posthog(
+                self._posthog_key,
+                host=self._posthog_host,
+                enable_exception_autocapture=True,
+            )
+            atexit.register(self._posthog_client.shutdown)
         except Exception:  # noqa: BLE001
             pass
 
@@ -141,6 +161,53 @@ class Telemetry:
             "tokens_out": tokens_out,
         })
 
+    # -- Business events -------------------------------------------------------
+
+    def track_finding_recorded(
+        self,
+        *,
+        severity: str = "",
+        has_cvss: bool = False,
+        has_confidence: bool = False,
+    ) -> None:
+        if self._disabled:
+            return
+        self._enqueue("finding_recorded", {
+            "severity": severity,
+            "has_cvss": has_cvss,
+            "has_confidence": has_confidence,
+        })
+
+    def track_report_generated(self, *, format: str = "") -> None:
+        if self._disabled:
+            return
+        self._enqueue("report_generated", {"format": format})
+
+    def track_stage_advanced(self, *, stage: str = "") -> None:
+        if self._disabled:
+            return
+        self._enqueue("stage_advanced", {"stage": stage})
+
+    def track_scan_imported(
+        self,
+        *,
+        tool: str = "",
+        services_added: int = 0,
+        findings_added: int = 0,
+    ) -> None:
+        if self._disabled:
+            return
+        self._enqueue("scan_imported", {
+            "tool": tool,
+            "services_added": services_added,
+            "findings_added": findings_added,
+        })
+
+    def track_scope_target_added(self, *, count: int = 0) -> None:
+        if self._disabled:
+            return
+        self._enqueue("scope_target_added", {"count": count})
+
     # -- Error reporting -------------------------------------------------------
 
     def capture_exception(self, exc: BaseException) -> None:
@@ -170,18 +237,15 @@ class Telemetry:
     def flush(self) -> None:
         if self._disabled:
             return
-        try:
-            import posthog  # type: ignore[import-untyped]
-        except ImportError:
+        if self._posthog_client is None:
             return
-
         while True:
             try:
                 event, properties = self._queue.get_nowait()
             except queue.Empty:
                 break
             try:
-                posthog.capture(
+                self._posthog_client.capture(
                     distinct_id=self._distinct_id(),
                     event=event,
                     properties=properties,
