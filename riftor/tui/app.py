@@ -154,7 +154,7 @@ _COMMANDS = [
     "/edit-finding", "/delete-finding", "/hosts", "/services", "/report",
     "/sessions", "/resume", "/new", "/theme", "/config", "/tools", "/permissions",
     "/lore", "/cost", "/retry", "/continue", "/compact", "/copy", "/show",
-    "/timeline", "/audit", "/export", "/doctor", "/review", "/hypotheses", "/lesson", "/lessons", "/browser", "/exit",
+    "/timeline", "/audit", "/export", "/conversation", "/doctor", "/review", "/hypotheses", "/lesson", "/lessons", "/browser", "/exit",
 ]
 
 HELP = """\
@@ -166,6 +166,7 @@ _Conversation_
 - `/compact` — shrink old tool output to free context
 - `/copy` — copy the last agent/tool output · `/show <id>` — expand a tool result
 - `/cost` — token + cost for this session
+- `/conversation` — export the full conversation as markdown
 
 _Engagement_
 - `/scope` — show scope · `/scope add 10.0.0.0/24 example.com` · `/scope out <t>`
@@ -205,6 +206,7 @@ _PALETTE_COMMANDS = [
     ("/report all", "Report (all formats)", "md + html + json + sarif"),
     ("/timeline", "Timeline", "Engagement activity log"),
     ("/export", "Export engagement", "Archive the whole engagement"),
+    ("/conversation", "Export conversation", "Save conversation as markdown"),
     ("/permissions", "Permissions", "Review allow/deny rules"),
     ("/doctor", "Doctor", "Check installed recon tools"),
     ("/audit", "Audit log", "Recent tool-call audit entries"),
@@ -656,6 +658,7 @@ class RiftorApp(App):
             "/timeline": self._timeline_cmd,
             "/audit": self._audit_cmd,
             "/export": self._export_cmd,
+            "/conversation": self._conversation_cmd,
             "/doctor": self._doctor_cmd,
             "/browser": lambda: self._browser_cmd(arg),
             "/review": self._review_cmd,
@@ -1173,6 +1176,87 @@ class RiftorApp(App):
             return
         self.engagement.store.log_activity("export", archive)
         self._note(f"engagement exported → {archive}")
+
+    def _conversation_cmd(self) -> None:
+        """Export the full conversation as markdown to .riftor/reports/."""
+        import json
+        import textwrap
+
+        stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        out_dir = self.engagement.dir / "reports"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        fname = f"conversation_{self.session_id}.md"
+        path = out_dir / fname
+
+        lines = [
+            "# riftor · Conversation Export",
+            "",
+            f"**Session:** `{self.session_id}`",
+            f"**Model:** `{self.config.model}`",
+            f"**Exported:** {stamp}",
+            f"**Messages:** {len(self.context.messages)}",
+            "",
+            "---",
+            "",
+        ]
+
+        for msg in self.context.messages:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+
+            if role == "system":
+                continue  # skip the system prompt
+
+            elif role == "user":
+                lines.append("## User")
+                lines.append("")
+                lines.append(content if isinstance(content, str) else str(content))
+                lines.append("")
+
+            elif role == "assistant":
+                if isinstance(content, str) and content:
+                    lines.append("## Assistant")
+                    lines.append("")
+                    lines.append(content)
+                    lines.append("")
+
+                tool_calls = msg.get("tool_calls") or []
+                for tc in tool_calls:
+                    fn = tc.get("function", {})
+                    name = fn.get("name", "?")
+                    raw_args = fn.get("arguments", "{}")
+                    # indent the json one level so it sits nicely under the heading
+                    try:
+                        args_obj = json.loads(raw_args)
+                        args_fmt = json.dumps(args_obj, indent=2)
+                    except (json.JSONDecodeError, TypeError):
+                        args_fmt = str(raw_args)
+                    args_indented = textwrap.indent(args_fmt, "    ")
+                    lines.append(f"### `{name}`")
+                    lines.append("")
+                    lines.append("```json")
+                    lines.append(args_indented)
+                    lines.append("```")
+                    lines.append("")
+
+            elif role == "tool":
+                call_id = msg.get("tool_call_id", "?")
+                lines.append(f"### Tool Result (`{call_id}`)")
+                lines.append("")
+                text = content if isinstance(content, str) else str(content)
+                if len(text) > 8000:
+                    text = text[:8000] + "\n\n… (truncated)"
+                lines.append("```")
+                lines.append(text)
+                lines.append("```")
+                lines.append("")
+
+        try:
+            path.write_text("\n".join(lines), encoding="utf-8")
+        except Exception as exc:  # noqa: BLE001
+            self._error(f"conversation export failed — {exc}")
+            return
+        self._note(f"conversation exported → {path}")
 
     # ---- conversation utilities ------------------------------------------------
     def _cost_cmd(self) -> None:
