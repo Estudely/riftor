@@ -22,8 +22,9 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.command import Hit, Hits
 from textual.command import Provider as CommandProvider
-from textual.containers import VerticalScroll
-from textual.widgets import Input, Markdown, Static
+from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.screen import ModalScreen
+from textual.widgets import Button, Input, Markdown, Static
 
 from riftor import tools
 from riftor.agent import antiloop
@@ -233,6 +234,43 @@ class RiftorCommands(CommandProvider):
                 )
 
 
+class _RecoveryModal(ModalScreen[bool]):
+    """Offered when an incomplete (crashed) session is found on startup."""
+
+    BINDINGS = [
+        ("escape", "dismiss(False)", "Start fresh"),
+        ("r", "dismiss(True)", "Resume"),
+    ]
+
+    def __init__(self, session_id: str, title: str) -> None:
+        super().__init__()
+        self._sid = session_id
+        self._title = title
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="recovery-box"):
+            yield Static(
+                Text("⚠  Crashed Session Detected", style="bold #fbbf24"),
+                id="recovery-title",
+            )
+            yield Static(
+                Text(
+                    f"Session {self._sid} ended unexpectedly.\n"
+                    f"{self._title or '(empty)'}"
+                ),
+                id="recovery-detail",
+            )
+            with Horizontal(id="recovery-buttons"):
+                yield Button("Resume (r)", id="resume", variant="success")
+                yield Button("Start fresh (esc)", id="fresh", variant="error")
+
+    def on_mount(self) -> None:
+        self.query_one("#resume", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(event.button.id == "resume")
+
+
 class RiftorApp(App):
     CSS_PATH = "themes/rift.tcss"
     TITLE = "riftor"
@@ -335,7 +373,11 @@ class RiftorApp(App):
         if warning:
             self._note("⚠ " + warning)
         self._toolchain_heads_up()
-        if not self._resume_latest():
+        # If the previous run crashed (incomplete session), prompt for recovery
+        # after mount; otherwise resume the latest complete session as normal.
+        if sessions.find_incomplete(self.workdir):
+            self.set_timer(0.1, self._offer_recovery)
+        elif not self._resume_latest():
             self._note(
                 "rift online · set scope with /scope add <target> before tasking the agent"
             )
@@ -1237,6 +1279,22 @@ class RiftorApp(App):
             self.run_worker(mgr.close(), exclusive=False, exit_on_error=False)
         self.toolctx.browser = None
         self._browser_hint_shown = False
+
+    async def _offer_recovery(self) -> None:
+        """Prompt the operator to resume a crashed (incomplete) session."""
+        incomplete = sessions.find_incomplete(self.workdir)
+        if not incomplete:
+            return
+        crashed = incomplete[0]  # newest incomplete
+        resume = await self.push_screen_wait(
+            _RecoveryModal(crashed["id"], crashed.get("title", ""))
+        )
+        if resume:
+            self._resume_cmd(crashed["id"])
+        else:
+            self._note(
+                "rift online · set scope with /scope add <target> before tasking the agent"
+            )
 
     def _new_session(self) -> None:
         self._save_session()

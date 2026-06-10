@@ -96,6 +96,11 @@ def list_sessions(workdir: Path) -> list[dict]:
     return out
 
 
+def find_incomplete(workdir: Path) -> list[dict]:
+    """Return metadata for incomplete (crashed) sessions, newest first."""
+    return [s for s in list_sessions(workdir) if not s.get("complete", True)]
+
+
 def latest(workdir: Path) -> dict | None:
     sessions = list_sessions(workdir)
     if not sessions:
