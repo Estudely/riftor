@@ -20,6 +20,7 @@ from riftor.config import PERMISSIONS_PATH, Config
 from riftor.engagement import Engagement
 from riftor.safety.audit import AuditLog
 from riftor.safety.permissions import Permissions
+from riftor.telemetry import Telemetry
 from riftor.tools import ToolContext, ToolResult
 
 
@@ -87,6 +88,10 @@ async def _run(cfg: Config, workdir: Path, prompt: str, scope_file: str | None, 
             print(f"riftor: scope file error: {exc}", file=sys.stderr)
     permissions = Permissions.load(PERMISSIONS_PATH)
     audit = AuditLog()
+    telemetry = Telemetry.from_config(cfg)
+    telemetry.track_session_start(
+        model=cfg.model, theme=cfg.theme, yolo=yolo
+    )
     toolctx = ToolContext(
         workdir=workdir,
         engagement=engagement,
@@ -120,16 +125,29 @@ async def _run(cfg: Config, workdir: Path, prompt: str, scope_file: str | None, 
                     elif event == "done":
                         turn = payload  # type: ignore[assignment]  # ("done", Turn)
             except ProviderError as exc:
+                telemetry.capture_exception(exc)
                 print(f"\nriftor: provider error [{exc.kind}] — {exc}", file=sys.stderr)
                 return 1
             if turn is None:
                 break
             context.add_message(turn.assistant_message)
+            usage = getattr(turn, "usage", None)
+            if usage:
+                telemetry.track_model_call(
+                    cfg.model,
+                    tokens_in=getattr(usage, "input_tokens", 0) or 0,
+                    tokens_out=getattr(usage, "output_tokens", 0) or 0,
+                )
             if not turn.tool_calls:
                 break
             for call in turn.tool_calls:
-                await _run_tool_headless(call, engagement, permissions, audit, toolctx, context, yolo=yolo)
+                await _run_tool_headless(
+                    call, engagement, permissions, audit, toolctx, context,
+                    yolo=yolo, telemetry=telemetry,
+                )
     finally:
+        telemetry.track_session_end()
+        telemetry.flush()
         if toolctx.browser is not None and toolctx.browser.launched:
             try:
                 await toolctx.browser.close()
@@ -147,6 +165,7 @@ async def _run_tool_headless(
     toolctx: ToolContext,
     context: Context,
     yolo: bool = False,
+    telemetry: Telemetry | None = None,
 ) -> None:
     tool = tools.get(call.name)
     if tool is None:
@@ -163,11 +182,15 @@ async def _run_tool_headless(
                 f"[blocked: out of scope] {', '.join(violations)} not in scope.",
             )
             audit.record(tool.name, preview, allowed=False)
+            if telemetry:
+                telemetry.track_tool_call(tool.name, allowed=False)
             return
 
     if not yolo and permissions.is_denied(tool.name, preview):
         context.add_tool_result(call.id, "[blocked by policy] denied by a deny rule.")
         audit.record(tool.name, preview, allowed=False)
+        if telemetry:
+            telemetry.track_tool_call(tool.name, allowed=False)
         return
 
     # No operator present: dangerous tools require a standing allow rule.
@@ -178,6 +201,8 @@ async def _run_tool_headless(
             "Add one to permissions.toml to enable it in headless mode.",
         )
         audit.record(tool.name, preview, allowed=False)
+        if telemetry:
+            telemetry.track_tool_call(tool.name, allowed=False)
         return
 
     try:
@@ -186,4 +211,8 @@ async def _run_tool_headless(
         result = ToolResult(f"error: {exc}", is_error=True)
     result = result.truncated(toolctx.max_result_chars)
     audit.record(tool.name, preview, allowed=True, is_error=result.is_error)
+    if telemetry:
+        telemetry.track_tool_call(
+            tool.name, allowed=True, is_error=result.is_error,
+        )
     context.add_tool_result(call.id, result.content)
