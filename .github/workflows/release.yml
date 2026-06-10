@@ -46,6 +46,10 @@ jobs:
           VER="$(uv version --short 2>/dev/null || grep -m1 '^version' pyproject.toml | cut -d'"' -f2)"
           echo "tag=$TAG pyproject=$VER"
           test "$TAG" = "$VER" || { echo "::error::tag v$TAG != pyproject version $VER"; exit 1; }
+      - name: Bake telemetry keys
+        env:
+          RIFTOR_POSTHOG_KEY: ${{ secrets.RIFTOR_POSTHOG_KEY }}
+        run: make telemetry-keys
       - name: Build sdist + wheel
         run: uv build
       - uses: actions/upload-artifact@v7
