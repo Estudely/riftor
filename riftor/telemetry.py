@@ -1,4 +1,4 @@
-"""Opt-out telemetry: Sentry for crash reporting, PostHog for usage analytics.
+"""Opt-out telemetry via PostHog for usage and error analytics.
 
 Disabled when:
   1. ``RIFTOR_TELEMETRY_DISABLED=1`` env var is set
@@ -23,13 +23,12 @@ if TYPE_CHECKING:
 
 
 class Telemetry:
-    """Thin facade over Sentry + PostHog with silent degradation."""
+    """Thin facade over PostHog with silent degradation."""
 
     def __init__(
         self,
         version: str = "0.0.0",
         *,
-        sentry_dsn: str | None = None,
         posthog_api_key: str | None = None,
         posthog_host: str = "",
     ) -> None:
@@ -42,24 +41,18 @@ class Telemetry:
             return
 
         try:
-            from riftor._telemetry_keys import (
-                SENTRY_DSN,
-                POSTHOG_API_KEY,
-                POSTHOG_HOST,
-            )
+            from riftor._telemetry_keys import POSTHOG_API_KEY, POSTHOG_HOST
         except ImportError:
             self._disabled = True
             return
 
-        self._sentry_dsn = sentry_dsn or SENTRY_DSN
         self._posthog_key = posthog_api_key or POSTHOG_API_KEY
         self._posthog_host = posthog_host or POSTHOG_HOST
 
-        if not self._sentry_dsn and not self._posthog_key:
+        if not self._posthog_key:
             self._disabled = True
             return
 
-        self._init_sentry()
         self._init_posthog()
 
     @classmethod
@@ -73,23 +66,6 @@ class Telemetry:
         if not config.telemetry:
             t._disabled = True
         return t
-
-    # -- Sentry ----------------------------------------------------------------
-
-    def _init_sentry(self) -> None:
-        if not self._sentry_dsn:
-            return
-        try:
-            import sentry_sdk  # type: ignore[import-untyped]
-
-            sentry_sdk.init(
-                dsn=self._sentry_dsn,
-                release=self._version,
-                traces_sample_rate=0.0,
-                auto_session_tracking=False,
-            )
-        except Exception:  # noqa: BLE001
-            pass
 
     # -- PostHog ---------------------------------------------------------------
 
@@ -170,20 +146,18 @@ class Telemetry:
     def capture_exception(self, exc: BaseException) -> None:
         if self._disabled:
             return
-        try:
-            import sentry_sdk  # type: ignore[import-untyped]
-            sentry_sdk.capture_exception(exc)
-        except Exception:  # noqa: BLE001
-            pass
+        self._enqueue("exception", {
+            "type": type(exc).__name__,
+            "message": str(exc)[:500],
+        })
 
     def capture_message(self, message: str, level: str = "info") -> None:
         if self._disabled:
             return
-        try:
-            import sentry_sdk  # type: ignore[import-untyped]
-            sentry_sdk.capture_message(message, level=level)  # type: ignore[arg-type]
-        except Exception:  # noqa: BLE001
-            pass
+        self._enqueue("message", {
+            "message": message[:500],
+            "level": level,
+        })
 
     # -- Queue + flush ---------------------------------------------------------
 
