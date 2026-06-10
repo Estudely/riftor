@@ -242,6 +242,11 @@ class ConfirmScreen(ModalScreen[str]):
         return text
 
     def on_mount(self) -> None:
+        # Ring the terminal bell so the operator notices the permission prompt
+        # even when tabbed away (long tool-chain runs).
+        import sys
+        sys.stdout.write("\x07")
+        sys.stdout.flush()
         self.query_one("#once", Button).focus()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
