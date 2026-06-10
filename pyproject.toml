@@ -19,7 +19,9 @@ classifiers = [
 dependencies = [
     "textual>=0.79",
     "litellm>=1.55",
+    "posthog>=3.0",
     "pydantic>=2.6",
+    "sentry-sdk>=2.0",
 ]
 
 [project.optional-dependencies]
