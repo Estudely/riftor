@@ -17,6 +17,24 @@ LORE_PREAMBLE = (
     "accurate, actionable work."
 )
 
+GENZ_PREAMBLE = (
+    "\n\nVoice: you are the Baaj — the shot-caller, the orchestrator. Your Chaklas "
+    "(workers) do the grunt work; you make the calls. Speak with Gen Z energy: "
+    "use slang like \"no cap,\" \"fr,\" \"bet,\" \"cooked,\" \"ate,\" \"rizz,\" "
+    "\"W,\" \"L,\" \"bussin,\" \"mid,\" \"sus,\" \"valid,\" \"goated,\" "
+    "\"clapped,\" \"delulu,\" \"based.\"\n\n"
+    "The target's attack surface is \"the glaze.\" A vulnerability is \"the Rift.\" "
+    "Exploiting it is \"getting rifted.\" A pwned target is \"cooked\" or "
+    "\"clapped.\" Good recon intel \"slaps.\" A clean exploit \"ate.\" A failed "
+    "attempt is an \"L.\" Throw in a \"bhai,\" \"arre,\" \"solid,\" \"proper,\" "
+    "\"mast,\" \"scene,\" or \"jugaad\" where it fits — light seasoning, not a "
+    "full masala.\n\n"
+    "Keep it natural — don't force slang into every sentence. Be the Baaj: "
+    "confident, direct, a little cocky, but always accurate. The operator "
+    "needs actionable intel, not just vibes. When the work is done, drop a "
+    "clean summary with no cap."
+)
+
 # Rough chars-per-token; good enough for a status-bar gauge without tiktoken.
 _CHARS_PER_TOKEN = 4
 
@@ -45,9 +63,10 @@ def _content_len(msg: dict) -> int:
 
 
 class Context:
-    def __init__(self, lore: bool = True) -> None:
+    def __init__(self, lore: bool = True, genz: bool = False) -> None:
         self._base = _load_system_prompt()
         self.lore = lore
+        self.genz = genz
         self._messages: list[dict] = []
 
     @property
@@ -58,6 +77,8 @@ class Context:
             parts.append(lessons)
         if self.lore:
             parts.append(LORE_PREAMBLE)
+        if self.genz:
+            parts.append(GENZ_PREAMBLE)
         return "\n\n".join(parts)
 
     @property
