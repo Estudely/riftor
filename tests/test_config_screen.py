@@ -35,10 +35,12 @@ async def test_config_modal_renders_all_fields():
             screen = app.screen
             # every field is present and addressable by its stable id
             for fid, kind in [
-                ("#cfg-provider", Select), ("#cfg-model-select", Select),
+                ("#cfg-provider", Select), ("#cfg-model-filter", Input),
+                ("#cfg-model-select", Select),
                 ("#cfg-model", Input), ("#cfg-base", Input), ("#cfg-key", Input),
                 ("#cfg-temp", Input), ("#cfg-maxtok", Input), ("#cfg-maxsteps", Input),
-                ("#cfg-chakla-provider", Select), ("#cfg-chakla-model-select", Select),
+                ("#cfg-chakla-provider", Select), ("#cfg-chakla-model-filter", Input),
+                ("#cfg-chakla-model-select", Select),
                 ("#cfg-chakla-custom", Input),
                 ("#cfg-label-main", Input), ("#cfg-label-worker", Input),
                 ("#cfg-theme", Select), ("#cfg-lore", Switch),
@@ -53,8 +55,9 @@ async def test_config_modal_renders_all_fields():
             # 3 picker rows + 2 label rows (was 1 plain input + 2 labels) => +2.
             # +3 field rows for the DISPLAY section => 15 + 3 = 18, plus the
             # GENERATION "Tool call steps" row => 19, plus the MODEL "Codex login"
-            # status row => 20, plus 2 DISPLAY browser switches => 22.
-            assert len(list(screen.query(".field-label"))) == 22
+            # status row => 20, plus 2 DISPLAY browser switches => 22,
+            # plus 2 model search/filter rows (MODEL + WORKERS) => 24.
+            assert len(list(screen.query(".field-label"))) == 24
             await pilot.press("escape")
             await pilot.pause()
 
