@@ -12,7 +12,6 @@ if TYPE_CHECKING:
     from riftor.engagement import Engagement
     from riftor.safety.audit import AuditLog
     from riftor.safety.permissions import Permissions
-    from riftor.telemetry import Telemetry
     from riftor.tools.browser import BrowserManager
 
 MAX_RESULT_CHARS = 30_000
@@ -59,7 +58,7 @@ class ToolContext:
     #: riftor (every other tool is stateless per call). None until a browser_*
     #: tool launches it. Mirrors how ``engagement`` persists across calls.
     browser: "BrowserManager | None" = None
-    telemetry: "Telemetry | None" = None
+
 
 
 class PathOutsideWorkdir(ValueError):
