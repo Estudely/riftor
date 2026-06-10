@@ -5,9 +5,13 @@ from __future__ import annotations
 import difflib
 
 from rich.text import Text
+from textual.timer import Timer
 from textual.widgets import DataTable, ListItem, ListView, Static
 
 from riftor.tui.theme import palette
+
+#: Frames for the pulse/breathing spinner — ● → ○ → ◎ → ◉ → ◎ → ○ → ●
+PULSE_FRAMES = ["●", "○", "◎", "◉", "◎", "○", "●"]
 
 RIFT_STAGES = ["R", "I", "F", "T"]
 STAGE_NAMES = {"R": "Recon", "I": "Intrusion", "F": "Foothold", "T": "Takeover"}
@@ -45,6 +49,60 @@ class Banner(Static):
         return t
 
 
+class PulseSpinner(Static):
+    """Animated pulse/breathing spinner that cycles through ● ○ ◎ ◉ frames.
+
+    Call :meth:`start` to begin the animation and :meth:`stop` to end it.
+    The spinner renders as ``frame label`` (e.g. ``◉ opening rift…``).
+    """
+
+    FRAMES = PULSE_FRAMES
+
+    def __init__(
+        self,
+        label: str = "",
+        *,
+        classes: str = "",
+        id: str | None = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(classes=classes, id=id, **kwargs)
+        self.label = label
+        self._frame_idx = 0
+        self._timer: Timer | None = None
+
+    def start(self, label: str | None = None) -> None:
+        """Begin the animation. Optionally update the label text."""
+        if label is not None:
+            self.label = label
+        if self._timer is not None:
+            return
+        self._timer = self.set_interval(0.12, self._tick)
+
+    def stop(self) -> None:
+        """Stop the animation."""
+        if self._timer is not None:
+            self._timer.stop()
+            self._timer = None
+
+    def set_label(self, label: str) -> None:
+        """Change the label text without restarting."""
+        self.label = label
+        self._render_frame()
+
+    def _tick(self) -> None:
+        self._frame_idx = (self._frame_idx + 1) % len(self.FRAMES)
+        self._render_frame()
+
+    def _render_frame(self) -> None:
+        self.update(
+            Text(
+                f"{self.FRAMES[self._frame_idx]} {self.label}",
+                style=self.rich_style if self.rich_style else "",
+            )
+        )
+
+
 class StatusBar(Static):
     def __init__(self, model: str, stage: str = "R", lore: bool = True, yolo: bool = False, genz: bool = False) -> None:
         super().__init__()
@@ -63,12 +121,32 @@ class StatusBar(Static):
         self.ctx_pct = 0
         self.chakla_tokens = 0
         self.chakla_cost = 0.0
+        self._spinner_frame = 0
+        self._spinner_timer: Timer | None = None
 
     def on_mount(self) -> None:
         self.refresh_bar()
 
     def set_busy(self, busy: bool) -> None:
         self.busy = busy
+        if busy:
+            self._start_spinner()
+        else:
+            self._stop_spinner()
+        self.refresh_bar()
+
+    def _start_spinner(self) -> None:
+        if self._spinner_timer is not None:
+            return
+        self._spinner_timer = self.set_interval(0.12, self._spin_tick)
+
+    def _stop_spinner(self) -> None:
+        if self._spinner_timer is not None:
+            self._spinner_timer.stop()
+            self._spinner_timer = None
+
+    def _spin_tick(self) -> None:
+        self._spinner_frame = (self._spinner_frame + 1) % len(PULSE_FRAMES)
         self.refresh_bar()
 
     def set_model(self, model: str) -> None:
@@ -170,10 +248,11 @@ class StatusBar(Static):
         if self.yolo:
             t.append("   ⚡ yolo", style=f"bold {p['danger']}")
         if self.busy:
+            frame = PULSE_FRAMES[self._spinner_frame]
             if self.genz:
-                t.append("   ⟳ Baaj is cooking…", style=p["cyan"])
+                t.append(f"   {frame} Baaj is cooking…", style=p["cyan"])
             else:
-                t.append("   ⟳ opening rift…", style=p["cyan"])
+                t.append(f"   {frame} opening rift…", style=p["cyan"])
         self.update(t)
 
 

@@ -39,7 +39,7 @@ from riftor.safety.permissions import ConfirmScreen, Permissions
 from riftor.tools import ToolContext, ToolResult
 from riftor.tui.config_screen import ConfigScreen
 from riftor.tui.theme import THEMES, css_variable_defaults, palette
-from riftor.tui.widgets import STAGE_NAMES, GENZ_STAGE_NAMES, GENZ_STAGE_LETTERS, Banner, CommandDropdown, FlockPane, StatusBar
+from riftor.tui.widgets import STAGE_NAMES, GENZ_STAGE_NAMES, GENZ_STAGE_LETTERS, Banner, CommandDropdown, FlockPane, PulseSpinner, StatusBar
 
 # Optional inline image rendering. textual-image needs Python >= 3.12 and a
 # graphics-capable terminal (Kitty/Sixel); import at module top per its detection
@@ -316,6 +316,7 @@ class RiftorApp(App):
         self.usage = Usage()
         self.chakla_usage = Usage()
         self._flock: tuple[Static, FlockPane] | None = None  # (header, table) while a dispatch is live
+        self._spinner: PulseSpinner | None = None  # chat-area spinner while agent is running
         self.toolctx = ToolContext(
             workdir=self.workdir,
             engagement=self.engagement,
@@ -474,6 +475,17 @@ class RiftorApp(App):
         try:
             header.remove()
             table.remove()
+        except Exception:  # noqa: BLE001 — teardown must never crash the loop
+            pass
+
+    def _clear_spinner(self) -> None:
+        if self._spinner is None:
+            return
+        spinner = self._spinner
+        self._spinner = None
+        try:
+            spinner.stop()
+            spinner.remove()
         except Exception:  # noqa: BLE001 — teardown must never crash the loop
             pass
 
@@ -1501,6 +1513,11 @@ class RiftorApp(App):
             self.context.add_user(user_text)
             self._last_user_text = user_text
         self.status.set_busy(True)
+        # chat-area pulse spinner
+        label = "Baaj is cooking…" if self.config.genz else "opening rift…"
+        self._spinner = PulseSpinner(label, classes="spinner")
+        await self._mount(self._spinner)
+        self._spinner.start()
         budget = 10**9 if self.yolo else self.max_steps + extra_steps
         _recent_cmds: list[str] = []
         _barren_rounds = 0
@@ -1581,6 +1598,7 @@ class RiftorApp(App):
         except Exception as exc:  # noqa: BLE001
             self._error(f"rift collapsed — {exc}")
         finally:
+            self._clear_spinner()
             self._clear_flock()
             self.status.set_busy(False)
             self.chat.scroll_end(animate=False)
