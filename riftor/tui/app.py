@@ -26,7 +26,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Markdown, Static
 
-from riftor import tools
+from riftor import __version__, tools
 from riftor.agent import antiloop
 from riftor.agent import session as sessions
 from riftor.agent.context import Context
@@ -36,6 +36,7 @@ from riftor.engagement import Engagement
 from riftor.engagement.report import write_reports
 from riftor.safety.audit import AuditLog
 from riftor.safety.permissions import ConfirmScreen, Permissions
+from riftor.telemetry import Telemetry
 from riftor.tools import ToolContext, ToolResult
 from riftor.tui.config_screen import ConfigScreen
 from riftor.tui.theme import THEMES, css_variable_defaults, palette
@@ -305,6 +306,7 @@ class RiftorApp(App):
         self.engagement = Engagement(self.workdir)
         self.permissions = Permissions.load(PERMISSIONS_PATH)
         self.audit = AuditLog()
+        self.telemetry = Telemetry.from_config(config, version=__version__)
         self.max_steps = config.max_steps
         self.session_id = sessions.new_id()
         # input history + last-output tracking + rate limiting
@@ -372,6 +374,11 @@ class RiftorApp(App):
         self._apply_theme(self.config.theme)
         self.query_one("#prompt", PromptInput).focus()
         self.status.set_stage(self.engagement.stage)
+        self.telemetry.track_session_start(
+            model=self.config.model,
+            theme=self.config.theme,
+            yolo=self.yolo,
+        )
         self._refresh_status()
         warning = self.config.model_warning()
         if warning:
@@ -393,6 +400,7 @@ class RiftorApp(App):
                 await mgr.close()
             except Exception:  # noqa: BLE001
                 pass
+        self.telemetry.flush()
 
     def _toolchain_heads_up(self) -> None:
         """One-line note if recon tools are missing — surfaced up front, not mid-task."""
@@ -1529,6 +1537,11 @@ class RiftorApp(App):
                 turn = await self._assistant_turn()
                 self.context.add_message(turn.assistant_message)
                 self.usage.add(turn.usage)
+                self.telemetry.track_model_call(
+                    self.config.model,
+                    tokens_in=getattr(turn.usage, "input_tokens", 0) or 0,
+                    tokens_out=getattr(turn.usage, "output_tokens", 0) or 0,
+                )
                 self._refresh_usage()
                 pct = int(self.context.estimated_tokens() / self._context_window() * 100)
                 if pct >= 80:
@@ -1549,6 +1562,7 @@ class RiftorApp(App):
                         self.context.add_tool_result(
                             call.id, "[anti-loop] skipped — stopping this turn."
                         )
+                        self.telemetry.track_tool_call(call.name, allowed=False)
                         continue
                     sig = antiloop.call_signature(call.name, call.arguments)
                     decision = antiloop.classify(_recent_cmds, sig)
@@ -1565,6 +1579,7 @@ class RiftorApp(App):
                             "times. STOP and try a completely different approach.",
                         )
                         anti_loop_stop = True
+                        self.telemetry.track_tool_call(call.name, allowed=False)
                         continue
                     if decision.warn:
                         # Operator-only notice; still run the tool so the call gets
@@ -1594,10 +1609,13 @@ class RiftorApp(App):
                     f"reached step limit ({budget}); stopping — /continue to extend"
                 )
         except ProviderError as exc:
+            self.telemetry.capture_exception(exc)
             self._error(f"rift collapsed [{exc.kind}] — {exc}")
         except Exception as exc:  # noqa: BLE001
+            self.telemetry.capture_exception(exc)
             self._error(f"rift collapsed — {exc}")
         finally:
+            self.telemetry.track_session_end()
             self._clear_spinner()
             self._clear_flock()
             self.status.set_busy(False)
@@ -1671,6 +1689,7 @@ class RiftorApp(App):
             msg = f"error: unknown tool '{call.name}'"
             await self._show_tool_result(msg, is_error=True)
             self.context.add_tool_result(call.id, msg)
+            self.telemetry.track_tool_call(call.name, allowed=False, is_error=True)
             return
 
         preview = tool.preview(call.arguments)
@@ -1697,6 +1716,7 @@ class RiftorApp(App):
                 "Do not retry it; propose a safer alternative.",
             )
             self.audit.record(tool.name, preview, allowed=False)
+            self.telemetry.track_tool_call(tool.name, allowed=False)
             return
 
         if not self.yolo and (scope_warning or self.permissions.needs_prompt(
@@ -1723,6 +1743,7 @@ class RiftorApp(App):
                     )
                 self.context.add_tool_result(call.id, hint)
                 self.audit.record(tool.name, preview, allowed=False)
+                self.telemetry.track_tool_call(tool.name, allowed=False)
                 return
             if decision == "session":
                 self.permissions.allow_for_session(tool.name)
@@ -1755,6 +1776,12 @@ class RiftorApp(App):
             is_error=result.is_error,
             duration=duration,
             result_len=len(result.content),
+        )
+        self.telemetry.track_tool_call(
+            tool.name,
+            allowed=True,
+            is_error=result.is_error,
+            duration=duration,
         )
         await self._show_tool_result(result.content, is_error=result.is_error)
         if call.name == "browser_screenshot" and not result.is_error:
