@@ -39,7 +39,7 @@ from riftor.safety.permissions import ConfirmScreen, Permissions
 from riftor.tools import ToolContext, ToolResult
 from riftor.tui.config_screen import ConfigScreen
 from riftor.tui.theme import THEMES, css_variable_defaults, palette
-from riftor.tui.widgets import STAGE_NAMES, Banner, CommandDropdown, FlockPane, StatusBar
+from riftor.tui.widgets import STAGE_NAMES, GENZ_STAGE_NAMES, GENZ_STAGE_LETTERS, Banner, CommandDropdown, FlockPane, StatusBar
 
 # Optional inline image rendering. textual-image needs Python >= 3.12 and a
 # graphics-capable terminal (Kitty/Sixel); import at module top per its detection
@@ -153,7 +153,7 @@ _COMMANDS = [
     "/help", "/clear", "/model", "/stage", "/scope", "/findings", "/finding",
     "/edit-finding", "/delete-finding", "/hosts", "/services", "/report",
     "/sessions", "/resume", "/new", "/theme", "/config", "/tools", "/permissions",
-    "/lore", "/cost", "/retry", "/continue", "/compact", "/copy", "/show",
+    "/lore", "/genz", "/cost", "/retry", "/continue", "/compact", "/copy", "/show",
     "/timeline", "/audit", "/export", "/conversation", "/doctor", "/review", "/hypotheses", "/lesson", "/lessons", "/browser", "/exit",
 ]
 
@@ -181,7 +181,8 @@ _Engagement_
 _Settings & sessions_
 - `/model [name]` — show or switch the model · `/theme [name]` (dark: rift/dusk/void/fracture/singularity · light: dawn/paper)
 - `/config` — settings panel · `/permissions` — review allow/deny rules
-- `/lore` — toggle the rift persona · `/audit` — recent tool-call audit log
+- `/lore` — toggle the rift persona · `/genz` — toggle Gen Z / Chakla Baaj mode 🦅
+- `/audit` — recent tool-call audit log
 - `/doctor` — check which external recon tools (nmap/httpx/…) are installed
 - `/browser [headed|headless|close]` — browser status / mode / teardown
 - `/review` — self-critique findings for false positives before reporting
@@ -297,7 +298,7 @@ class RiftorApp(App):
         self.config = config
         self.workdir = workdir or Path.cwd()
         self.yolo = yolo
-        self.context = Context(lore=config.lore)
+        self.context = Context(lore=config.lore, genz=config.genz)
         self.provider = Provider(config)
         self.tools = tools.all_tools()
         self.tool_schemas = tools.schemas()
@@ -330,9 +331,9 @@ class RiftorApp(App):
         self._browser_hint_shown = False
 
     def compose(self) -> ComposeResult:
-        yield Banner(id="banner")
+        yield Banner(genz=self.config.genz, id="banner")
         yield VerticalScroll(id="chat")
-        yield StatusBar(self.config.model, lore=self.config.lore, yolo=self.yolo)
+        yield StatusBar(self.config.model, lore=self.config.lore, yolo=self.yolo, genz=self.config.genz)
         yield CommandDropdown(_COMMANDS, id="cmd-dropdown")
         yield PromptInput(placeholder="task riftor — or /help", id="prompt")
 
@@ -633,6 +634,7 @@ class RiftorApp(App):
             "/tools": self._tools_cmd,
             "/clear": self.action_clear,
             "/lore": self._lore_cmd,
+            "/genz": self._genz_cmd,
             "/model": lambda: self._model_cmd(arg),
             "/stage": lambda: self._set_stage(arg),
             "/scope": lambda: self._scope_cmd(arg),
@@ -692,7 +694,23 @@ class RiftorApp(App):
         self.config.lore = not self.config.lore
         self.context.lore = self.config.lore
         self.status.set_lore(self.config.lore)
-        self._note(f"lore {'engaged' if self.config.lore else 'disengaged'}")
+        if self.config.genz:
+            self._note(f"lore {'engaged no cap' if self.config.lore else 'disengaged, say less'}")
+        else:
+            self._note(f"lore {'engaged' if self.config.lore else 'disengaged'}")
+
+    def _genz_cmd(self) -> None:
+        self.config.genz = not self.config.genz
+        self.context.genz = self.config.genz
+        self.status.set_genz(self.config.genz)
+        try:
+            self.query_one(Banner).set_genz(self.config.genz)
+        except Exception:
+            pass
+        if self.config.genz:
+            self._note("genz engaged fr 🦅")
+        else:
+            self._note("genz disengaged, back to normie mode")
 
     def _model_cmd(self, arg: str) -> None:
         if arg:
@@ -733,6 +751,7 @@ class RiftorApp(App):
         self.config.max_steps = result.get("max_steps", self.config.max_steps)
         self.max_steps = self.config.max_steps
         self.config.lore = result["lore"]
+        self.config.genz = result.get("genz", self.config.genz)
         self.config.show_thinking = result.get("show_thinking", self.config.show_thinking)
         self.config.show_tool_output = result.get("show_tool_output", self.config.show_tool_output)
         self.config.browser_headless = result.get("browser_headless", self.config.browser_headless)
@@ -772,6 +791,12 @@ class RiftorApp(App):
         self.provider = Provider(self.config)
         self.context.lore = self.config.lore
         self.status.set_lore(self.config.lore)
+        self.status.set_genz(self.config.genz)
+        self.context.genz = self.config.genz
+        try:
+            self.query_one(Banner).set_genz(self.config.genz)
+        except Exception:
+            pass
         self.status.set_model(self.config.model)
         self.config.theme = result["theme"]
         self._apply_theme(result["theme"])
@@ -798,8 +823,14 @@ class RiftorApp(App):
     def _set_stage(self, arg: str) -> None:
         if not arg:
             cur = self.engagement.stage
-            stages = " · ".join(f"{k} {v}" for k, v in STAGE_NAMES.items())
-            self._note(f"stage: {cur} ({STAGE_NAMES[cur]})   ·   {stages}")
+            if self.config.genz:
+                names = GENZ_STAGE_NAMES
+                letters = GENZ_STAGE_LETTERS
+                stages = " · ".join(f"{letters[k]} {v}" for k, v in names.items())
+                self._note(f"stage: {letters[cur]} ({names[cur]})   ·   {stages}")
+            else:
+                stages = " · ".join(f"{k} {v}" for k, v in STAGE_NAMES.items())
+                self._note(f"stage: {cur} ({STAGE_NAMES[cur]})   ·   {stages}")
             return
         name_to_letter = {v.lower(): k for k, v in STAGE_NAMES.items()}
         token = arg.strip()
@@ -818,7 +849,13 @@ class RiftorApp(App):
         color = colors.get(letter, p["cyan"])
         line = Text()
         line.append("──◢ ", style=color)
-        line.append(f"{letter} · {STAGE_NAMES[letter]}", style=f"bold {color}")
+        if self.config.genz:
+            label = GENZ_STAGE_LETTERS.get(letter, letter)
+            name = GENZ_STAGE_NAMES.get(letter, STAGE_NAMES.get(letter, letter))
+        else:
+            label = letter
+            name = STAGE_NAMES.get(letter, letter)
+        line.append(f"{label} · {name}", style=f"bold {color}")
         line.append(" ◣" + "─" * 30, style=color)
         self.chat.mount(Static(line, classes="note"))
         self._scroll_if_following()
@@ -826,7 +863,8 @@ class RiftorApp(App):
     def _scope_cmd(self, arg: str) -> None:
         parts = arg.split()
         if not parts:
-            ins = ", ".join(t.raw for t in self.engagement.scope.in_scope) or "(none)"
+            none_label = "no glaze yet fr" if self.config.genz else "(none)"
+            ins = ", ".join(t.raw for t in self.engagement.scope.in_scope) or none_label
             outs = self.engagement.scope.out_of_scope
             mode = "dry-run" if self.engagement.dry_run else ("on" if self.engagement.enforce else "off")
             line = f"scope · enforce {mode} · in: {ins}"

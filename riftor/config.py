@@ -60,6 +60,7 @@ class Config(BaseModel):
     max_tokens: int = 2048
     theme: str = "rift"
     lore: bool = True
+    genz: bool = False
     # Display: reasoning + tool-output visibility (runtime, via /config).
     show_thinking: bool = True
     show_tool_output: bool = True
@@ -229,6 +230,7 @@ class Config(BaseModel):
             f"max_tokens = {self.max_tokens}",
             f'theme = "{self.theme}"',
             f"lore = {str(self.lore).lower()}",
+            f"genz = {str(self.genz).lower()}",
             f"show_thinking = {str(self.show_thinking).lower()}",
             f"show_tool_output = {str(self.show_tool_output).lower()}",
             f'reasoning_effort = "{self.reasoning_effort}"',

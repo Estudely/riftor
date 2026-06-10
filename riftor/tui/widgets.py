@@ -12,24 +12,47 @@ from riftor.tui.theme import palette
 RIFT_STAGES = ["R", "I", "F", "T"]
 STAGE_NAMES = {"R": "Recon", "I": "Intrusion", "F": "Foothold", "T": "Takeover"}
 
+GENZ_STAGES = ["Glaze", "Rizz", "In", "Clapped"]
+GENZ_STAGE_NAMES = {
+    "R": "On the Glaze",
+    "I": "Rizz the Rift",
+    "F": "So In",
+    "T": "Clapped",
+}
+GENZ_STAGE_LETTERS = {
+    "R": "Glaze", "I": "Rizz", "F": "In", "T": "Clapped",
+}
+
 
 class Banner(Static):
+    def __init__(self, genz: bool = False, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.genz = genz
+
+    def set_genz(self, genz: bool) -> None:
+        self.genz = genz
+        self.refresh()
+
     def render(self) -> Text:
         p = palette(self.app)
         t = Text()
         t.append("riftor", style=f"bold {p['violet']}")
         t.append("  ▍  ", style=p["cyan"])
-        t.append("find the rift · open it · cross through", style=f"dim {p['muted']}")
+        if self.genz:
+            t.append("glaze the target · rizz the rift · get clapped", style=f"dim {p['muted']}")
+        else:
+            t.append("find the rift · open it · cross through", style=f"dim {p['muted']}")
         return t
 
 
 class StatusBar(Static):
-    def __init__(self, model: str, stage: str = "R", lore: bool = True, yolo: bool = False) -> None:
+    def __init__(self, model: str, stage: str = "R", lore: bool = True, yolo: bool = False, genz: bool = False) -> None:
         super().__init__()
         self.model = model
         self.stage = stage
         self.lore = lore
         self.yolo = yolo
+        self.genz = genz
         self.busy = False
         self.scope_count = 0
         self.enforce = True
@@ -54,6 +77,10 @@ class StatusBar(Static):
 
     def set_lore(self, lore: bool) -> None:
         self.lore = lore
+        self.refresh_bar()
+
+    def set_genz(self, genz: bool) -> None:
+        self.genz = genz
         self.refresh_bar()
 
     def set_yolo(self, yolo: bool) -> None:
@@ -93,12 +120,19 @@ class StatusBar(Static):
         p = palette(self.app)
         t = Text()
         t.append("[ ", style=p["faint"])
-        for i, stage in enumerate(RIFT_STAGES):
-            t.append(stage, style=f"bold {p['cyan']}" if stage == self.stage else p["dim"])
-            if i < len(RIFT_STAGES) - 1:
+        if self.genz:
+            stages = GENZ_STAGES
+            stage_names = GENZ_STAGE_NAMES
+        else:
+            stages = RIFT_STAGES
+            stage_names = STAGE_NAMES
+        active_idx = RIFT_STAGES.index(self.stage) if self.stage in RIFT_STAGES else 0
+        for i, stage in enumerate(stages):
+            t.append(stage, style=f"bold {p['cyan']}" if i == active_idx else p["dim"])
+            if i < len(stages) - 1:
                 t.append("·", style=p["faint"])
         t.append(" ]  ", style=p["faint"])
-        t.append(STAGE_NAMES[self.stage], style=p["violet"])
+        t.append(stage_names[self.stage], style=p["violet"])
         t.append("   scope:", style=p["dim"])
         if self.scope_count:
             t.append(str(self.scope_count), style=p["muted"])
@@ -130,10 +164,16 @@ class StatusBar(Static):
         t.append(self.model, style=p["muted"])
         t.append("   lore:", style=p["dim"])
         t.append("on" if self.lore else "off", style=p["muted"])
+        if self.genz:
+            t.append("   genz:", style=p["dim"])
+            t.append("on", style=p["violet"])
         if self.yolo:
             t.append("   ⚡ yolo", style=f"bold {p['danger']}")
         if self.busy:
-            t.append("   ⟳ opening rift…", style=p["cyan"])
+            if self.genz:
+                t.append("   ⟳ Baaj is cooking…", style=p["cyan"])
+            else:
+                t.append("   ⟳ opening rift…", style=p["cyan"])
         self.update(t)
 
 
