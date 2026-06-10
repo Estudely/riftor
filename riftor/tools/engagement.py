@@ -42,10 +42,7 @@ class SetStageTool(Tool):
         eng = ctx.engagement
         if eng is None:
             return ToolResult("error: no active engagement", is_error=True)
-        stage = str(args.get("stage", ""))
-        if eng.set_stage(stage):
-            if ctx.telemetry:
-                ctx.telemetry.track_stage_advanced(stage=stage)
+        if eng.set_stage(str(args.get("stage", ""))):
             return ToolResult(f"stage set to {eng.stage}")
         return ToolResult("error: stage must be one of R/I/F/T", is_error=True)
 
@@ -130,8 +127,6 @@ class AddScopeTool(Tool):
 
         if not added and already:
             return ToolResult(f"already in scope: {', '.join(already)}")
-        if added and ctx.telemetry:
-            ctx.telemetry.track_scope_target_added(count=len(added))
         msg = f"added {len(added)} target(s) to scope: {', '.join(added)}"
         if already:
             msg += f" · {len(already)} already present"
@@ -246,12 +241,6 @@ class RecordFindingTool(Tool):
         )
         if action == "skipped":
             return ToolResult(f"finding already recorded (#{fid}) — skipped duplicate")
-        if ctx.telemetry:
-            ctx.telemetry.track_finding_recorded(
-                severity=severity,
-                has_cvss=bool(vector),
-                has_confidence=confidence is not None,
-            )
         # Check for fuzzy duplicates across tools.
         similar = ctx.engagement.store.find_similar(title, host) if ctx.engagement else []
         tag_line = severity + (f" · CVSS {score:.1f}" if score is not None else "")
@@ -427,12 +416,6 @@ class ImportScanTool(Tool):
             extra = f" ({scan.skipped} line(s) skipped)" if scan.skipped else ""
             return ToolResult(f"parsed {tool}: nothing recognised{extra} (check the output format)")
 
-        if ctx.telemetry:
-            ctx.telemetry.track_scan_imported(
-                tool=tool,
-                services_added=svc_added,
-                findings_added=fnd_added,
-            )
         msg = f"imported {tool}: {svc_added} service(s), {fnd_added} finding(s)"
         details = []
         if svc_skipped or fnd_skipped:
@@ -471,8 +454,6 @@ class GenerateReportTool(Tool):
         except ValueError:
             paths = write_reports(eng, "both")
         eng.store.log_activity("report", fmt)
-        if ctx.telemetry:
-            ctx.telemetry.track_report_generated(format=fmt)
         return ToolResult("wrote report:\n" + "\n".join(str(p) for p in paths))
 
 

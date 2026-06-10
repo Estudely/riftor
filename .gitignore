@@ -28,7 +28,4 @@ reports/
 
 # internal AI planning/spec docs — kept locally, not shipped or tracked
 docs/superpowers/
-
-# telemetry keys — baked at build time, never committed
-riftor/_telemetry_keys.py
 .env

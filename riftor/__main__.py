@@ -35,10 +35,6 @@ def main() -> None:
         help="run the Playwright browser headed (visible) for this run",
     )
     parser.add_argument(
-        "--no-telemetry", action="store_true",
-        help="disable telemetry (crash + usage reporting) for this run",
-    )
-    parser.add_argument(
         "-p", "--prompt",
         help="run a single task non-interactively and exit (headless one-shot)",
     )
@@ -75,9 +71,6 @@ def main() -> None:
         cfg.api_key = args.api_key
     if args.browser_headed:
         cfg.browser_headless = False  # this run only; not written to config.toml
-    if args.no_telemetry:
-        cfg.telemetry = False
-
     workdir = Path(args.workdir).expanduser() if args.workdir else Path.cwd()
 
     if args.prompt or args.headless:

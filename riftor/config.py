@@ -77,8 +77,7 @@ class Config(BaseModel):
     browser_persistent_profile: bool = False
     # Tracks whether we've shown the first-run onboarding.
     onboarded: bool = False
-    # Telemetry: Sentry (crashes) + PostHog (usage). Opt-out via config or --no-telemetry.
-    telemetry: bool = True
+
     # Per-provider credentials, keyed by provider key (see riftor.providers.PROVIDERS).
     providers: dict[str, ProviderCreds] = {}
     # Subagents (Baaj orchestrator → Chakla workers). The labels are renameable
@@ -243,7 +242,7 @@ class Config(BaseModel):
             f"browser_headless = {str(self.browser_headless).lower()}",
             f"browser_persistent_profile = {str(self.browser_persistent_profile).lower()}",
             f"onboarded = {str(self.onboarded).lower()}",
-            f"telemetry = {str(self.telemetry).lower()}",
+
             f'chakla_model = "{self.chakla_model}"',
             f"chakla_max_workers = {self.chakla_max_workers}",
             f"chakla_timeout_s = {self.chakla_timeout_s}",
