@@ -13,6 +13,7 @@ _riftor() {
     '--workdir[engagement working directory]:dir:_files -/' \
     '--scope-file[load scope targets from a file]:file:_files' \
     '--browser-headed[run the Playwright browser headed for this run]' \
+    '--no-telemetry[disable telemetry (crash + usage reporting) for this run]' \
     '(-p --prompt)'{-p,--prompt}'[run one task non-interactively]:prompt:' \
     '--headless[non-interactive mode]' \
     '(-h --help)'{-h,--help}'[show help]'

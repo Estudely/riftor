@@ -33,3 +33,10 @@ clean: ## Remove build/test artifacts
 
 install-hooks: ## Install pre-commit hooks
 	uv run pre-commit install
+
+telemetry-keys: ## Bake telemetry keys from env vars for a release build
+	@echo "# Generated at build time — not committed to git." > riftor/_telemetry_keys.py
+	@echo "SENTRY_DSN = \"$${RIFTOR_SENTRY_DSN:-}\"" >> riftor/_telemetry_keys.py
+	@echo "POSTHOG_API_KEY = \"$${RIFTOR_POSTHOG_KEY:-}\"" >> riftor/_telemetry_keys.py
+	@echo "POSTHOG_HOST = \"$${RIFTOR_POSTHOG_HOST:-https://us.i.posthog.com}\"" >> riftor/_telemetry_keys.py
+	@echo "wrote riftor/_telemetry_keys.py"
