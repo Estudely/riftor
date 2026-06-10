@@ -128,6 +128,9 @@ async def _run(cfg: Config, workdir: Path, prompt: str, scope_file: str | None, 
                 telemetry.capture_exception(exc)
                 print(f"\nriftor: provider error [{exc.kind}] — {exc}", file=sys.stderr)
                 return 1
+            except Exception as exc:  # noqa: BLE001
+                telemetry.capture_exception(exc)
+                raise
             if turn is None:
                 break
             context.add_message(turn.assistant_message)
@@ -170,6 +173,8 @@ async def _run_tool_headless(
     tool = tools.get(call.name)
     if tool is None:
         context.add_tool_result(call.id, f"error: unknown tool '{call.name}'")
+        if telemetry:
+            telemetry.track_tool_call(call.name, allowed=False, is_error=True)
         return
     preview = tool.preview(call.arguments)
     print(f"\n  ⛏ {tool.name}  {preview}", file=sys.stderr)
