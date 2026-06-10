@@ -204,6 +204,59 @@ class Store:
     def count_findings(self) -> int:
         return int(self._conn.execute("SELECT COUNT(*) AS c FROM findings").fetchone()["c"])
 
+    def find_similar(
+        self, title: str, host: str = "", threshold: float = 0.75
+    ) -> list[dict]:
+        """Return findings with a similar title on the same host (or any host if
+        *host* is empty), scored by ``difflib.SequenceMatcher``. Only entries
+        at or above *threshold* are included, sorted best-match first.
+
+        Each result dict has keys: id, title, host, severity, score.
+        """
+        import difflib
+
+        rows = self._conn.execute(
+            "SELECT id, title, host, severity FROM findings ORDER BY id"
+        ).fetchall()
+        norm_title = title.strip().lower()
+        results: list[dict] = []
+        for row in rows:
+            if host and row["host"] and row["host"].strip().lower() != host.strip().lower():
+                continue
+            other = (row["title"] or "").strip().lower()
+            if not other or other == norm_title:
+                continue
+            score = difflib.SequenceMatcher(None, norm_title, other).ratio()
+            if score >= threshold:
+                results.append({
+                    "id": row["id"],
+                    "title": row["title"],
+                    "host": row["host"] or "",
+                    "severity": row["severity"] or "",
+                    "score": round(score, 3),
+                })
+        results.sort(key=lambda r: r["score"], reverse=True)
+        return results
+
+    def correlate_findings(self) -> dict[str, list[int]]:
+        """Group findings by host and by severity tag for cross-tool correlation.
+        Returns ``{key: [finding_id, ...]}`` where key is e.g. ``host:10.0.0.1``
+        or ``severity:critical``.
+        """
+        groups: dict[str, list[int]] = {}
+        for row in self._conn.execute("SELECT id, host, severity, tags FROM findings"):
+            fid = int(row["id"])
+            h = (row["host"] or "").strip()
+            s = (row["severity"] or "").strip().lower()
+            tags = (row["tags"] or "").strip()
+            if h:
+                groups.setdefault(f"host:{h}", []).append(fid)
+            if s:
+                groups.setdefault(f"severity:{s}", []).append(fid)
+            for tag in (t.strip() for t in tags.split(",") if t.strip()):
+                groups.setdefault(f"tag:{tag}", []).append(fid)
+        return {k: v for k, v in groups.items() if len(v) > 1}
+
     # -- hypotheses -------------------------------------------------------------
     _HYP_STATUSES = {"open", "confirmed", "refuted", "inconclusive"}
 

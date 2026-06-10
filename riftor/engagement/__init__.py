@@ -131,11 +131,16 @@ class Engagement:
         if existing is None:
             return self.add_finding(**kwargs), "added"
         if dedup == "merge":
-            self.store.update_finding(
-                existing,
-                evidence=kwargs.get("evidence") or None,
-                recommendation=kwargs.get("recommendation") or None,
-            )
+            # Propagate enriched fields from the new finding onto the existing one,
+            # but only when the new finding actually provides them.
+            merge_fields: dict = {}
+            for fld in ("evidence", "recommendation", "cvss", "tags", "notes",
+                         "confidence", "verification_method"):
+                val = kwargs.get(fld)
+                if val is not None and val != "":
+                    merge_fields[fld] = val
+            if merge_fields:
+                self.store.update_finding(existing, **merge_fields)
             self.store.log_activity("finding_merge", f"#{existing}")
             return existing, "merged"
         return existing, "skipped"

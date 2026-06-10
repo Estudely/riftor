@@ -224,11 +224,13 @@ class RecordFindingTool(Tool):
 
         confidence = _parse_confidence(args.get("confidence"))
 
+        title = str(args["title"])
+        host = str(args.get("host") or "")
         fid, action = eng.add_finding_dedup(
             dedup="skip",
-            title=str(args["title"]),
+            title=title,
             severity=severity,
-            host=str(args.get("host") or ""),
+            host=host,
             evidence=str(args.get("evidence") or ""),
             recommendation=str(args.get("recommendation") or ""),
             tags=str(args.get("tags") or ""),
@@ -239,8 +241,14 @@ class RecordFindingTool(Tool):
         )
         if action == "skipped":
             return ToolResult(f"finding already recorded (#{fid}) — skipped duplicate")
-        tag = severity + (f" · CVSS {score:.1f}" if score is not None else "")
-        return ToolResult(f"recorded finding #{fid} [{tag}] {args['title']}")
+        # Check for fuzzy duplicates across tools.
+        similar = ctx.engagement.store.find_similar(title, host) if ctx.engagement else []
+        tag_line = severity + (f" · CVSS {score:.1f}" if score is not None else "")
+        msg = f"recorded finding #{fid} [{tag_line}] {title}"
+        if similar:
+            ids = ", ".join(f"#{s['id']}" for s in similar[:3])
+            msg += f"  ⚠ similar to: {ids} — review and /edit-finding or /delete-finding to merge"
+        return ToolResult(msg)
 
 
 class EditFindingTool(Tool):
@@ -248,7 +256,9 @@ class EditFindingTool(Tool):
     description = (
         "Update an existing finding by id (from /findings). Pass only the fields to "
         "change: title, severity, host, evidence, recommendation, tags, notes, "
-        "confidence, verification_method."
+        "confidence, verification_method, cvss_vector. "
+        "When cvss_vector is given, the severity is auto-derived from the computed "
+        "CVSS v3.1 base score — do NOT also pass severity in that case."
     )
     parameters = {
         "type": "object",
@@ -263,6 +273,12 @@ class EditFindingTool(Tool):
             "notes": {"type": "string"},
             "confidence": {"type": "integer", "minimum": 0, "maximum": 10},
             "verification_method": {"type": "string"},
+            "cvss_vector": {
+                "type": "string",
+                "description": "CVSS v3.1 vector, e.g. "
+                "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H. Severity is "
+                "auto-derived from the computed score.",
+            },
         },
         "required": ["id"],
     }
@@ -283,12 +299,22 @@ class EditFindingTool(Tool):
         }
         if args.get("confidence") is not None:
             fields["confidence"] = _parse_confidence(args.get("confidence"))
+        # When cvss_vector is given, auto-derive severity from the computed score.
+        vector = str(args.get("cvss_vector") or "").strip()
+        if vector:
+            score = base_score(vector)
+            if score is not None:
+                fields["severity"] = severity_from_score(score)
+                fields["cvss"] = vector
         if "severity" in fields and fields["severity"].lower() not in _SEVERITIES:
             return ToolResult(f"error: severity must be one of {', '.join(_SEVERITIES)}", is_error=True)
         if not eng.store.update_finding(fid, **fields):
             return ToolResult(f"error: no finding #{fid}", is_error=True)
         eng.store.log_activity("finding_edit", f"#{fid} {', '.join(fields)}")
-        return ToolResult(f"updated finding #{fid} ({', '.join(fields) or 'no changes'})")
+        note = ""
+        if vector and score is not None:
+            note = f" · CVSS {score:.1f} ({severity_from_score(score)})"
+        return ToolResult(f"updated finding #{fid} ({', '.join(fields) or 'no changes'}{note})")
 
 
 class DeleteFindingTool(Tool):

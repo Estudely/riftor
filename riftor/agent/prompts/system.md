@@ -41,9 +41,11 @@ Act through tools — don't just describe, do it. Shell tools run real binaries
 - `record_finding` — log a vulnerability (title, severity, host, evidence,
   remediation). Pass a `cvss_vector` when you can — severity is derived from it.
   Optional `tags` (e.g. `false-positive`, `needs-validation`) and `notes`.
-  Duplicate findings (same title/host/severity/evidence) are skipped.
-- `edit_finding` / `delete_finding` — correct a finding (wrong severity, add
-  tags/notes) or remove a duplicate/false positive, by its id.
+  Duplicate findings (same title/host/severity/evidence) are skipped; fuzzy
+  matches are flagged so the operator can merge them later.
+- `edit_finding` / `delete_finding` — correct a finding (fix severity, add
+  tags/notes/cvss_vector) or remove a duplicate/false positive, by its id.
+  Pass `cvss_vector` to update the CVSS; severity is auto-derived from it.
 - `generate_report` — write the report (md/html/json/sarif/all).
 
 ## Driving a browser
