@@ -13,6 +13,13 @@ Screen {
     padding: 1 2 0 2;
 }
 
+#cwd-header {
+    height: 1;
+    padding: 0 2;
+    background: $surface;
+    color: $muted;
+}
+
 #chat {
     height: 1fr;
     padding: 0 2 1 2;
@@ -355,4 +362,20 @@ StatusBar {
     background: $violet 25%;
     color: $foreground;
     border-left: thick $violet;
+}
+
+#shell-pane {
+    height: auto;
+    max-height: 14;
+    margin: 0 1 0 1;
+    border-top: solid $border;
+}
+
+#shell-log {
+    height: auto;
+    max-height: 10;
+    background: $surface;
+    color: $foreground;
+    padding: 0 2;
+    scrollbar-color: $border;
 }

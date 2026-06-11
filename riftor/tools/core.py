@@ -7,6 +7,7 @@ Read-only tools (read/grep/glob/webfetch) run without a prompt. Mutating tools
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 import difflib
 import re
 import shutil
@@ -366,3 +367,53 @@ def _html_to_text(html: str) -> str:
     text = re.sub(r"[ \t]{2,}", " ", text)
     text = re.sub(r"\n\s*\n\s*\n+", "\n\n", text)
     return text.strip()
+
+
+@dataclass
+class ShellResult:
+    stdout: str
+    stderr: str
+    exit_code: int
+    truncated: bool
+
+
+async def run_shell(command: str, workdir: str | Path, timeout: int = 30) -> ShellResult:
+    """Run a shell command and return captured stdout, stderr, and exit code.
+
+    Output is truncated at 10 000 characters. Timeout raises no exception;
+    the result reports truncated output and a non-zero exit code.
+    """
+    proc = await asyncio.create_subprocess_shell(
+        command,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        cwd=str(workdir),
+    )
+    try:
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        return ShellResult(
+            stdout="",
+            stderr=f"error: timed out after {timeout}s",
+            exit_code=proc.returncode if proc.returncode is not None else -1,
+            truncated=True,
+        )
+    stdout = out.decode("utf-8", errors="replace") if out else ""
+    stderr = err.decode("utf-8", errors="replace") if err else ""
+    truncated = False
+    max_chars = 10_000
+    if len(stdout) > max_chars:
+        dropped = len(stdout) - max_chars
+        stdout = stdout[:max_chars] + f"\n...[truncated {dropped} chars]"
+        truncated = True
+    if len(stderr) > max_chars:
+        dropped = len(stderr) - max_chars
+        stderr = stderr[:max_chars] + f"\n...[truncated {dropped} chars]"
+        truncated = True
+    return ShellResult(
+        stdout=stdout,
+        stderr=stderr,
+        exit_code=proc.returncode if proc.returncode is not None else 0,
+        truncated=truncated,
+    )

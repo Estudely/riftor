@@ -24,7 +24,7 @@ from textual.command import Hit, Hits
 from textual.command import Provider as CommandProvider
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Markdown, Static
+from textual.widgets import Button, Collapsible, Input, Markdown, RichLog, Static
 
 from riftor import tools
 from riftor.agent import antiloop
@@ -154,7 +154,7 @@ _COMMANDS = [
     "/edit-finding", "/delete-finding", "/hosts", "/services", "/report",
     "/sessions", "/resume", "/new", "/theme", "/config", "/tools", "/permissions",
     "/lore", "/genz", "/cost", "/retry", "/continue", "/compact", "/copy", "/show",
-    "/timeline", "/audit", "/export", "/conversation", "/doctor", "/review", "/hypotheses", "/lesson", "/lessons", "/browser", "/exit",
+    "/timeline", "/audit", "/export", "/conversation", "/doctor", "/review", "/hypotheses", "/lesson", "/lessons", "/browser", "/clearlog", "/exit",
 ]
 
 HELP = """\
@@ -310,6 +310,7 @@ class RiftorApp(App):
         # input history + last-output tracking + rate limiting
         self._history: list[str] = []
         self._history_idx: int | None = None
+        self._shell_history: list[str] = []
         self._tool_results: dict[int, str] = {}
         self._last_output: str = ""
         self._last_user_text: str | None = None
@@ -333,7 +334,14 @@ class RiftorApp(App):
 
     def compose(self) -> ComposeResult:
         yield Banner(genz=self.config.genz, id="banner")
+        yield Static(id="cwd-header")
         yield VerticalScroll(id="chat")
+        yield Collapsible(
+            RichLog(id="shell-log", highlight=True, markup=False),
+            id="shell-pane",
+            title="Shell output",
+            collapsed=True,
+        )
         yield StatusBar(self.config.model, lore=self.config.lore, yolo=self.yolo, genz=self.config.genz)
         yield CommandDropdown(_COMMANDS, id="cmd-dropdown")
         yield PromptInput(placeholder="task riftor — or /help", id="prompt")
@@ -362,6 +370,7 @@ class RiftorApp(App):
         try:
             self.query_one(Banner).refresh()
             self.status.refresh_bar()
+            self._refresh_cwd_header()
         except Exception:  # noqa: BLE001 — widgets may not be mounted yet
             pass
 
@@ -370,6 +379,7 @@ class RiftorApp(App):
             self.register_theme(theme)
         self._apply_keybindings()
         self._apply_theme(self.config.theme)
+        self._refresh_cwd_header()
         self.query_one("#prompt", PromptInput).focus()
         self.status.set_stage(self.engagement.stage)
         self._refresh_status()
@@ -419,6 +429,17 @@ class RiftorApp(App):
             note += "  ⚠ previous run ended mid-task — /retry to resume or /continue"
         self._note(note)
         return True
+
+    def _refresh_cwd_header(self) -> None:
+        try:
+            cwd_header = self.query_one("#cwd-header", Static)
+            p = self._pal()
+            cwd_header.update(Text.assemble(
+                ("cwd: ", f"bold {p['violet']}"),
+                (str(self.workdir), f"{p['muted']}"),
+            ))
+        except Exception:  # noqa: BLE001 — widget may not be mounted yet
+            pass
 
     def _refresh_status(self) -> None:
         self.status.set_stage(self.engagement.stage)
@@ -526,6 +547,51 @@ class RiftorApp(App):
         self.chat.mount(Static(Text(text), classes="user"))
         self._scroll_if_following()
 
+    @work(exclusive=True)
+    async def _shell_cmd(self, text: str) -> None:
+        from riftor.tools.core import run_shell
+
+        command = text[1:].strip()
+        if not command:
+            return
+
+        p = self._pal()
+        shell_log = self.query_one("#shell-log", RichLog)
+        shell_pane = self.query_one("#shell-pane", Collapsible)
+
+        shell_log.write(Text(f"$ {command}", style=f"bold {p['violet']}"))
+
+        try:
+            result = await run_shell(command, str(self.workdir), timeout=120)
+        except Exception as exc:
+            shell_log.write(Text(f"[error: {exc}]", style=f"bold {p['danger']}"))
+            self.audit.record("shell_error", command, allowed=False, is_error=True)
+        else:
+            self._shell_history.append(command)
+            self.audit.record("shell_cmd", command, allowed=True)
+            if result.stderr:
+                shell_log.write(Text(result.stderr, style=p['danger']))
+            if result.stdout:
+                shell_log.write(Text(result.stdout))
+            if result.exit_code != 0:
+                shell_log.write(
+                    Text(f"[exit {result.exit_code}]", style=f"bold {p['magenta']}")
+                )
+
+        shell_log.write("")
+
+        shell_pane.title = f"Shell output — {len(self._shell_history)} commands"
+        shell_pane.collapsed = False
+
+    def _clearlog_cmd(self) -> None:
+        """Clear the shell output log and collapse the pane."""
+        shell_log = self.query_one("#shell-log", RichLog)
+        shell_pane = self.query_one("#shell-pane", Collapsible)
+        shell_log.clear()
+        shell_pane.title = "Shell output"
+        shell_pane.collapsed = True
+        self._shell_history.clear()
+
     async def _mount(self, widget) -> None:
         await self.chat.mount(widget)
         self._scroll_if_following()
@@ -554,6 +620,9 @@ class RiftorApp(App):
         inp.reset_pastes()
         self._history_idx = None
         if not text:
+            return
+        if text.startswith("!"):
+            self._shell_cmd(text)
             return
         if not text.startswith("/"):
             self._history.append(text)
@@ -679,6 +748,7 @@ class RiftorApp(App):
             "/hypotheses": self._hypotheses_cmd,
             "/lesson": lambda: self._lesson_cmd(arg),
             "/lessons": self._lessons_cmd,
+            "/clearlog": self._clearlog_cmd,
         }
         if cmd in ("/exit", "/quit"):
             self._save_session()

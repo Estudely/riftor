@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from riftor import tools
+from riftor.tools.core import run_shell
 
 
 @pytest.mark.asyncio
@@ -215,3 +216,31 @@ async def test_yolo_bypasses_workdir_containment(tmp_workdir, engagement):
     # Either it reads the real file, or errors for a non-containment reason
     # (e.g. file missing) — but never the containment refusal.
     assert "outside" not in r.content.lower()
+
+
+@pytest.mark.asyncio
+async def test_run_shell_success():
+    result = await run_shell("echo hello", ".")
+    assert result.exit_code == 0
+    assert "hello" in result.stdout
+    assert result.stderr == ""
+    assert not result.truncated
+
+
+@pytest.mark.asyncio
+async def test_run_shell_stderr():
+    result = await run_shell("echo err >&2", ".")
+    assert "err" in result.stderr
+
+
+@pytest.mark.asyncio
+async def test_run_shell_exit_code():
+    result = await run_shell("exit 42", ".")
+    assert result.exit_code == 42
+
+
+@pytest.mark.asyncio
+async def test_run_shell_invalid_command():
+    result = await run_shell("nonexistent_command_xyz", ".")
+    assert result.exit_code != 0
+    assert result.stderr != ""
