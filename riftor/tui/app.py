@@ -363,6 +363,7 @@ class RiftorApp(App):
         try:
             self.query_one(Banner).refresh()
             self.status.refresh_bar()
+            self._refresh_cwd_header()
         except Exception:  # noqa: BLE001 — widgets may not be mounted yet
             pass
 
@@ -371,12 +372,7 @@ class RiftorApp(App):
             self.register_theme(theme)
         self._apply_keybindings()
         self._apply_theme(self.config.theme)
-        cwd_header = self.query_one("#cwd-header", Static)
-        p = self._pal()
-        cwd_header.update(Text.assemble(
-            ("cwd: ", f"bold {p['violet']}"),
-            (str(self.workdir), f"{p['muted']}"),
-        ))
+        self._refresh_cwd_header()
         self.query_one("#prompt", PromptInput).focus()
         self.status.set_stage(self.engagement.stage)
         self._refresh_status()
@@ -426,6 +422,17 @@ class RiftorApp(App):
             note += "  ⚠ previous run ended mid-task — /retry to resume or /continue"
         self._note(note)
         return True
+
+    def _refresh_cwd_header(self) -> None:
+        try:
+            cwd_header = self.query_one("#cwd-header", Static)
+            p = self._pal()
+            cwd_header.update(Text.assemble(
+                ("cwd: ", f"bold {p['violet']}"),
+                (str(self.workdir), f"{p['muted']}"),
+            ))
+        except Exception:  # noqa: BLE001 — widget may not be mounted yet
+            pass
 
     def _refresh_status(self) -> None:
         self.status.set_stage(self.engagement.stage)
