@@ -583,7 +583,7 @@ class RiftorApp(App):
         shell_pane.title = f"Shell output — {len(self._shell_history)} commands"
         shell_pane.collapsed = False
 
-    async def _clearlog_cmd(self) -> None:
+    def _clearlog_cmd(self) -> None:
         """Clear the shell output log and collapse the pane."""
         shell_log = self.query_one("#shell-log", RichLog)
         shell_pane = self.query_one("#shell-pane", Collapsible)
