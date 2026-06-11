@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from riftor import tools
-from riftor.tools.core import ShellResult, run_shell
+from riftor.tools.core import run_shell
 
 
 @pytest.mark.asyncio
