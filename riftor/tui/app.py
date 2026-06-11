@@ -333,6 +333,7 @@ class RiftorApp(App):
 
     def compose(self) -> ComposeResult:
         yield Banner(genz=self.config.genz, id="banner")
+        yield Static(id="cwd-header")
         yield VerticalScroll(id="chat")
         yield StatusBar(self.config.model, lore=self.config.lore, yolo=self.yolo, genz=self.config.genz)
         yield CommandDropdown(_COMMANDS, id="cmd-dropdown")
@@ -370,6 +371,12 @@ class RiftorApp(App):
             self.register_theme(theme)
         self._apply_keybindings()
         self._apply_theme(self.config.theme)
+        cwd_header = self.query_one("#cwd-header", Static)
+        p = self._pal()
+        cwd_header.update(Text.assemble(
+            ("cwd: ", f"bold {p['violet']}"),
+            (str(self.workdir), f"{p['muted']}"),
+        ))
         self.query_one("#prompt", PromptInput).focus()
         self.status.set_stage(self.engagement.stage)
         self._refresh_status()

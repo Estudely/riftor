@@ -13,6 +13,13 @@ Screen {
     padding: 1 2 0 2;
 }
 
+#cwd-header {
+    height: 1;
+    padding: 0 2;
+    background: $surface;
+    color: $muted;
+}
+
 #chat {
     height: 1fr;
     padding: 0 2 1 2;
