@@ -337,7 +337,7 @@ class RiftorApp(App):
         yield Static(id="cwd-header")
         yield VerticalScroll(id="chat")
         yield Collapsible(
-            RichLog(id="shell-log", highlight=True, markup=True),
+            RichLog(id="shell-log", highlight=True, markup=False),
             id="shell-pane",
             title="Shell output",
             collapsed=True,
