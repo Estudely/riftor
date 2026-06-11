@@ -154,7 +154,7 @@ _COMMANDS = [
     "/edit-finding", "/delete-finding", "/hosts", "/services", "/report",
     "/sessions", "/resume", "/new", "/theme", "/config", "/tools", "/permissions",
     "/lore", "/genz", "/cost", "/retry", "/continue", "/compact", "/copy", "/show",
-    "/timeline", "/audit", "/export", "/conversation", "/doctor", "/review", "/hypotheses", "/lesson", "/lessons", "/browser", "/exit",
+    "/timeline", "/audit", "/export", "/conversation", "/doctor", "/review", "/hypotheses", "/lesson", "/lessons", "/browser", "/clearlog", "/exit",
 ]
 
 HELP = """\
@@ -583,6 +583,15 @@ class RiftorApp(App):
         shell_pane.title = f"Shell output — {len(self._shell_history)} commands"
         shell_pane.collapsed = False
 
+    async def _clearlog_cmd(self) -> None:
+        """Clear the shell output log and collapse the pane."""
+        shell_log = self.query_one("#shell-log", RichLog)
+        shell_pane = self.query_one("#shell-pane", Collapsible)
+        shell_log.clear()
+        shell_pane.title = "Shell output"
+        shell_pane.collapsed = True
+        self._shell_history.clear()
+
     async def _mount(self, widget) -> None:
         await self.chat.mount(widget)
         self._scroll_if_following()
@@ -739,6 +748,7 @@ class RiftorApp(App):
             "/hypotheses": self._hypotheses_cmd,
             "/lesson": lambda: self._lesson_cmd(arg),
             "/lessons": self._lessons_cmd,
+            "/clearlog": self._clearlog_cmd,
         }
         if cmd in ("/exit", "/quit"):
             self._save_session()
