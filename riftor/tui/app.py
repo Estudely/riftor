@@ -547,6 +547,40 @@ class RiftorApp(App):
         self.chat.mount(Static(Text(text), classes="user"))
         self._scroll_if_following()
 
+    @work(exclusive=True)
+    async def _shell_cmd(self, text: str) -> None:
+        from riftor.tools.core import run_shell
+
+        command = text[1:].strip()
+        if not command:
+            return
+        self._shell_history.append(command)
+
+        p = self._pal()
+        shell_log = self.query_one("#shell-log", RichLog)
+        shell_pane = self.query_one("#shell-pane", Collapsible)
+
+        shell_log.write(Text(f"$ {command}", style=f"bold {p['violet']}"))
+
+        try:
+            result = await run_shell(command, str(self.workdir))
+        except Exception as exc:
+            shell_log.write(Text(f"[error: {exc}]", style=f"bold {p['danger']}"))
+        else:
+            if result.stderr:
+                shell_log.write(Text(result.stderr, style=p['danger']))
+            if result.stdout:
+                shell_log.write(Text(result.stdout))
+            if result.exit_code != 0:
+                shell_log.write(
+                    Text(f"[exit {result.exit_code}]", style=f"bold {p['magenta']}")
+                )
+
+        shell_log.write("")
+
+        shell_pane.title = f"Shell output — {len(self._shell_history)} commands"
+        shell_pane.collapsed = False
+
     async def _mount(self, widget) -> None:
         await self.chat.mount(widget)
         self._scroll_if_following()
@@ -575,6 +609,9 @@ class RiftorApp(App):
         inp.reset_pastes()
         self._history_idx = None
         if not text:
+            return
+        if text.startswith("!"):
+            self._shell_cmd(text)
             return
         if not text.startswith("/"):
             self._history.append(text)
