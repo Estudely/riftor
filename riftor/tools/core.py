@@ -366,3 +366,50 @@ def _html_to_text(html: str) -> str:
     text = re.sub(r"[ \t]{2,}", " ", text)
     text = re.sub(r"\n\s*\n\s*\n+", "\n\n", text)
     return text.strip()
+
+
+from dataclasses import dataclass
+from pathlib import Path as _Path
+
+
+@dataclass
+class ShellResult:
+    stdout: str
+    stderr: str
+    exit_code: int
+    truncated: bool
+
+
+async def run_shell(command: str, workdir: str | _Path, timeout: int = 30) -> ShellResult:
+    """Run a shell command and return captured stdout, stderr, and exit code.
+
+    Output is truncated at ~10 KB (same as BashTool). Raises on subprocess
+    or timeout errors — callers must handle them.
+    """
+    proc = await asyncio.create_subprocess_shell(
+        command,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        cwd=str(workdir),
+    )
+    try:
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        out, err = await proc.communicate()
+    stdout = out.decode("utf-8", errors="replace")
+    stderr = err.decode("utf-8", errors="replace")
+    truncated = False
+    max_chars = 10_000
+    if len(stdout) > max_chars:
+        stdout = stdout[:max_chars] + "\n… (truncated)"
+        truncated = True
+    if len(stderr) > max_chars:
+        stderr = stderr[:max_chars] + "\n… (truncated)"
+        truncated = True
+    return ShellResult(
+        stdout=stdout,
+        stderr=stderr,
+        exit_code=proc.returncode or 0,
+        truncated=truncated,
+    )
