@@ -554,7 +554,6 @@ class RiftorApp(App):
         command = text[1:].strip()
         if not command:
             return
-        self._shell_history.append(command)
 
         p = self._pal()
         shell_log = self.query_one("#shell-log", RichLog)
@@ -563,10 +562,13 @@ class RiftorApp(App):
         shell_log.write(Text(f"$ {command}", style=f"bold {p['violet']}"))
 
         try:
-            result = await run_shell(command, str(self.workdir))
+            result = await run_shell(command, str(self.workdir), timeout=120)
         except Exception as exc:
             shell_log.write(Text(f"[error: {exc}]", style=f"bold {p['danger']}"))
+            self.audit.record("shell_error", command, allowed=False, is_error=True)
         else:
+            self._shell_history.append(command)
+            self.audit.record("shell_cmd", command, allowed=True)
             if result.stderr:
                 shell_log.write(Text(result.stderr, style=p['danger']))
             if result.stdout:
