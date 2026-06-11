@@ -363,3 +363,20 @@ StatusBar {
     color: $foreground;
     border-left: thick $violet;
 }
+
+#shell-pane {
+    height: auto;
+    max-height: 14;
+    margin: 0 1 0 1;
+    border-top: solid $border;
+}
+
+#shell-log {
+    height: auto;
+    max-height: 10;
+    background: $surface;
+    color: $foreground;
+    padding: 0 2;
+    overflow-y: scroll;
+    scrollbar-color: $border;
+}

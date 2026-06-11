@@ -24,7 +24,7 @@ from textual.command import Hit, Hits
 from textual.command import Provider as CommandProvider
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Markdown, Static
+from textual.widgets import Button, Collapsible, Input, Markdown, RichLog, Static
 
 from riftor import tools
 from riftor.agent import antiloop
@@ -310,6 +310,7 @@ class RiftorApp(App):
         # input history + last-output tracking + rate limiting
         self._history: list[str] = []
         self._history_idx: int | None = None
+        self._shell_history: list[str] = []
         self._tool_results: dict[int, str] = {}
         self._last_output: str = ""
         self._last_user_text: str | None = None
@@ -335,6 +336,12 @@ class RiftorApp(App):
         yield Banner(genz=self.config.genz, id="banner")
         yield Static(id="cwd-header")
         yield VerticalScroll(id="chat")
+        yield Collapsible(
+            RichLog(id="shell-log", highlight=True, markup=True),
+            id="shell-pane",
+            title="Shell output",
+            collapsed=True,
+        )
         yield StatusBar(self.config.model, lore=self.config.lore, yolo=self.yolo, genz=self.config.genz)
         yield CommandDropdown(_COMMANDS, id="cmd-dropdown")
         yield PromptInput(placeholder="task riftor — or /help", id="prompt")
