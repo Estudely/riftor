@@ -82,3 +82,33 @@ async def test_memory_clear(monkeypatch):
             await pilot.press("enter")
             await pilot.pause()
             assert MemoryStore(workdir).list() == []
+
+
+@pytest.mark.asyncio
+async def test_memory_add_empty_after_tag_not_persisted(monkeypatch):
+    monkeypatch.setattr(cfgmod, "CONFIG_DIR", Path(tempfile.mkdtemp()))
+    with tempfile.TemporaryDirectory() as d:
+        workdir = Path(d)
+        _patch_paths(workdir)
+        app = RiftorApp(Config(), workdir=workdir)
+        async with app.run_test() as pilot:
+            app.query_one("#prompt", Input).value = "/memory add [a]   "
+            await pilot.press("enter")
+            await pilot.pause()
+            assert MemoryStore(workdir).list() == []
+
+
+@pytest.mark.asyncio
+async def test_memory_bare_lists_without_crash(monkeypatch):
+    monkeypatch.setattr(cfgmod, "CONFIG_DIR", Path(tempfile.mkdtemp()))
+    with tempfile.TemporaryDirectory() as d:
+        workdir = Path(d)
+        _patch_paths(workdir)
+        MemoryStore(workdir).add("a note", source="operator")
+        app = RiftorApp(Config(), workdir=workdir)
+        async with app.run_test() as pilot:
+            app.query_one("#prompt", Input).value = "/memory"
+            await pilot.press("enter")
+            await pilot.pause()
+            # listing branch executed without error; row still present
+            assert len(MemoryStore(workdir).list()) == 1

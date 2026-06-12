@@ -27,6 +27,7 @@ async def test_template_apply_sets_stage_and_active(monkeypatch):
         workdir = Path(d)
         _patch_paths(workdir)
         app = RiftorApp(Config(), workdir=workdir)
+        app.engagement.set_stage("T")  # so the == "R" assertion proves the reset
         async with app.run_test() as pilot:
             app.query_one("#prompt", Input).value = "/template webapp"
             await pilot.press("enter")

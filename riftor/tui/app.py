@@ -1265,8 +1265,12 @@ class RiftorApp(App):
             tag = ""
             text = rest
             if rest.startswith("[") and "]" in rest:
-                tag = rest[1:rest.index("]")].strip()
-                text = rest[rest.index("]") + 1:].strip()
+                close = rest.index("]")
+                tag = rest[1:close].strip()
+                text = rest[close + 1:].strip()
+            if not text:
+                self._note("usage: /memory add <text>  (or [tag] text)")
+                return
             try:
                 entry = store.add(text, tag, source="operator")
                 label = f"[{entry.tag}] {entry.text}" if entry.tag else entry.text
@@ -1275,6 +1279,9 @@ class RiftorApp(App):
                 self._note(f"error: {e}")
             return
         if sub == "rm":
+            if not rest:
+                self._note("usage: /memory rm <id>")
+                return
             if store.remove(rest):
                 self._note(f"forgot #{rest}")
             else:
