@@ -20,7 +20,7 @@ class Template:
     label: str
     description: str
     stage: str          # starting RIFT stage: R/I/F/T
-    tools: list[str]    # suggested external tool chain (display only)
+    tools: tuple[str, ...]  # suggested external tool chain (display only)
     methodology: str    # playbook injected into agent context
 
 
@@ -30,7 +30,7 @@ TEMPLATES: dict[str, Template] = {
         label="Web Application",
         description="Web app / website assessment",
         stage="R",
-        tools=["httpx", "ffuf", "nuclei", "sqlmap", "nikto"],
+        tools=("httpx", "ffuf", "nuclei", "sqlmap", "nikto"),
         methodology=(
             "Engagement type: WEB APPLICATION.\n"
             "- Recon: enumerate hosts/vhosts, fingerprint stack (httpx/whatweb), "
@@ -47,7 +47,7 @@ TEMPLATES: dict[str, Template] = {
         label="API",
         description="REST/GraphQL API assessment",
         stage="R",
-        tools=["httpx", "ffuf", "nuclei", "curl"],
+        tools=("httpx", "ffuf", "nuclei", "curl"),
         methodology=(
             "Engagement type: API.\n"
             "- Recon: discover endpoints (docs/swagger/graphql introspection), "
@@ -64,7 +64,7 @@ TEMPLATES: dict[str, Template] = {
         label="Network",
         description="Network / infrastructure assessment",
         stage="R",
-        tools=["nmap", "nuclei", "httpx"],
+        tools=("nmap", "nuclei", "httpx"),
         methodology=(
             "Engagement type: NETWORK / INFRASTRUCTURE.\n"
             "- Recon: host discovery, full port + service/version scan (nmap), "
@@ -81,7 +81,7 @@ TEMPLATES: dict[str, Template] = {
         label="Active Directory",
         description="Active Directory / Windows domain assessment",
         stage="R",
-        tools=["nmap", "nuclei"],
+        tools=("nmap", "nuclei"),
         methodology=(
             "Engagement type: ACTIVE DIRECTORY.\n"
             "- Recon: enumerate domain (users, groups, shares, GPOs), find DCs, "

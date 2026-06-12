@@ -41,3 +41,16 @@ def test_engagement_clear_template(engagement):
     engagement.set_template("api")
     engagement.set_template("")
     assert engagement.active_template() is None
+
+
+def test_set_template_strips_and_overwrites(engagement):
+    engagement.set_template("  webapp  ")
+    assert engagement.active_template() == "webapp"
+    engagement.set_template("api")  # overwrite
+    assert engagement.active_template() == "api"
+
+
+def test_set_template_logs_activity(engagement):
+    engagement.set_template("network")
+    rows = engagement.store.list_activity()
+    assert any(r["event"] == "template_apply" and r["detail"] == "network" for r in rows)
