@@ -692,5 +692,5 @@ class RememberTool(Tool):
             entry = MemoryStore(ctx.workdir).add(text, tag, source="agent")
             label = f"[{entry.tag}] {entry.text}" if entry.tag else entry.text
             return ToolResult(f"remembered (#{entry.id}): {label}")
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             return ToolResult(f"error saving memory: {e}", is_error=True)

@@ -22,6 +22,9 @@ def test_add_dedups_on_text_and_tag(tmp_workdir):
     b = store.add("SAME FACT", tag="x")  # case-insensitive dedup
     assert a.id == b.id
     assert len(store.list()) == 1
+    c = store.add("same fact", tag="y")  # different tag → new row
+    assert c.id != a.id
+    assert len(store.list()) == 2
 
 
 def test_add_empty_text_raises(tmp_workdir):
@@ -56,6 +59,15 @@ def test_format_for_prompt_caps_and_tags(tmp_workdir):
     assert "## MEMORY (durable notes for this engagement)" in out
     assert "- plain fact" in out
     assert "- [creds] tagged fact" in out
+
+
+def test_format_for_prompt_caps_to_last_n(tmp_workdir):
+    store = MemoryStore(tmp_workdir)
+    for i in range(5):
+        store.add(f"fact {i}")
+    out = store.format_for_prompt(max_items=2)
+    assert "fact 0" not in out
+    assert "fact 3" in out and "fact 4" in out
 
 
 def test_format_for_prompt_empty_is_blank(tmp_workdir):
