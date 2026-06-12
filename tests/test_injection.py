@@ -54,3 +54,10 @@ def test_context_without_workdir_unaffected(tmp_workdir):
     MemoryStore(tmp_workdir).add("should not appear")
     ctx = Context(lore=False)  # no workdir
     assert "should not appear" not in ctx.system_prompt
+
+
+def test_corrupt_db_is_blank(tmp_workdir):
+    d = tmp_workdir / ".riftor"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "engagement.db").write_bytes(b"not a sqlite file")
+    assert engagement_injection(tmp_workdir) == ""  # must not raise

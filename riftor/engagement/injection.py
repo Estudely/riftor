@@ -27,14 +27,18 @@ def engagement_injection(workdir: Path | None) -> str:
 
     # --- active template methodology (engagement.db meta + static dict) ---
     try:
-        db_path = Path(workdir) / ".riftor" / "engagement.db"
+        db_path = workdir / ".riftor" / "engagement.db"
         if db_path.exists():
             from riftor.engagement.state import Store
             from riftor.engagement.templates import (
                 ACTIVE_TEMPLATE_META_KEY,
                 TEMPLATES,
             )
-            key = Store(db_path).get_meta(ACTIVE_TEMPLATE_META_KEY, "") or ""
+            store = Store(db_path)
+            try:
+                key = store.get_meta(ACTIVE_TEMPLATE_META_KEY, "") or ""
+            finally:
+                store.close()
             tmpl = TEMPLATES.get(key)
             if tmpl:
                 parts.append(

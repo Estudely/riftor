@@ -82,7 +82,7 @@ def _content_len(msg: dict) -> int:
 
 class Context:
     def __init__(self, lore: bool = True, genz: bool = False,
-                 workdir: "Path | None" = None) -> None:
+                 workdir: Path | None = None) -> None:
         self._base = _load_system_prompt()
         self.lore = lore
         self.genz = genz
