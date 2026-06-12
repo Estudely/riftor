@@ -25,3 +25,19 @@ def test_every_template_is_valid():
         assert t.methodology.strip()
         assert t.tools and all(isinstance(x, str) for x in t.tools)
         assert t.description.strip()
+
+
+def test_engagement_set_and_get_template(engagement):
+    assert engagement.active_template() is None
+    engagement.set_template("webapp")
+    assert engagement.active_template() == "webapp"
+    # persists across reopen of the same workdir
+    from riftor.engagement import Engagement
+    reopened = Engagement(engagement.dir.parent)
+    assert reopened.active_template() == "webapp"
+
+
+def test_engagement_clear_template(engagement):
+    engagement.set_template("api")
+    engagement.set_template("")
+    assert engagement.active_template() is None
