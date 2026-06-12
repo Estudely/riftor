@@ -391,6 +391,24 @@ async def main() -> None:
         await pilot.pause()
         assert not isinstance(app.screen, ScreenshotGalleryScreen)
 
+        # /template applies a playbook (sets stage + active template)
+        inp.value = "/template webapp"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.engagement.active_template() == "webapp", app.engagement.active_template()
+        assert app.engagement.stage == "R", app.engagement.stage
+
+        # /memory add persists, and injection surfaces both in the system prompt
+        inp.value = "/memory add [pref] operator likes quiet scans"
+        await pilot.press("enter")
+        await pilot.pause()
+        from riftor.engagement.memory import MemoryStore
+        assert any(r["text"] == "operator likes quiet scans"
+                   for r in MemoryStore(Path(workdir)).list())
+        sp = app.context.system_prompt
+        assert "operator likes quiet scans" in sp
+        assert "WEB APPLICATION" in sp
+
     print("SMOKE OK")
 
 

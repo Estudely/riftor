@@ -6,6 +6,7 @@ from pathlib import Path
 
 from riftor.engagement.scope import Scope, Target
 from riftor.engagement.state import Store
+from riftor.engagement.templates import ACTIVE_TEMPLATE_META_KEY
 
 VALID_STAGES = ("R", "I", "F", "T")
 STAGE_LABELS = {"R": "Recon", "I": "Intrusion", "F": "Foothold", "T": "Takeover"}
@@ -103,6 +104,18 @@ class Engagement:
                 self.store.log_activity("stage", f"{prev}->{letter}")
             return True
         return False
+
+    # -- template ---------------------------------------------------------------
+    def set_template(self, key: str) -> None:
+        """Record the active engagement template (empty string clears it)."""
+        key = (key or "").strip()
+        self.store.set_meta(ACTIVE_TEMPLATE_META_KEY, key)
+        self.store.log_activity("template_apply", key or "(cleared)")
+
+    def active_template(self) -> str | None:
+        """The active template key, or None if unset/cleared."""
+        val = self.store.get_meta(ACTIVE_TEMPLATE_META_KEY, "")
+        return val or None
 
     # -- findings / services ----------------------------------------------------
     def add_finding(self, **kwargs) -> int:

@@ -155,7 +155,7 @@ _COMMANDS = [
     "/edit-finding", "/delete-finding", "/hosts", "/services", "/report",
     "/sessions", "/resume", "/new", "/theme", "/config", "/tools", "/permissions",
     "/lore", "/genz", "/cost", "/retry", "/continue", "/compact", "/copy", "/show",
-    "/timeline", "/audit", "/export", "/conversation", "/doctor", "/review", "/hypotheses", "/lesson", "/lessons", "/browser", "/clearlog", "/screenshots", "/exit",
+    "/timeline", "/audit", "/export", "/conversation", "/doctor", "/review", "/hypotheses", "/lesson", "/lessons", "/memory", "/template", "/browser", "/clearlog", "/screenshots", "/exit",
 ]
 
 HELP = """\
@@ -178,6 +178,8 @@ _Engagement_
 - `/hosts` · `/services` — discovered infrastructure
 - `/report [md|html|json|sarif|both|all]` — write a report to `.riftor/reports/`
 - `/timeline` — engagement activity log · `/export` — archive the whole engagement
+- `/memory` — durable notes for this engagement · `/memory add [tag] <text>` · `/memory rm <id>` · `/memory clear`
+- `/template [webapp|api|network|ad]` — apply an engagement playbook (sets stage + guides the agent) · `/template off`
 
 _Settings & sessions_
 - `/model [name]` — show or switch the model · `/theme [name]` (dark: rift/dusk/void/fracture/singularity · light: dawn/paper)
@@ -220,6 +222,8 @@ _PALETTE_COMMANDS = [
     ("/new", "New session", "Start a fresh conversation"),
     ("/clear", "Clear", "Clear the conversation"),
     ("/screenshots", "Screenshots", "Browse, view, and delete screenshots"),
+    ("/memory", "Memory", "Durable notes for this engagement"),
+    ("/template", "Template", "Apply an engagement playbook"),
 ]
 
 
@@ -301,7 +305,7 @@ class RiftorApp(App):
         self.config = config
         self.workdir = workdir or Path.cwd()
         self.yolo = yolo
-        self.context = Context(lore=config.lore, genz=config.genz)
+        self.context = Context(lore=config.lore, genz=config.genz, workdir=self.workdir)
         self.provider = Provider(config)
         self.tools = tools.all_tools()
         self.tool_schemas = tools.schemas()
@@ -752,6 +756,8 @@ class RiftorApp(App):
             "/hypotheses": self._hypotheses_cmd,
             "/lesson": lambda: self._lesson_cmd(arg),
             "/lessons": self._lessons_cmd,
+            "/memory": lambda: self._memory_cmd(arg),
+            "/template": lambda: self._template_cmd(arg),
             "/clearlog": self._clearlog_cmd,
         }
         if cmd in ("/exit", "/quit"):
@@ -1245,6 +1251,88 @@ class RiftorApp(App):
             else:
                 lines.append(f"- {lesson} *({source})*")
         self._markdown("\n".join(lines))
+
+    def _memory_cmd(self, arg: str) -> None:
+        from riftor.engagement.memory import MemoryStore
+        store = MemoryStore(self.workdir)
+        parts = arg.split(maxsplit=1)
+        sub = parts[0].lower() if parts else ""
+        rest = parts[1].strip() if len(parts) > 1 else ""
+        if sub == "add":
+            if not rest:
+                self._note("usage: /memory add <text>  (or [tag] text)")
+                return
+            tag = ""
+            text = rest
+            if rest.startswith("[") and "]" in rest:
+                close = rest.index("]")
+                tag = rest[1:close].strip()
+                text = rest[close + 1:].strip()
+            if not text:
+                self._note("usage: /memory add <text>  (or [tag] text)")
+                return
+            try:
+                entry = store.add(text, tag, source="operator")
+                label = f"[{entry.tag}] {entry.text}" if entry.tag else entry.text
+                self._note(f"remembered (#{entry.id}): {label}")
+            except Exception as e:
+                self._note(f"error: {e}")
+            return
+        if sub == "rm":
+            if not rest:
+                self._note("usage: /memory rm <id>")
+                return
+            if store.remove(rest):
+                self._note(f"forgot #{rest}")
+            else:
+                self._note(f"no memory #{rest}")
+            return
+        if sub == "clear":
+            store.clear()
+            self._note("memory cleared")
+            return
+        rows = store.list()
+        if not rows:
+            self._note("no memory yet. Use /memory add <text> (or [tag] text).")
+            return
+        lines = ["## Memory"]
+        for r in rows:
+            tag = r.get("tag", "")
+            text = r.get("text", "")
+            rid = r.get("id", "")
+            src = r.get("source", "agent")
+            prefix = f"[{tag}] " if tag else ""
+            lines.append(f"- `{rid}` {prefix}{text} *({src})*")
+        self._markdown("\n".join(lines))
+
+    def _template_cmd(self, arg: str) -> None:
+        from riftor.engagement.templates import TEMPLATES
+        sub = (arg or "").strip()
+        if not sub:
+            lines = ["## Engagement templates"]
+            for key, t in TEMPLATES.items():
+                lines.append(f"- `{key}` — {t.description}")
+            lines.append("\nApply with `/template <name>` · clear with `/template off`")
+            self._markdown("\n".join(lines))
+            return
+        if sub.lower() == "off":
+            self.engagement.set_template("")
+            self._note("template cleared")
+            self._refresh_status()
+            return
+        key = sub.lower()
+        tmpl = TEMPLATES.get(key)
+        if tmpl is None:
+            self._note(f"unknown template: {key} — try /template for the list")
+            return
+        self.engagement.set_stage(tmpl.stage)
+        self.engagement.set_template(key)
+        self._refresh_status()
+        tools = ", ".join(tmpl.tools)
+        self._markdown(
+            f"**template applied: {tmpl.label}**  ·  stage → {tmpl.stage}\n\n"
+            f"suggested tools: {tools}\n\n{tmpl.methodology}"
+        )
 
     def _doctor_cmd(self) -> None:
         from riftor.engagement.doctor import check_toolchain, render_markdown

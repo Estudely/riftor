@@ -661,3 +661,36 @@ class ListLessonsTool(Tool):
             else:
                 lines.append(f"#{lid} [{source}] {lesson}")
         return ToolResult("\n".join(lines))
+
+
+class RememberTool(Tool):
+    name = "remember"
+    description = (
+        "Store a durable fact, preference, or decision for THIS engagement. It "
+        "persists across sessions and is recalled automatically. Use for target "
+        "quirks, where creds live, operator preferences, or decisions you made."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "text": {"type": "string", "description": "The fact to remember."},
+            "tag": {
+                "type": "string",
+                "description": "Optional short category, e.g. 'creds' or 'pref'.",
+            },
+        },
+        "required": ["text"],
+    }
+
+    async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        from riftor.engagement.memory import MemoryStore
+        text = str(args.get("text") or "").strip()
+        tag = str(args.get("tag") or "").strip()
+        if not text:
+            return ToolResult("error: text is required", is_error=True)
+        try:
+            entry = MemoryStore(ctx.workdir).add(text, tag, source="agent")
+            label = f"[{entry.tag}] {entry.text}" if entry.tag else entry.text
+            return ToolResult(f"remembered (#{entry.id}): {label}")
+        except Exception as e:
+            return ToolResult(f"error saving memory: {e}", is_error=True)

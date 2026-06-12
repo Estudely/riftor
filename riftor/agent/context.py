@@ -9,6 +9,10 @@ turns intact.
 from __future__ import annotations
 
 from importlib import resources
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 LORE_PREAMBLE = (
     "\n\nVoice: speak with the calm precision of something that watches through "
@@ -77,10 +81,12 @@ def _content_len(msg: dict) -> int:
 
 
 class Context:
-    def __init__(self, lore: bool = True, genz: bool = False) -> None:
+    def __init__(self, lore: bool = True, genz: bool = False,
+                 workdir: Path | None = None) -> None:
         self._base = _load_system_prompt()
         self.lore = lore
         self.genz = genz
+        self.workdir = workdir
         self._messages: list[dict] = []
 
     @property
@@ -89,6 +95,10 @@ class Context:
         lessons = _load_lessons()
         if lessons:
             parts.append(lessons)
+        from riftor.engagement.injection import engagement_injection
+        injected = engagement_injection(self.workdir)
+        if injected:
+            parts.append(injected)
         if self.lore:
             parts.append(LORE_PREAMBLE)
         if self.genz:
