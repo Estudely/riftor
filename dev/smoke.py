@@ -380,6 +380,17 @@ async def main() -> None:
         await pilot.pause()
         assert len(list(app.query(Markdown))) == 0
 
+        # /screenshots opens the gallery modal; close it with escape
+        from riftor.tui.screenshot_gallery import ScreenshotGalleryScreen
+
+        inp.value = "/screenshots"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(app.screen, ScreenshotGalleryScreen), type(app.screen)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, ScreenshotGalleryScreen)
+
     print("SMOKE OK")
 
 
