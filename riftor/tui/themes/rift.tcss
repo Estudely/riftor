@@ -379,3 +379,94 @@ StatusBar {
     padding: 0 2;
     scrollbar-color: $border;
 }
+
+/* ─────────────────────── screenshot gallery ────────────────────────── */
+ScreenshotGalleryScreen {
+    align: center middle;
+    background: $background 75%;
+}
+
+#gallery-box {
+    layout: vertical;
+    width: 90;
+    max-width: 95%;
+    height: 28;
+    max-height: 100%;
+    padding: 0;
+    background: $panel;
+    border: round $violet;
+}
+
+#gallery-title {
+    width: 1fr;
+    height: 3;
+    padding: 1 2 0 2;
+    background: $surface;
+    border-bottom: solid $border;
+    text-style: bold;
+}
+
+#gallery-main {
+    height: 1fr;
+    layout: horizontal;
+}
+
+#gallery-list {
+    width: 32;
+    height: 1fr;
+    background: $surface;
+    padding: 1 0;
+    scrollbar-color: $border;
+}
+
+#gallery-list > ListItem {
+    padding: 0 2;
+    color: $muted;
+}
+
+#gallery-list > ListItem.--highlight {
+    background: $violet 25%;
+    color: $foreground;
+    border-left: thick $violet;
+}
+
+#gallery-preview-scroll {
+    width: 1fr;
+    height: 1fr;
+    padding: 1 2;
+    border-left: solid $border;
+    overflow-y: auto;
+    scrollbar-color: $border;
+}
+
+#gallery-preview-info {
+    height: auto;
+    color: $cyan;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#gallery-preview-image {
+    height: auto;
+}
+
+#gallery-footer {
+    height: 3;
+    align: center middle;
+    background: $surface;
+    border-top: solid $border;
+    padding: 0 2;
+}
+
+#gallery-footer Label {
+    width: 1fr;
+    color: $muted;
+}
+
+#gallery-footer Button {
+    height: 1;
+    min-height: 1;
+    min-width: 10;
+    border: none;
+    margin: 0 0 0 2;
+}

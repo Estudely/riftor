@@ -38,6 +38,7 @@ from riftor.safety.audit import AuditLog
 from riftor.safety.permissions import ConfirmScreen, Permissions
 from riftor.tools import ToolContext, ToolResult
 from riftor.tui.config_screen import ConfigScreen
+from riftor.tui.screenshot_gallery import ScreenshotGalleryScreen
 from riftor.tui.theme import THEMES, css_variable_defaults, palette
 from riftor.tui.widgets import STAGE_NAMES, GENZ_STAGE_NAMES, GENZ_STAGE_LETTERS, Banner, CommandDropdown, FlockPane, PulseSpinner, StatusBar
 
@@ -154,7 +155,7 @@ _COMMANDS = [
     "/edit-finding", "/delete-finding", "/hosts", "/services", "/report",
     "/sessions", "/resume", "/new", "/theme", "/config", "/tools", "/permissions",
     "/lore", "/genz", "/cost", "/retry", "/continue", "/compact", "/copy", "/show",
-    "/timeline", "/audit", "/export", "/conversation", "/doctor", "/review", "/hypotheses", "/lesson", "/lessons", "/browser", "/clearlog", "/exit",
+    "/timeline", "/audit", "/export", "/conversation", "/doctor", "/review", "/hypotheses", "/lesson", "/lessons", "/browser", "/clearlog", "/screenshots", "/exit",
 ]
 
 HELP = """\
@@ -185,6 +186,7 @@ _Settings & sessions_
 - `/audit` — recent tool-call audit log
 - `/doctor` — check which external recon tools (nmap/httpx/…) are installed
 - `/browser [headed|headless|close]` — browser status / mode / teardown
+- `/screenshots` — browse, view, and delete browser screenshots
 - `/review` — self-critique findings for false positives before reporting
 - `/hypotheses` — list tracked hypotheses (open leads)
 - `/lesson <text>` — teach a durable lesson (persists across sessions)
@@ -217,6 +219,7 @@ _PALETTE_COMMANDS = [
     ("/config", "Config", "Open the settings panel"),
     ("/new", "New session", "Start a fresh conversation"),
     ("/clear", "Clear", "Clear the conversation"),
+    ("/screenshots", "Screenshots", "Browse, view, and delete screenshots"),
 ]
 
 
@@ -744,6 +747,7 @@ class RiftorApp(App):
             "/conversation": self._conversation_cmd,
             "/doctor": self._doctor_cmd,
             "/browser": lambda: self._browser_cmd(arg),
+            "/screenshots": self._screenshots_cmd,
             "/review": self._review_cmd,
             "/hypotheses": self._hypotheses_cmd,
             "/lesson": lambda: self._lesson_cmd(arg),
@@ -1266,6 +1270,10 @@ class RiftorApp(App):
         profile = "persistent" if self.config.browser_persistent_profile else "incognito"
         state = "running" if (mgr and mgr.launched) else "not launched"
         self._note(f"browser: {state} · {mode} · {profile} (toggle in /config)")
+
+    @work(group="screenshots")
+    async def _screenshots_cmd(self) -> None:
+        await self.push_screen_wait(ScreenshotGalleryScreen(self.workdir))
 
     def _export_cmd(self) -> None:
         import json
