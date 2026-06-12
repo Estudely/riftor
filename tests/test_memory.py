@@ -60,3 +60,30 @@ def test_format_for_prompt_caps_and_tags(tmp_workdir):
 
 def test_format_for_prompt_empty_is_blank(tmp_workdir):
     assert MemoryStore(tmp_workdir).format_for_prompt() == ""
+
+
+async def test_remember_tool_writes_entry(toolctx):
+    from riftor import tools
+    r = await tools.get("remember").execute(
+        {"text": "operator prefers quiet scans", "tag": "pref"}, toolctx)
+    assert not r.is_error
+    assert "remembered" in r.content
+    from riftor.engagement.memory import MemoryStore
+    rows = MemoryStore(toolctx.workdir).list()
+    assert rows and rows[0]["text"] == "operator prefers quiet scans"
+    assert rows[0]["source"] == "agent"
+
+
+async def test_remember_tool_requires_text(toolctx):
+    from riftor import tools
+    r = await tools.get("remember").execute({"text": "  "}, toolctx)
+    assert r.is_error
+
+
+def test_remember_tool_registered_safe():
+    from riftor import tools
+    t = tools.get("remember")
+    assert t is not None
+    assert t.requires_permission is False
+    assert t.scope_sensitive is False
+    assert t.danger is False
