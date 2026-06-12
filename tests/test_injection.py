@@ -61,3 +61,17 @@ def test_corrupt_db_is_blank(tmp_workdir):
     d.mkdir(parents=True, exist_ok=True)
     (d / "engagement.db").write_bytes(b"not a sqlite file")
     assert engagement_injection(tmp_workdir) == ""  # must not raise
+
+
+def test_injection_creates_nothing_on_empty_workdir(tmp_workdir):
+    # Assembling a prompt must not create .riftor/ as a side effect.
+    engagement_injection(tmp_workdir)
+    assert not (tmp_workdir / ".riftor").exists()
+
+
+def test_injection_reads_template_without_ddl_churn(tmp_workdir):
+    # Sanity: template injection still works after switching to a direct read.
+    from riftor.engagement import Engagement
+    Engagement(tmp_workdir).set_template("webapp")
+    out = engagement_injection(tmp_workdir)
+    assert "WEB APPLICATION" in out
