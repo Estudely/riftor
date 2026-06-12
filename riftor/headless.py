@@ -77,7 +77,7 @@ def run_headless(
 
 
 async def _run(cfg: Config, workdir: Path, prompt: str, scope_file: str | None, yolo: bool = False) -> int:
-    context = Context(lore=cfg.lore)
+    context = Context(lore=cfg.lore, workdir=workdir)
     provider = Provider(cfg)
     engagement = Engagement(workdir)
     if scope_file:

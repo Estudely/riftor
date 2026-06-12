@@ -36,3 +36,21 @@ def test_combines_memory_and_template(tmp_workdir):
     out = engagement_injection(tmp_workdir)
     assert "rate limit is 5/s" in out
     assert "API" in out
+
+
+def test_context_system_prompt_includes_injection(tmp_workdir):
+    from riftor.agent.context import Context
+    eng = Engagement(tmp_workdir)
+    eng.set_template("network")
+    MemoryStore(tmp_workdir).add("box at 10.0.0.5 runs redis")
+    ctx = Context(lore=False, workdir=tmp_workdir)
+    sp = ctx.system_prompt
+    assert "box at 10.0.0.5 runs redis" in sp
+    assert "NETWORK" in sp
+
+
+def test_context_without_workdir_unaffected(tmp_workdir):
+    from riftor.agent.context import Context
+    MemoryStore(tmp_workdir).add("should not appear")
+    ctx = Context(lore=False)  # no workdir
+    assert "should not appear" not in ctx.system_prompt

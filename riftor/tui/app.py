@@ -301,7 +301,7 @@ class RiftorApp(App):
         self.config = config
         self.workdir = workdir or Path.cwd()
         self.yolo = yolo
-        self.context = Context(lore=config.lore, genz=config.genz)
+        self.context = Context(lore=config.lore, genz=config.genz, workdir=self.workdir)
         self.provider = Provider(config)
         self.tools = tools.all_tools()
         self.tool_schemas = tools.schemas()
