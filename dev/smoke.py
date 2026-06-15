@@ -459,6 +459,13 @@ async def test_tools() -> None:
         for s in tools.schemas():
             assert s["type"] == "function" and s["function"]["name"]
 
+        # register_plugins is a no-op with no plugins dir; never shrinks the registry
+        from riftor.config import Config as _Config
+
+        _before = len(tools.all_tools())
+        tools.register_plugins(_Config())
+        assert len(tools.all_tools()) >= _before, "register_plugins shrank the registry"
+
     print("TOOLS OK")
 
 

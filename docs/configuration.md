@@ -29,6 +29,9 @@ falls back to detected defaults (it won't overwrite your file) and launches.
 | `browser_headless` | bool | `true` | Run the Playwright browser headless (good for servers/SSH). Set `false` to launch it visibly. |
 | `browser_persistent_profile` | bool | `false` | Reuse a profile at `.riftor/browser-profile/` (persists cookies/sessions). Default is incognito — a fresh context per launch. |
 | `wordlists_dir` | string | — | Extra directory the `wordlist` tool searches, in addition to the known SecLists/system locations. |
+| `plugins_enabled` | bool | `true` | Master switch for operator plugins. `false` disables all plugin loading. |
+| `plugins_allow` | list | `[]` | If non-empty, only these plugin module names are loaded. |
+| `plugins_deny` | list | `[]` | Plugin module names to skip. Deny wins over allow. |
 | `chakla_model` | string | `anthropic/claude-haiku-4-5-20251001` | The cheap worker model used by dispatched Chakla subagents. |
 | `chakla_max_workers` | int | `5` | Max number of Chakla workers per dispatch batch. |
 | `chakla_timeout_s` | int | `300` | Per-worker wall-clock timeout in seconds. |
@@ -152,6 +155,54 @@ Screenshots are saved to `.riftor/screenshots/`. They render inline in the termi
 if the optional extra is installed (`pip install 'riftor[browser-ui]'`) on Python
 ≥3.12 and the terminal supports Kitty or Sixel graphics; otherwise riftor shows the
 saved file path.
+
+## Plugins
+
+Operators can extend riftor with their own tools by dropping Python files (or
+packages) into the plugins directory:
+
+- `$XDG_CONFIG_HOME/riftor/plugins` if `XDG_CONFIG_HOME` is set,
+- otherwise `~/.config/riftor/plugins`.
+
+Each top-level `.py` file or package (a directory with `__init__.py`) must export a
+module-level `TOOLS` list. Files and directories whose names start with `_` or `.`
+are ignored.
+
+```python
+# ~/.config/riftor/plugins/hello.py
+from riftor.tools.base import Tool, ToolResult
+
+
+class HelloTool(Tool):
+    name = "hello"
+    description = "Say hello."
+    parameters = {"type": "object", "properties": {}}
+
+    async def execute(self, args, ctx):
+        return ToolResult("hello from a plugin")
+
+
+TOOLS = [HelloTool()]
+```
+
+Each item in `TOOLS` must be an instance of a `Tool` subclass with a unique,
+non-built-in `name` and a `dict` `parameters` schema. Plugins are discovered and
+registered once at startup. A plugin that fails to load (missing/invalid `TOOLS`,
+a non-`Tool` item, an empty name, a name that collides with a built-in or another
+plugin, or an import error) is skipped with a warning — it never crashes riftor.
+In the TUI the warning appears as a startup notice; in `--headless` it prints to
+stderr.
+
+Control loading with the config fields above:
+
+- `plugins_enabled = false` disables all plugins (kill switch).
+- `plugins_allow = ["foo"]` loads only the listed modules.
+- `plugins_deny = ["bar"]` skips the listed modules; **deny wins over allow**.
+
+> **Trust:** plugin code runs with the **same privileges as riftor itself** — the
+> operator-owned config directory is the trust boundary. Only install plugins you
+> trust. Plugin tools still flow through the permission and scope engine according
+> to their own `requires_permission` / `danger` / `scope_sensitive` flags.
 
 ## Providers & models
 
