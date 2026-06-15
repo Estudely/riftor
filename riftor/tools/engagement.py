@@ -535,15 +535,22 @@ class WordlistTool(Tool):
     }
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
-        from riftor.engagement.wordlists import KNOWN_ROOTS, count_lines, discover, search
+        from riftor.engagement.wordlists import (
+            KNOWN_ROOTS,
+            Wordlist,
+            count_lines,
+            discover,
+            search,
+        )
 
         extra = ctx.config.wordlists_dir if ctx.config is not None else None
         lists = discover(extra_dir=extra)
         if not lists:
             roots = list(KNOWN_ROOTS) + ([extra] if extra else [])
+            shown = ", ".join(str(Path(r).expanduser()) for r in roots)
             return ToolResult(
                 "no wordlists found. Searched: "
-                + ", ".join(roots)
+                + shown
                 + ". Install SecLists or set `wordlists_dir` in config "
                 + "(~/.config/riftor/config.toml)."
             )
@@ -564,7 +571,7 @@ class WordlistTool(Tool):
             return ToolResult("\n".join(lines)).truncated(ctx.max_result_chars)
 
         # No query: grouped catalog.
-        by_cat: dict[str, list] = {}
+        by_cat: dict[str, list[Wordlist]] = {}
         for w in lists:
             by_cat.setdefault(w.category, []).append(w)
         out = [f"# {len(lists)} wordlists ({len(by_cat)} categories)"]
