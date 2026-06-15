@@ -28,6 +28,7 @@ falls back to detected defaults (it won't overwrite your file) and launches.
 | `rate_limit_per_min` | int | `0` | Cap model calls per minute (`0` = unlimited). |
 | `browser_headless` | bool | `true` | Run the Playwright browser headless (good for servers/SSH). Set `false` to launch it visibly. |
 | `browser_persistent_profile` | bool | `false` | Reuse a profile at `.riftor/browser-profile/` (persists cookies/sessions). Default is incognito — a fresh context per launch. |
+| `wordlists_dir` | string | — | Extra directory the `wordlist` tool searches, in addition to the known SecLists/system locations. |
 | `chakla_model` | string | `anthropic/claude-haiku-4-5-20251001` | The cheap worker model used by dispatched Chakla subagents. |
 | `chakla_max_workers` | int | `5` | Max number of Chakla workers per dispatch batch. |
 | `chakla_timeout_s` | int | `300` | Per-worker wall-clock timeout in seconds. |
@@ -52,6 +53,23 @@ rate_limit_per_min = 0
 # model = "ollama_chat/llama3.1"
 # api_base = "http://localhost:11434"
 ```
+
+### Wordlists
+
+The `wordlist` agent tool discovers local wordlists for fuzzing/brute-forcing
+(ffuf, gobuster, nuclei, hydra). It probes these locations:
+
+- `/usr/share/seclists`
+- `/usr/share/wordlists/seclists`
+- `/usr/share/wordlists`
+- `~/.local/share/seclists`
+- the `wordlists_dir` you configure, if any
+
+Call it with no arguments for the full catalog grouped by category, or pass a
+`query` (e.g. `directory`, `subdomains`, `common`, `usernames`) to find the best
+match. It returns absolute paths to plug straight into a `bash` command. If no
+wordlists are found, install [SecLists](https://github.com/danielmiessler/SecLists)
+or set `wordlists_dir`.
 
 ### Subagents (Baaj / Chakla)
 
