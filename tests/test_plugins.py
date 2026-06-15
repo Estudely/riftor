@@ -7,8 +7,10 @@ from pathlib import Path
 
 import pytest
 
+import riftor.tools as tools_pkg
 from riftor.config import Config
 from riftor.plugins import PluginError, load_plugins, plugins_dir
+from riftor.tools import all_tools, get, schemas
 
 
 def _write_plugin(dirpath: Path, name: str, body: str) -> None:
@@ -131,3 +133,41 @@ def test_underscore_files_skipped(monkeypatch, tmp_path):
     _write_plugin(tmp_path / "riftor" / "plugins", "_private", _GOOD)
     tools, errors = load_plugins(Config(), builtin_names=set())
     assert tools == [] and errors == []
+
+
+@pytest.fixture
+def restore_registry():
+    snap_list = list(tools_pkg.ALL_TOOLS)
+    snap_map = dict(tools_pkg._BY_NAME)
+    yield
+    tools_pkg.ALL_TOOLS[:] = snap_list
+    tools_pkg._BY_NAME.clear()
+    tools_pkg._BY_NAME.update(snap_map)
+
+
+def test_import_does_not_load_plugins(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    _write_plugin(tmp_path / "riftor" / "plugins", "demo", _GOOD)
+    import importlib
+
+    importlib.reload(tools_pkg)
+    assert tools_pkg.get("hello_plugin") is None
+
+
+def test_register_updates_all_three_seams(monkeypatch, tmp_path, restore_registry):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    _write_plugin(tmp_path / "riftor" / "plugins", "demo", _GOOD)
+    errors = tools_pkg.register_plugins(Config())
+    assert errors == []
+    assert get("hello_plugin") is not None
+    assert any(t.name == "hello_plugin" for t in all_tools())
+    assert any(s["function"]["name"] == "hello_plugin" for s in schemas())
+
+
+def test_register_is_idempotent(monkeypatch, tmp_path, restore_registry):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    _write_plugin(tmp_path / "riftor" / "plugins", "demo", _GOOD)
+    tools_pkg.register_plugins(Config())
+    before = len(all_tools())
+    tools_pkg.register_plugins(Config())
+    assert len(all_tools()) == before
