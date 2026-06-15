@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from riftor.engagement.wordlists import Wordlist, count_lines, discover
+from riftor.engagement.wordlists import Wordlist, count_lines, discover, search
 
 
 def _mkroot(base: Path) -> Path:
@@ -69,3 +69,32 @@ def test_count_lines_and_cache(tmp_path):
 def test_count_lines_unreadable_returns_none(tmp_path):
     missing = tmp_path / "gone.txt"
     assert count_lines(missing) is None
+
+
+def _lists():
+    return [
+        Wordlist("common.txt", Path("/r/Discovery/Web-Content/common.txt"), "Discovery/Web-Content"),
+        Wordlist("subdomains-top1million.txt", Path("/r/DNS/subdomains-top1million.txt"), "DNS"),
+        Wordlist("top-usernames.txt", Path("/r/Usernames/top-usernames.txt"), "Usernames"),
+    ]
+
+
+def test_search_empty_query_returns_all():
+    assert search("", _lists()) == _lists()
+
+
+def test_search_substring_on_category_and_name():
+    hits = search("web-content", _lists())
+    assert [w.name for w in hits] == ["common.txt"]
+    hits = search("subdomains", _lists())
+    assert [w.name for w in hits] == ["subdomains-top1million.txt"]
+
+
+def test_search_fuzzy_fallback_when_no_substring():
+    # "usernme" has no substring hit but fuzzy-matches top-usernames.txt
+    hits = search("usernmes", _lists())
+    assert any(w.name == "top-usernames.txt" for w in hits)
+
+
+def test_search_no_match_returns_empty():
+    assert search("zzzznotathing", _lists()) == []
