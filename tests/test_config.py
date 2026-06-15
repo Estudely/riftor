@@ -244,3 +244,18 @@ def test_creds_for_openrouter_routed_id_is_miskeyed_known_limitation(monkeypatch
     cfg = Config(model="openrouter/auto")
     cfg.providers = {"openrouter": cfgmod.ProviderCreds(api_key="sk-or")}
     assert cfg.creds_for("openai/gpt-5.5") == (None, None)
+
+
+def test_wordlists_dir_defaults_none_and_round_trips(tmp_path, monkeypatch):
+    monkeypatch.setattr("riftor.config.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("riftor.config.CONFIG_PATH", tmp_path / "config.toml")
+    from riftor.config import Config
+
+    cfg = Config()
+    assert cfg.wordlists_dir is None
+
+    cfg.wordlists_dir = "/opt/wordlists"
+    cfg.save()
+    import tomllib
+    data = tomllib.loads((tmp_path / "config.toml").read_text())
+    assert data["riftor"]["wordlists_dir"] == "/opt/wordlists"
