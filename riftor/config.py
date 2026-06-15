@@ -78,6 +78,12 @@ class Config(BaseModel):
     # Optional extra root searched by the `wordlist` tool (in addition to known
     # SecLists/system locations). None => only the known roots are probed.
     wordlists_dir: str | None = None
+    # Operator plugins (.py / packages under ~/.config/riftor/plugins exporting
+    # a module-level TOOLS list). Loaded at startup. plugins_enabled is the kill
+    # switch; deny wins over allow.
+    plugins_enabled: bool = True
+    plugins_allow: list[str] = []
+    plugins_deny: list[str] = []
     # Tracks whether we've shown the first-run onboarding.
     onboarded: bool = False
 
@@ -247,6 +253,9 @@ class Config(BaseModel):
             f'wordlists_dir = "{self.wordlists_dir}"' if self.wordlists_dir
             else '# wordlists_dir = "/usr/share/seclists"',
             f"onboarded = {str(self.onboarded).lower()}",
+            f"plugins_enabled = {str(self.plugins_enabled).lower()}",
+            f"plugins_allow = [{', '.join(repr(x) for x in self.plugins_allow)}]",
+            f"plugins_deny = [{', '.join(repr(x) for x in self.plugins_deny)}]",
 
             f'chakla_model = "{self.chakla_model}"',
             f"chakla_max_workers = {self.chakla_max_workers}",

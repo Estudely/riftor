@@ -51,8 +51,6 @@ def test_valid_single_file_plugin_loads(monkeypatch, tmp_path):
     assert [t.name for t in tools] == ["hello_plugin"]
 
 
-# TODO(Task 3): remove this skip once Config gains the `plugins_enabled` field.
-@pytest.mark.skip(reason="needs Config plugin fields from Task 3")
 def test_disabled_loads_nothing(monkeypatch, tmp_path):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     _write_plugin(tmp_path / "riftor" / "plugins", "demo", _GOOD)
@@ -60,8 +58,6 @@ def test_disabled_loads_nothing(monkeypatch, tmp_path):
     assert tools == [] and errors == []
 
 
-# TODO(Task 3): remove this skip once Config gains the `plugins_deny` field.
-@pytest.mark.skip(reason="needs Config plugin fields from Task 3")
 def test_deny_skips_module(monkeypatch, tmp_path):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     _write_plugin(tmp_path / "riftor" / "plugins", "demo", _GOOD)
@@ -69,8 +65,6 @@ def test_deny_skips_module(monkeypatch, tmp_path):
     assert tools == []
 
 
-# TODO(Task 3): remove this skip once Config gains the `plugins_allow` field.
-@pytest.mark.skip(reason="needs Config plugin fields from Task 3")
 def test_allowlist_loads_only_listed(monkeypatch, tmp_path):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     pdir = tmp_path / "riftor" / "plugins"
@@ -80,8 +74,6 @@ def test_allowlist_loads_only_listed(monkeypatch, tmp_path):
     assert [t.name for t in tools] == ["hello_plugin"]
 
 
-# TODO(Task 3): remove this skip once Config gains the plugin allow/deny fields.
-@pytest.mark.skip(reason="needs Config plugin fields from Task 3")
 def test_deny_wins_over_allow(monkeypatch, tmp_path):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     _write_plugin(tmp_path / "riftor" / "plugins", "demo", _GOOD)

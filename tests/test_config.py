@@ -259,3 +259,22 @@ def test_wordlists_dir_defaults_none_and_round_trips(tmp_path, monkeypatch):
     import tomllib
     data = tomllib.loads((tmp_path / "config.toml").read_text())
     assert data["riftor"]["wordlists_dir"] == "/opt/wordlists"
+
+
+def test_plugin_fields_default_and_round_trip(tmp_path, monkeypatch):
+    monkeypatch.setattr("riftor.config.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("riftor.config.CONFIG_PATH", tmp_path / "config.toml")
+    from riftor.config import Config
+
+    cfg = Config()
+    assert cfg.plugins_enabled is True
+    assert cfg.plugins_allow == [] and cfg.plugins_deny == []
+
+    cfg.plugins_enabled = False
+    cfg.plugins_deny = ["sketchy"]
+    cfg.save()
+
+    import tomllib
+    data = tomllib.loads((tmp_path / "config.toml").read_text())
+    assert data["riftor"]["plugins_enabled"] is False
+    assert data["riftor"]["plugins_deny"] == ["sketchy"]
