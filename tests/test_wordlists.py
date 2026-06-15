@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from riftor.config import Config
 from riftor.engagement.wordlists import Wordlist, count_lines, discover, search
+from riftor.tools import ToolContext, get
+from riftor.tools.engagement import WordlistTool
 
 
 def _mkroot(base: Path) -> Path:
@@ -98,3 +101,62 @@ def test_search_fuzzy_fallback_when_no_substring():
 
 def test_search_no_match_returns_empty():
     assert search("zzzznotathing", _lists()) == []
+
+
+def _ctx_with(root):
+    return ToolContext(config=Config(wordlists_dir=str(root)))
+
+
+async def test_tool_registered():
+    assert get("wordlist") is not None
+
+
+async def test_tool_lists_catalog_when_no_query(tmp_path):
+    root = tmp_path / "seclists"
+    (root / "Discovery").mkdir(parents=True)
+    (root / "Discovery" / "common.txt").write_text("a\nb\n")
+    tool = WordlistTool()
+    res = await tool.execute({}, _ctx_with(root))
+    assert not res.is_error
+    assert "common.txt" in res.content
+    assert "Discovery" in res.content
+    assert str((root / "Discovery" / "common.txt").resolve()) in res.content
+
+
+async def test_tool_search_returns_matches(tmp_path):
+    root = tmp_path / "seclists"
+    (root / "DNS").mkdir(parents=True)
+    (root / "DNS" / "subdomains.txt").write_text("a\n")
+    (root / "DNS" / "resolvers.txt").write_text("1.1.1.1\n")
+    tool = WordlistTool()
+    res = await tool.execute({"query": "subdomains"}, _ctx_with(root))
+    assert "subdomains.txt" in res.content
+    assert "resolvers.txt" not in res.content
+
+
+async def test_tool_empty_install_is_friendly(tmp_path):
+    tool = WordlistTool()
+    ctx = ToolContext(config=Config(wordlists_dir=str(tmp_path / "nope")))
+    # patch KNOWN_ROOTS empty so the host's real /usr/share doesn't leak in
+    import riftor.engagement.wordlists as wl
+    orig = wl.KNOWN_ROOTS
+    wl.KNOWN_ROOTS = []
+    try:
+        res = await tool.execute({}, ctx)
+    finally:
+        wl.KNOWN_ROOTS = orig
+    assert not res.is_error
+    assert "no wordlists" in res.content.lower()
+    assert "wordlists_dir" in res.content
+
+
+async def test_tool_handles_none_config(tmp_path):
+    tool = WordlistTool()
+    import riftor.engagement.wordlists as wl
+    orig = wl.KNOWN_ROOTS
+    wl.KNOWN_ROOTS = []
+    try:
+        res = await tool.execute({}, ToolContext())  # config is None
+    finally:
+        wl.KNOWN_ROOTS = orig
+    assert not res.is_error  # degrades to "no wordlists" message, no crash

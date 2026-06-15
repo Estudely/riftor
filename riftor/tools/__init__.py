@@ -30,6 +30,7 @@ from riftor.tools.engagement import (
     ResolveHypothesisTool,
     ScopeListTool,
     SetStageTool,
+    WordlistTool,
 )
 from riftor.tools.subagent import DispatchChaklaTool
 from riftor.tools.browser import (
@@ -47,6 +48,7 @@ from riftor.tools.browser import (
 ALL_TOOLS: list[Tool] = [
     ScopeListTool(),
     ListHostsTool(),
+    WordlistTool(),
     ReadTool(),
     GlobTool(),
     GrepTool(),
