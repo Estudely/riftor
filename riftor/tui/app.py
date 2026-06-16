@@ -870,7 +870,9 @@ class RiftorApp(App):
             nid = addr.get("node_id", "?")
             addrs = addr.get("direct_addresses", [])
             eng_id = state.meta.id
-            cmd = f'./riftor-meshd <<< \'{{"id":1,"method":"p2p_submit_remote","params":{{"node_id":"{nid}","addresses":{addrs},"engagement_id":"{eng_id}","submission":{{"type":"finding","data":{{"title":"Test","severity":"medium","target":"10.0.0.5","vuln_class":"test"}}}}}}}}\''
+            import json
+            addrs_json = json.dumps(addrs)
+            cmd = f'./riftor-meshd <<< \'{{"id":1,"method":"p2p_submit_remote","params":{{"node_id":"{nid}","addresses":{addrs_json},"engagement_id":"{eng_id}","submission":{{"type":"finding","data":{{"title":"Test","severity":"medium","target":"10.0.0.5","vuln_class":"test"}}}}}}}}\''
             lines = [
                 f"NodeId: {nid}",
                 f"Addresses: {addrs}",
