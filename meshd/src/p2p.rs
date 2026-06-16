@@ -66,9 +66,11 @@ pub fn spawn_router(endpoint: Endpoint) -> Router {
 pub async fn dial(
     endpoint: &Endpoint,
     endpoint_id: EndpointId,
+    addrs: Vec<iroh::TransportAddr>,
     relay_url: Option<iroh::RelayUrl>,
 ) -> anyhow::Result<P2pStream> {
-    let mut endpoint_addr = iroh::EndpointAddr::from(endpoint_id);
+    let mut endpoint_addr = iroh::EndpointAddr::from(endpoint_id)
+        .with_addrs(addrs);
     if let Some(url) = relay_url {
         endpoint_addr = endpoint_addr.with_relay_url(url);
     }

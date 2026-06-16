@@ -656,10 +656,7 @@ impl Handler {
             None => {
                 return Response::Error {
                     id,
-                    error: ResponseError {
-                        code: "INVALID_PARAMS".into(),
-                        message: "Missing 'node_id'".into(),
-                    },
+                    error: ResponseError { code: "INVALID_PARAMS".into(), message: "Missing 'node_id'".into() },
                 }
             }
         };
@@ -668,15 +665,23 @@ impl Handler {
             Err(e) => {
                 return Response::Error {
                     id,
-                    error: ResponseError {
-                        code: "INVALID_NODE_ID".into(),
-                        message: format!("Invalid node_id: {}", e),
-                    },
+                    error: ResponseError { code: "INVALID_NODE_ID".into(), message: format!("Invalid node_id: {}", e) },
                 }
             }
         };
 
-        match crate::p2p::dial(&self.endpoint, node_id, None).await {
+        // Parse optional addresses
+        let addrs: Vec<iroh::TransportAddr> = params
+            .get("addresses")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter().filter_map(|a| {
+                    a.as_str().and_then(|s| s.parse::<std::net::SocketAddr>().ok().map(|sa| iroh::TransportAddr::Ip(sa)))
+                }).collect()
+            })
+            .unwrap_or_default();
+
+        match crate::p2p::dial(&self.endpoint, node_id, addrs, None).await {
             Ok(mut stream) => {
                 // Send a ping and get response
                 let msg = json!({"method": "ping", "params": {}});
@@ -752,7 +757,7 @@ impl Handler {
             }
         };
 
-        match crate::p2p::dial(&self.endpoint, node_id, None).await {
+        match crate::p2p::dial(&self.endpoint, node_id, vec![], None).await {
             Ok(mut stream) => {
                 let msg = json!({"method": "submit", "params": {"submission": submission}});
                 if let Err(e) = stream.send_json(&msg).await {
