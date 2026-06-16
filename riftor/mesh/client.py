@@ -111,3 +111,47 @@ class MeshClient:
             raise MeshError(resp.error or {})
         b64 = resp.result.get("data", "") if resp.result else ""
         return base64.b64decode(b64)
+
+    async def get_queue_stats(self, engagement_id: str) -> dict:
+        resp = await self._daemon.request("get_queue_stats", {"engagement_id": engagement_id})
+        if not resp.ok:
+            raise MeshError(resp.error or {})
+        return resp.result or {}
+
+    async def get_review_queue(self, engagement_id: str) -> list[dict]:
+        resp = await self._daemon.request("get_review_queue", {"engagement_id": engagement_id})
+        if not resp.ok:
+            raise MeshError(resp.error or {})
+        return (resp.result or {}).get("decisions", [])
+
+    async def set_processor_mode(self, engagement_id: str, mode: str) -> str:
+        resp = await self._daemon.request("set_processor_mode", {
+            "engagement_id": engagement_id, "mode": mode,
+        })
+        if not resp.ok:
+            raise MeshError(resp.error or {})
+        return (resp.result or {}).get("mode", "")
+
+    async def approve_decision(self, engagement_id: str, submission_id: str) -> dict:
+        resp = await self._daemon.request("approve_decision", {
+            "engagement_id": engagement_id, "submission_id": submission_id,
+        })
+        if not resp.ok:
+            raise MeshError(resp.error or {})
+        return resp.result or {}
+
+    async def reject_decision(self, engagement_id: str, submission_id: str, reason: str) -> dict:
+        resp = await self._daemon.request("reject_decision", {
+            "engagement_id": engagement_id, "submission_id": submission_id, "reason": reason,
+        })
+        if not resp.ok:
+            raise MeshError(resp.error or {})
+        return resp.result or {}
+
+    async def override_severity(self, engagement_id: str, submission_id: str, severity: str) -> dict:
+        resp = await self._daemon.request("override_severity", {
+            "engagement_id": engagement_id, "submission_id": submission_id, "severity": severity,
+        })
+        if not resp.ok:
+            raise MeshError(resp.error or {})
+        return resp.result or {}

@@ -21,6 +21,9 @@ class MeshSidebar(Vertical):
             yield Label("Not connected", id="mesh-connection-status")
         with Vertical(id="mesh-engagement"):
             yield Label("", id="mesh-engagement-name")
+        with Vertical(id="mesh-processor"):
+            yield Static("Processor", classes="section-header")
+            yield Label("Not connected", id="mesh-processor-status")
         with Vertical(id="mesh-members"):
             yield Static("Members", classes="section-header")
             yield Static("", id="mesh-members-list")
@@ -50,6 +53,13 @@ class MeshSidebar(Vertical):
             lines.append(f" {indicator} {name} ({role})")
         member_widget = self.query_one("#mesh-members-list", Static)
         member_widget.update("\n".join(lines) if lines else "  No members")
+
+    def update_processor_status(self, mode: str = "", pending: int = 0) -> None:
+        status = self.query_one("#mesh-processor-status", Label)
+        if mode:
+            status.update(f"\u25cf [{mode}] Queue: {pending}")
+        else:
+            status.update("Not connected")
 
     def add_activity(self, entry: str) -> None:
         log = self.query_one("#mesh-activity-log", RichLog)

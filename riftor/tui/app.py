@@ -156,7 +156,7 @@ _COMMANDS = [
     "/edit-finding", "/delete-finding", "/hosts", "/services", "/report",
     "/sessions", "/resume", "/new", "/theme", "/config", "/tools", "/permissions",
     "/lore", "/genz", "/cost", "/retry", "/continue", "/compact", "/copy", "/show",
-    "/timeline", "/audit", "/export", "/conversation", "/doctor", "/review", "/hypotheses", "/lesson", "/lessons", "/memory", "/template", "/browser", "/clearlog", "/screenshots", "/mesh", "/mesh-create", "/mesh-join", "/mesh-leave", "/mesh-invite", "/mesh-refresh", "/exit",
+    "/timeline", "/audit", "/export", "/conversation", "/doctor", "/review", "/hypotheses", "/lesson", "/lessons", "/memory", "/template", "/browser", "/clearlog", "/screenshots",     "/mesh", "/mesh-create", "/mesh-join", "/mesh-leave", "/mesh-invite", "/mesh-refresh", "/mesh-queue", "/mesh-processor", "/mesh-review", "/mesh-approve", "/mesh-reject", "/exit",
 ]
 
 HELP = """\
@@ -623,7 +623,27 @@ class RiftorApp(App):
         self._shell_history.clear()
 
     # ---- mesh commands ----------------------------------------------------------
-    def _mesh_cmd(self) -> None:
+    def _mesh_cmd(self, arg: str = "") -> None:
+        sub = arg.split()[0].lower() if arg else ""
+        if sub == "mode":
+            self._mesh_mode_cmd(arg[len(sub):].strip())
+            return
+        if sub == "queue":
+            self._mesh_queue_cmd()
+            return
+        if sub == "processor":
+            self._mesh_processor_cmd()
+            return
+        if sub == "review":
+            self._mesh_review_cmd()
+            return
+        if sub == "approve":
+            self._mesh_approve_cmd(arg[len(sub):].strip())
+            return
+        if sub == "reject":
+            self._mesh_reject_cmd(arg[len(sub):].strip())
+            return
+
         mgr = getattr(self, "mesh_manager", None)
         if mgr is None:
             self._note("Mesh not available — daemon binary not found")
@@ -650,6 +670,12 @@ class RiftorApp(App):
                 "/mesh-invite — generate an invite code for peers",
                 "/mesh-leave — leave this engagement",
                 "/mesh-refresh — refresh state from peers",
+                "/mesh mode <autonomous|review|critical> — set processor mode",
+                "/mesh queue — show submission queue stats",
+                "/mesh processor — show processor status",
+                "/mesh review — show pending review decisions",
+                "/mesh approve <submission_id> — approve a decision",
+                "/mesh reject <submission_id> <reason> — reject a decision",
             ]
         self._markdown("\n".join(lines))
 
@@ -733,6 +759,101 @@ class RiftorApp(App):
             )
         except Exception as e:
             self._error(f"Mesh refresh failed: {e}")
+
+    async def _mesh_mode_cmd(self, arg: str) -> None:
+        mgr = getattr(self, "mesh_manager", None)
+        if mgr is None or not mgr.running:
+            self._note("Mesh not available")
+            return
+        mode = arg.strip()
+        if mode not in ("autonomous", "review", "critical"):
+            self._note("Usage: /mesh mode autonomous|review|critical")
+            return
+        try:
+            new_mode = await mgr.set_processor_mode(mode)
+            self._note(f"Processor mode: {new_mode}")
+        except Exception as e:
+            self._error(f"Failed to set mode: {e}")
+
+    async def _mesh_queue_cmd(self) -> None:
+        mgr = getattr(self, "mesh_manager", None)
+        if mgr is None or not mgr.running:
+            self._note("Mesh not available")
+            return
+        try:
+            stats = await mgr.get_queue_stats()
+            lines = [
+                f"Pending: {stats.get('pending', 0)}",
+                f"Processing: {stats.get('processing', 0)}",
+                f"Completed: {stats.get('completed', 0)}",
+                f"Failed: {stats.get('failed', 0)}",
+            ]
+            self._note("\n".join(lines))
+        except Exception as e:
+            self._error(f"Failed: {e}")
+
+    async def _mesh_processor_cmd(self) -> None:
+        mgr = getattr(self, "mesh_manager", None)
+        if mgr is None or not mgr.running:
+            self._note("Mesh not available")
+            return
+        try:
+            stats = await mgr.get_queue_stats()
+            mode = stats.get("mode", "unknown")
+            workers = stats.get("worker_count", "?")
+            cb = "OPEN" if stats.get("circuit_open") else "closed"
+            self._note(f"Processor: {mode} | Workers: {workers} | Circuit: {cb}")
+        except Exception as e:
+            self._error(f"Failed: {e}")
+
+    async def _mesh_review_cmd(self) -> None:
+        mgr = getattr(self, "mesh_manager", None)
+        if mgr is None or not mgr.running:
+            self._note("Mesh not available")
+            return
+        try:
+            decisions = await mgr.get_review_queue()
+            if not decisions:
+                self._note("No pending decisions")
+                return
+            lines = [f"{len(decisions)} pending decisions:"]
+            for i, d in enumerate(decisions[:5]):
+                title = d.get("finding", {}).get("title", "N/A")
+                decision = d.get("decision", "N/A")
+                sev = d.get("severity", "N/A")
+                lines.append(f"  #{i+1}: {title} [{sev}] ({decision})")
+            self._note("\n".join(lines))
+        except Exception as e:
+            self._error(f"Failed: {e}")
+
+    async def _mesh_approve_cmd(self, arg: str) -> None:
+        mgr = getattr(self, "mesh_manager", None)
+        if mgr is None or not mgr.running:
+            self._note("Mesh not available")
+            return
+        if not arg.strip():
+            self._note("Usage: /mesh approve <submission_id>")
+            return
+        try:
+            result = await mgr.approve_review(arg.strip())
+            self._note(f"Approved: {result.get('status', 'ok')}")
+        except Exception as e:
+            self._error(f"Failed: {e}")
+
+    async def _mesh_reject_cmd(self, arg: str) -> None:
+        mgr = getattr(self, "mesh_manager", None)
+        if mgr is None or not mgr.running:
+            self._note("Mesh not available")
+            return
+        parts = arg.strip().split(" ", 1)
+        if len(parts) < 2:
+            self._note("Usage: /mesh reject <submission_id> <reason>")
+            return
+        try:
+            result = await mgr.reject_review(parts[0], parts[1])
+            self._note(f"Rejected: {result.get('status', 'ok')}")
+        except Exception as e:
+            self._error(f"Failed: {e}")
 
     def _update_mesh_sidebar(self) -> None:
         mgr = getattr(self, "mesh_manager", None)
@@ -904,12 +1025,17 @@ class RiftorApp(App):
             "/memory": lambda: self._memory_cmd(arg),
             "/template": lambda: self._template_cmd(arg),
             "/clearlog": self._clearlog_cmd,
-            "/mesh": self._mesh_cmd,
+            "/mesh": lambda: self._mesh_cmd(arg),
             "/mesh-create": lambda: self._mesh_create_cmd(arg),
             "/mesh-join": lambda: self._mesh_join_cmd(arg),
             "/mesh-leave": self._mesh_leave_cmd,
             "/mesh-invite": self._mesh_invite_cmd,
             "/mesh-refresh": self._mesh_refresh_cmd,
+            "/mesh-queue": self._mesh_queue_cmd,
+            "/mesh-processor": self._mesh_processor_cmd,
+            "/mesh-review": self._mesh_review_cmd,
+            "/mesh-approve": lambda: self._mesh_approve_cmd(arg),
+            "/mesh-reject": lambda: self._mesh_reject_cmd(arg),
         }
         if cmd in ("/exit", "/quit"):
             self._save_session()

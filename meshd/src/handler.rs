@@ -1,17 +1,37 @@
-use crate::protocol::{Response, ResponseError, Event};
+use crate::protocol::{Response, ResponseError};
+use crate::processor::{Processor, ProcessorMode};
+use crate::queue::{SubmissionQueue, Submission};
 use serde_json::{json, Value};
-use tokio::sync::broadcast;
+use std::sync::Arc;
 use tracing::warn;
 
 pub struct Handler {
     identity_manager: crate::identity::IdentityManager,
     engagement_manager: crate::engagement::EngagementManager,
-    event_tx: broadcast::Sender<String>,
+    processor: Arc<Processor>,
 }
 
 impl Handler {
     pub async fn new() -> anyhow::Result<Self> {
-        let (event_tx, _) = broadcast::channel(256);
+        let identity_manager = crate::identity::IdentityManager::load_or_create().await?;
+        let node_id = identity_manager.get_info()?.node_id;
+        let engagement_manager = crate::engagement::EngagementManager::new(node_id);
+        let queue = Arc::new(SubmissionQueue::new(256));
+        let docs = Arc::new(crate::docs::DocsStore::new());
+        let llm_config = crate::llm::LlmConfig::default();
+        let processor = Arc::new(Processor::new(queue, docs, llm_config, ProcessorMode::Autonomous, 1));
+
+        Ok(Self {
+            identity_manager,
+            engagement_manager,
+            processor,
+        })
+    }
+
+    pub async fn new_with_processor(
+        _queue: Arc<SubmissionQueue>,
+        processor: Arc<Processor>,
+    ) -> anyhow::Result<Self> {
         let identity_manager = crate::identity::IdentityManager::load_or_create().await?;
         let node_id = identity_manager.get_info()?.node_id;
         let engagement_manager = crate::engagement::EngagementManager::new(node_id);
@@ -19,7 +39,7 @@ impl Handler {
         Ok(Self {
             identity_manager,
             engagement_manager,
-            event_tx,
+            processor,
         })
     }
 
@@ -35,6 +55,12 @@ impl Handler {
             "add_blob" => self.add_blob(request.id, request.params).await,
             "get_blob" => self.get_blob(request.id, request.params).await,
             "ping" => Response::Success { id: request.id, result: json!({"pong": true}) },
+            "get_queue_stats" => self.get_queue_stats(request.id, request.params).await,
+            "get_review_queue" => self.get_review_queue(request.id, request.params).await,
+            "set_processor_mode" => self.set_processor_mode(request.id, request.params).await,
+            "approve_decision" => self.approve_decision(request.id, request.params).await,
+            "reject_decision" => self.reject_decision(request.id, request.params).await,
+            "override_severity" => self.override_severity(request.id, request.params).await,
             method => Response::Error {
                 id: request.id,
                 error: ResponseError {
@@ -66,19 +92,6 @@ impl Handler {
 
         match self.engagement_manager.create(name).await {
             Ok(meta) => {
-                if let Ok(data) = serde_json::to_value(&meta) {
-                    let event = Event {
-                        event: "engagement_created".into(),
-                        data,
-                    };
-                    if let Ok(json) = crate::protocol::write_event(&event) {
-                        let _ = self.event_tx.send(json);
-                    } else {
-                        warn!("Failed to serialize event for engagement_created");
-                    }
-                } else {
-                    warn!("Failed to serialize engagement meta for event");
-                }
                 let result = match serde_json::to_value(meta) {
                     Ok(r) => r,
                     Err(e) => {
@@ -130,19 +143,6 @@ impl Handler {
 
         match self.engagement_manager.join(&invite).await {
             Ok(meta) => {
-                if let Ok(data) = serde_json::to_value(&meta) {
-                    let event = Event {
-                        event: "engagement_joined".into(),
-                        data,
-                    };
-                    if let Ok(json) = crate::protocol::write_event(&event) {
-                        let _ = self.event_tx.send(json);
-                    } else {
-                        warn!("Failed to serialize event for engagement_joined");
-                    }
-                } else {
-                    warn!("Failed to serialize engagement meta for event");
-                }
                 let result = match serde_json::to_value(meta) {
                     Ok(r) => r,
                     Err(e) => {
@@ -192,21 +192,29 @@ impl Handler {
             },
         };
 
-        let submission = match params.get("submission") {
-            Some(s) => s,
+        let submission_data = match params.get("submission") {
+            Some(s) => s.clone(),
             None => return Response::Error {
                 id,
                 error: ResponseError { code: "INVALID_PARAMS".into(), message: "Missing 'submission'".into() },
             },
         };
 
-        match self.engagement_manager.submit(&engagement_id, submission).await {
-            Ok(submission_id) => Response::Success { id, result: json!({"submission_id": submission_id}) },
-            Err(e) => Response::Error {
+        let sub = Submission {
+            submission_id: uuid::Uuid::new_v4().to_string(),
+            engagement_id: engagement_id.clone(),
+            author_node_id: self.identity_manager.get_info().map(|i| i.node_id).unwrap_or_default(),
+            data: submission_data,
+        };
+        let submission_id = sub.submission_id.clone();
+        self.processor.queue.enqueue(sub).await.map_err(|e| {
+            Response::Error {
                 id,
-                error: ResponseError { code: "SUBMIT_ERROR".into(), message: e.to_string() },
-            },
-        }
+                error: ResponseError { code: "QUEUE_FULL".into(), message: e.to_string() },
+            }
+        }).map(|_| {
+            Response::Success { id, result: json!({"submission_id": submission_id}) }
+        }).unwrap_or_else(|e| e)
     }
 
     async fn get_state(&self, id: u64, params: Value) -> Response {
@@ -292,7 +300,102 @@ impl Handler {
         }
     }
 
-    pub fn event_rx(&self) -> broadcast::Receiver<String> {
-        self.event_tx.subscribe()
+    async fn get_queue_stats(&self, id: u64, params: Value) -> Response {
+        let _engagement_id = match params.get("engagement_id").and_then(|v| v.as_str()) {
+            Some(eid) => eid.to_string(),
+            None => return Response::Error {
+                id,
+                error: ResponseError { code: "INVALID_PARAMS".into(), message: "Missing 'engagement_id'".into() },
+            },
+        };
+        let stats = self.processor.stats().await;
+        Response::Success { id, result: serde_json::to_value(stats).unwrap_or_default() }
+    }
+
+    async fn get_review_queue(&self, id: u64, params: Value) -> Response {
+        let _engagement_id = match params.get("engagement_id").and_then(|v| v.as_str()) {
+            Some(eid) => eid.to_string(),
+            None => return Response::Error {
+                id,
+                error: ResponseError { code: "INVALID_PARAMS".into(), message: "Missing 'engagement_id'".into() },
+            },
+        };
+        let queue = self.processor.get_review_queue().await;
+        Response::Success { id, result: serde_json::to_value(queue).unwrap_or_default() }
+    }
+
+    async fn set_processor_mode(&self, id: u64, params: Value) -> Response {
+        let mode_str = match params.get("mode").and_then(|v| v.as_str()) {
+            Some(m) => m,
+            None => return Response::Error {
+                id,
+                error: ResponseError { code: "INVALID_PARAMS".into(), message: "Missing 'mode'".into() },
+            },
+        };
+        let mode = match mode_str {
+            "autonomous" => ProcessorMode::Autonomous,
+            "review" => ProcessorMode::ReviewRequired,
+            "critical" => ProcessorMode::CriticalOnly,
+            _ => return Response::Error {
+                id,
+                error: ResponseError { code: "INVALID_PARAMS".into(), message: format!("Unknown mode: {}", mode_str) },
+            },
+        };
+        self.processor.set_mode(mode).await;
+        Response::Success { id, result: json!({"mode": mode_str}) }
+    }
+
+    async fn approve_decision(&self, id: u64, params: Value) -> Response {
+        let submission_id = match params.get("submission_id").and_then(|v| v.as_str()) {
+            Some(sid) => sid.to_string(),
+            None => return Response::Error {
+                id,
+                error: ResponseError { code: "INVALID_PARAMS".into(), message: "Missing 'submission_id'".into() },
+            },
+        };
+        match self.processor.approve_decision(&submission_id).await {
+            Ok(()) => Response::Success { id, result: json!({"approved": submission_id}) },
+            Err(e) => Response::Error {
+                id,
+                error: ResponseError { code: "APPROVE_ERROR".into(), message: e.to_string() },
+            },
+        }
+    }
+
+    async fn reject_decision(&self, id: u64, params: Value) -> Response {
+        let submission_id = match params.get("submission_id").and_then(|v| v.as_str()) {
+            Some(sid) => sid.to_string(),
+            None => return Response::Error {
+                id,
+                error: ResponseError { code: "INVALID_PARAMS".into(), message: "Missing 'submission_id'".into() },
+            },
+        };
+        let reason = params.get("reason").and_then(|v| v.as_str()).unwrap_or("rejected_by_operator");
+        self.processor.reject_decision(&submission_id, reason).await;
+        Response::Success { id, result: json!({"rejected": submission_id}) }
+    }
+
+    async fn override_severity(&self, id: u64, params: Value) -> Response {
+        let submission_id = match params.get("submission_id").and_then(|v| v.as_str()) {
+            Some(sid) => sid.to_string(),
+            None => return Response::Error {
+                id,
+                error: ResponseError { code: "INVALID_PARAMS".into(), message: "Missing 'submission_id'".into() },
+            },
+        };
+        let severity = match params.get("severity").and_then(|v| v.as_str()) {
+            Some(s) => s.to_string(),
+            None => return Response::Error {
+                id,
+                error: ResponseError { code: "INVALID_PARAMS".into(), message: "Missing 'severity'".into() },
+            },
+        };
+        match self.processor.override_severity(&submission_id, &severity).await {
+            Ok(()) => Response::Success { id, result: json!({"overridden": submission_id, "severity": severity}) },
+            Err(e) => Response::Error {
+                id,
+                error: ResponseError { code: "OVERRIDE_ERROR".into(), message: e.to_string() },
+            },
+        }
     }
 }

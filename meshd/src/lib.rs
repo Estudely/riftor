@@ -5,3 +5,7 @@ pub mod engagement;
 pub mod docs;
 pub mod gossip;
 pub mod blobs;
+pub mod queue;
+pub mod llm;
+pub mod prompts;
+pub mod processor;

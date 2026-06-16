@@ -1,7 +1,6 @@
 use meshd::handler::Handler;
 use meshd::protocol::{read_request, write_response, Response, ResponseError};
 use std::io::{self, BufRead, Write};
-use tokio::task;
 use tracing::{info, error};
 
 #[tokio::main]
@@ -15,14 +14,6 @@ async fn main() -> anyhow::Result<()> {
     info!("riftor-meshd starting");
 
     let handler = Handler::new().await?;
-    let mut event_rx = handler.event_rx();
-
-    task::spawn(async move {
-        while let Ok(event_json) = event_rx.recv().await {
-            writeln!(io::stdout(), "{}", event_json).ok();
-            io::stdout().flush().ok();
-        }
-    });
 
     let stdin = io::stdin().lock();
     let mut stdout = io::stdout().lock();

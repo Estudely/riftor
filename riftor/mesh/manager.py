@@ -98,6 +98,30 @@ class MeshManager:
         self._current_engagement = await client.get_state(state.meta.id)
         return self._current_engagement
 
+    async def get_queue_stats(self) -> dict:
+        state = self._ensure_engagement()
+        return await self._ensure_client().get_queue_stats(state.meta.id)
+
+    async def get_review_queue(self) -> list:
+        state = self._ensure_engagement()
+        return await self._ensure_client().get_review_queue(state.meta.id)
+
+    async def set_processor_mode(self, mode: str) -> str:
+        state = self._ensure_engagement()
+        return await self._ensure_client().set_processor_mode(state.meta.id, mode)
+
+    async def approve_review(self, submission_id: str) -> dict:
+        state = self._ensure_engagement()
+        return await self._ensure_client().approve_decision(state.meta.id, submission_id)
+
+    async def reject_review(self, submission_id: str, reason: str) -> dict:
+        state = self._ensure_engagement()
+        return await self._ensure_client().reject_decision(state.meta.id, submission_id, reason)
+
+    async def override_severity(self, submission_id: str, severity: str) -> dict:
+        state = self._ensure_engagement()
+        return await self._ensure_client().override_severity(state.meta.id, submission_id, severity)
+
     def _ensure_client(self) -> MeshClient:
         if not self._running or self._client is None:
             raise RuntimeError("Mesh not started. Call start() first.")
