@@ -46,32 +46,11 @@ class MeshDaemon:
             stderr=asyncio.subprocess.PIPE,
         )
 
-        reader = asyncio.StreamReader()
-        protocol_factory = asyncio.StreamReaderProtocol(reader)
-        transport, _ = await asyncio.get_event_loop().connect_read_pipe(
-            lambda: protocol_factory, self._process.stdout
+        # Use subprocess streams directly — no need for connect_read_pipe/connect_write_pipe
+        self._protocol = MeshProtocol(
+            self._process.stdout,   # StreamReader
+            self._process.stdin,    # StreamWriter-like (has write + drain)
         )
-
-        writer_transport, writer_protocol = await asyncio.get_event_loop().connect_write_pipe(
-            lambda: asyncio.streams.FlowControlMixin(), self._process.stdin
-        )
-
-        class StdoutWriter:
-            def __init__(self, transport, protocol_):
-                self._transport = transport
-                self._protocol = protocol_
-
-            def write(self, data: bytes):
-                self._transport.write(data)
-
-            async def drain(self):
-                await self._protocol._drain_helper()
-
-            def close(self):
-                self._transport.close()
-
-        writer = StdoutWriter(writer_transport, writer_protocol)
-        self._protocol = MeshProtocol(reader, writer)
         await self._protocol.start()
         logger.info("riftor-meshd started")
 
