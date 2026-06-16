@@ -3394,6 +3394,7 @@ dependencies = [
  "base64",
  "chrono",
  "dirs",
+ "futures",
  "iroh",
  "iroh-blobs",
  "iroh-docs",

@@ -110,6 +110,8 @@ impl Handler {
             "approve_decision" => self.approve_decision(request.id, request.params).await,
             "reject_decision" => self.reject_decision(request.id, request.params).await,
             "override_severity" => self.override_severity(request.id, request.params).await,
+            "p2p_dial" => self.p2p_dial(request.id, request.params).await,
+            "p2p_submit_remote" => self.p2p_submit_remote(request.id, request.params).await,
             method => Response::Error {
                 id: request.id,
                 error: ResponseError {
@@ -642,6 +644,144 @@ impl Handler {
                 id,
                 error: ResponseError {
                     code: "OVERRIDE_ERROR".into(),
+                    message: e.to_string(),
+                },
+            },
+        }
+    }
+
+    async fn p2p_dial(&self, id: u64, params: Value) -> Response {
+        let node_id_str = match params.get("node_id").and_then(|v| v.as_str()) {
+            Some(n) => n,
+            None => {
+                return Response::Error {
+                    id,
+                    error: ResponseError {
+                        code: "INVALID_PARAMS".into(),
+                        message: "Missing 'node_id'".into(),
+                    },
+                }
+            }
+        };
+        let node_id: iroh::EndpointId = match node_id_str.parse() {
+            Ok(n) => n,
+            Err(e) => {
+                return Response::Error {
+                    id,
+                    error: ResponseError {
+                        code: "INVALID_NODE_ID".into(),
+                        message: format!("Invalid node_id: {}", e),
+                    },
+                }
+            }
+        };
+
+        match crate::p2p::dial(&self.endpoint, node_id, None).await {
+            Ok(mut stream) => {
+                // Send a ping and get response
+                let msg = json!({"method": "ping", "params": {}});
+                if let Err(e) = stream.send_json(&msg).await {
+                    return Response::Error {
+                        id,
+                        error: ResponseError {
+                            code: "P2P_ERROR".into(),
+                            message: format!("Send failed: {}", e),
+                        },
+                    };
+                }
+                match stream.recv_json().await {
+                    Ok(resp) => Response::Success {
+                        id,
+                        result: json!({"remote_response": resp}),
+                    },
+                    Err(e) => Response::Error {
+                        id,
+                        error: ResponseError {
+                            code: "P2P_ERROR".into(),
+                            message: format!("Recv failed: {}", e),
+                        },
+                    },
+                }
+            }
+            Err(e) => Response::Error {
+                id,
+                error: ResponseError {
+                    code: "P2P_CONNECT_ERROR".into(),
+                    message: e.to_string(),
+                },
+            },
+        }
+    }
+
+    async fn p2p_submit_remote(&self, id: u64, params: Value) -> Response {
+        let node_id_str = match params.get("node_id").and_then(|v| v.as_str()) {
+            Some(n) => n,
+            None => {
+                return Response::Error {
+                    id,
+                    error: ResponseError {
+                        code: "INVALID_PARAMS".into(),
+                        message: "Missing 'node_id'".into(),
+                    },
+                }
+            }
+        };
+        let node_id: iroh::EndpointId = match node_id_str.parse() {
+            Ok(n) => n,
+            Err(e) => {
+                return Response::Error {
+                    id,
+                    error: ResponseError {
+                        code: "INVALID_NODE_ID".into(),
+                        message: format!("Invalid node_id: {}", e),
+                    },
+                }
+            }
+        };
+
+        let submission = match params.get("submission") {
+            Some(s) => s.clone(),
+            None => {
+                return Response::Error {
+                    id,
+                    error: ResponseError {
+                        code: "INVALID_PARAMS".into(),
+                        message: "Missing 'submission'".into(),
+                    },
+                }
+            }
+        };
+
+        match crate::p2p::dial(&self.endpoint, node_id, None).await {
+            Ok(mut stream) => {
+                let msg = json!({"method": "submit", "params": {"submission": submission}});
+                if let Err(e) = stream.send_json(&msg).await {
+                    return Response::Error {
+                        id,
+                        error: ResponseError {
+                            code: "P2P_ERROR".into(),
+                            message: format!("Send failed: {}", e),
+                        },
+                    };
+                }
+                match stream.recv_json().await {
+                    Ok(resp) => Response::Success {
+                        id,
+                        result: json!({"remote_response": resp}),
+                    },
+                    Err(e) => Response::Error {
+                        id,
+                        error: ResponseError {
+                            code: "P2P_ERROR".into(),
+                            message: format!("Recv failed: {}", e),
+                        },
+                    },
+                }
+            }
+            Err(e) => Response::Error {
+                id,
+                error: ResponseError {
+                    code: "P2P_CONNECT_ERROR".into(),
                     message: e.to_string(),
                 },
             },

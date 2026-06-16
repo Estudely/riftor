@@ -16,6 +16,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 base64 = "0.22"
 dirs = "5"
 chrono = { version = "0.4", features = ["serde"] }
+futures = "0.3"
 iroh-docs = "0.101.0"
 iroh-gossip = "0.101.0"
 iroh-blobs = "0.103.0"

@@ -9,3 +9,4 @@ pub mod queue;
 pub mod llm;
 pub mod prompts;
 pub mod processor;
+pub mod p2p;
