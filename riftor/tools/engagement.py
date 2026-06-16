@@ -511,6 +511,80 @@ class LoadSkillTool(Tool):
         )
 
 
+class WordlistTool(Tool):
+    name = "wordlist"
+    description = (
+        "List or search local wordlists for fuzzing/brute-forcing (ffuf, gobuster, "
+        "nuclei, hydra). Searches known SecLists/system locations and any configured "
+        "dir, returning absolute paths to plug into a bash command. Call with no args "
+        "to see the catalog grouped by category; pass `query` (e.g. 'directory', "
+        "'subdomains', 'common', 'usernames') to find the best match. An empty result "
+        "means none are installed — suggest the operator install SecLists."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": (
+                    "Optional filter, e.g. 'directory', 'subdomains', 'common', "
+                    "'usernames'. Omit to list the full catalog grouped by category."
+                ),
+            },
+        },
+    }
+
+    async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        from riftor.engagement.wordlists import (
+            KNOWN_ROOTS,
+            Wordlist,
+            count_lines,
+            discover,
+            search,
+        )
+
+        extra = ctx.config.wordlists_dir if ctx.config is not None else None
+        lists = discover(extra_dir=extra)
+        if not lists:
+            roots = list(KNOWN_ROOTS) + ([extra] if extra else [])
+            shown = ", ".join(str(Path(r).expanduser()) for r in roots)
+            return ToolResult(
+                "no wordlists found. Searched: "
+                + shown
+                + ". Install SecLists or set `wordlists_dir` in config "
+                + "(~/.config/riftor/config.toml)."
+            )
+
+        query = str(args.get("query") or "").strip()
+        if query:
+            matches = search(query, lists)
+            if not matches:
+                cats = sorted({w.category for w in lists})
+                return ToolResult(
+                    f"no wordlist matched '{query}'. Categories available: "
+                    + ", ".join(cats)
+                )
+            lines = [f"# wordlists matching '{query}'"]
+            for w in matches:
+                n = count_lines(w.path)
+                lines.append(f"- {w.path}  ({w.category}, {n if n is not None else '?'} lines)")
+            return ToolResult("\n".join(lines)).truncated(ctx.max_result_chars)
+
+        # No query: grouped catalog.
+        by_cat: dict[str, list[Wordlist]] = {}
+        for w in lists:
+            by_cat.setdefault(w.category, []).append(w)
+        out = [f"# {len(lists)} wordlists ({len(by_cat)} categories)"]
+        for cat in sorted(by_cat):
+            out.append(f"\n## {cat}")
+            for w in sorted(by_cat[cat], key=lambda x: x.name):
+                n = count_lines(w.path)
+                out.append(f"- {w.name}  {w.path}  ({n if n is not None else '?'} lines)")
+        if len(lists) >= 500:
+            out.append("\n…list capped at 500; pass a `query` to narrow.")
+        return ToolResult("\n".join(out)).truncated(ctx.max_result_chars)
+
+
 class RecordHypothesisTool(Tool):
     name = "record_hypothesis"
     description = (

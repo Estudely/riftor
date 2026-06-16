@@ -97,6 +97,8 @@ async def _run(cfg: Config, workdir: Path, prompt: str, scope_file: str | None, 
         yolo=yolo,
         progress=_make_progress_printer(),
     )
+    for err in tools.register_plugins(cfg):
+        print(f"riftor: plugin '{err.module}' skipped: {err.error.splitlines()[-1]}", file=sys.stderr)
     schemas = tools.schemas()
 
     context.add_user(prompt)

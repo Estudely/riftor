@@ -75,6 +75,15 @@ class Config(BaseModel):
     # persist a client's session cookies. Persistent profile is opt-in via /config.
     browser_headless: bool = True
     browser_persistent_profile: bool = False
+    # Optional extra root searched by the `wordlist` tool (in addition to known
+    # SecLists/system locations). None => only the known roots are probed.
+    wordlists_dir: str | None = None
+    # Operator plugins (.py / packages under ~/.config/riftor/plugins exporting
+    # a module-level TOOLS list). Loaded at startup. plugins_enabled is the kill
+    # switch; deny wins over allow.
+    plugins_enabled: bool = True
+    plugins_allow: list[str] = []
+    plugins_deny: list[str] = []
     # Tracks whether we've shown the first-run onboarding.
     onboarded: bool = False
 
@@ -241,7 +250,12 @@ class Config(BaseModel):
             f"rate_limit_per_min = {self.rate_limit_per_min}",
             f"browser_headless = {str(self.browser_headless).lower()}",
             f"browser_persistent_profile = {str(self.browser_persistent_profile).lower()}",
+            f'wordlists_dir = "{self.wordlists_dir}"' if self.wordlists_dir
+            else '# wordlists_dir = "/usr/share/seclists"',
             f"onboarded = {str(self.onboarded).lower()}",
+            f"plugins_enabled = {str(self.plugins_enabled).lower()}",
+            f"plugins_allow = [{', '.join(repr(x) for x in self.plugins_allow)}]",
+            f"plugins_deny = [{', '.join(repr(x) for x in self.plugins_deny)}]",
 
             f'chakla_model = "{self.chakla_model}"',
             f"chakla_max_workers = {self.chakla_max_workers}",

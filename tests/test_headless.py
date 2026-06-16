@@ -110,3 +110,26 @@ async def test_yolo_bypasses_requires_permission(gate):
     msg = _last_tool_result(context)
     assert "denied" not in msg.lower()
     assert (gate[3].workdir / "x.txt").read_text() == "yo"
+
+
+def test_headless_registers_plugins(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    pdir = tmp_path / "riftor" / "plugins"
+    pdir.mkdir(parents=True)
+    (pdir / "demo.py").write_text(
+        "from riftor.tools.base import Tool, ToolResult\n"
+        "class T(Tool):\n"
+        "    name='hello_plugin'; description='d'; parameters={'type':'object','properties':{}}\n"
+        "    async def execute(self, args, ctx): return ToolResult('hi')\n"
+        "TOOLS=[T()]\n"
+    )
+    import riftor.tools as tools_pkg
+
+    snap_list, snap_map = list(tools_pkg.ALL_TOOLS), dict(tools_pkg._BY_NAME)
+    try:
+        tools_pkg.register_plugins(Config())
+        assert tools_pkg.get("hello_plugin") is not None
+    finally:
+        tools_pkg.ALL_TOOLS[:] = snap_list
+        tools_pkg._BY_NAME.clear()
+        tools_pkg._BY_NAME.update(snap_map)

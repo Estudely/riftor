@@ -450,9 +450,21 @@ async def test_tools() -> None:
         )
         assert r.is_error, "edit should fail on missing old_string"
 
+        # wordlist tool: registered and runs without crashing on a clean box
+        assert tools.get("wordlist") is not None, "wordlist tool not registered"
+        r = await tools.get("wordlist").execute({}, ctx)
+        assert not r.is_error, r.content
+
         # schemas are well-formed for litellm
         for s in tools.schemas():
             assert s["type"] == "function" and s["function"]["name"]
+
+        # register_plugins is a no-op with no plugins dir; never shrinks the registry
+        from riftor.config import Config as _Config
+
+        _before = len(tools.all_tools())
+        tools.register_plugins(_Config())
+        assert len(tools.all_tools()) >= _before, "register_plugins shrank the registry"
 
     print("TOOLS OK")
 

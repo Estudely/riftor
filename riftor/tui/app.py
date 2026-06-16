@@ -307,6 +307,7 @@ class RiftorApp(App):
         self.yolo = yolo
         self.context = Context(lore=config.lore, genz=config.genz, workdir=self.workdir)
         self.provider = Provider(config)
+        self._plugin_errors = tools.register_plugins(config)
         self.tools = tools.all_tools()
         self.tool_schemas = tools.schemas()
         self.engagement = Engagement(self.workdir)
@@ -393,6 +394,8 @@ class RiftorApp(App):
         warning = self.config.model_warning()
         if warning:
             self._note("⚠ " + warning)
+        for err in getattr(self, "_plugin_errors", []):
+            self._note(f"plugin '{err.module}' skipped: {err.error.splitlines()[-1]}")
         self._toolchain_heads_up()
         # If the previous run crashed (incomplete session), prompt for recovery
         # after mount; otherwise resume the latest complete session as normal.
