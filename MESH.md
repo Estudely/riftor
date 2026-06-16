@@ -2,7 +2,32 @@
 
 > Feature branch: `feature/mesh-phase1`  
 > Last updated: 2026-06-16  
-> Status: **MVP verified — P2P findings pipeline works end-to-end**
+> Status: **Cross-machine verified — Mac submitted finding over iroh P2P to Linux Commander**
+
+## Where to pick up
+
+```bash
+git clone https://github.com/Estudely/riftor.git
+cd riftor
+git checkout feature/mesh-phase1
+
+# Build daemon
+cargo build --manifest-path meshd/Cargo.toml --release
+
+# Install Python deps
+uv sync --extra dev
+
+# Run TUI
+uv run riftor
+```
+
+## Quick resume test
+
+**Linux (Commander):** `uv run riftor` → `/mesh-create test` → `/mesh test`
+**Mac (Worker):** copy-paste the command from `/mesh test` output
+
+The full P2P pipeline: Worker → iroh QUIC → Commander Router → AI Processor → Published.
+All cross-machine verified 2026-06-16.
 
 ---
 
