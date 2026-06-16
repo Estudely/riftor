@@ -14,16 +14,16 @@ pub struct EngagementMeta {
 }
 
 pub struct EngagementManager {
-    docs: DocsStore,
+    docs: std::sync::Arc<DocsStore>,
     gossip: GossipStore,
     engagements: tokio::sync::Mutex<Vec<EngagementMeta>>,
     node_id: String,
 }
 
 impl EngagementManager {
-    pub fn new(node_id: String) -> Self {
+    pub fn new(node_id: String, docs: std::sync::Arc<DocsStore>) -> Self {
         Self {
-            docs: DocsStore::new(),
+            docs,
             gossip: GossipStore::new(),
             engagements: tokio::sync::Mutex::new(Vec::new()),
             node_id,

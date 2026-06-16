@@ -16,14 +16,13 @@ pub struct LlmConfig {
 impl Default for LlmConfig {
     fn default() -> Self {
         Self {
-            api_key: std::env::var("ANTHROPIC_API_KEY")
+            api_key: std::env::var("DEEPSEEK_API_KEY")
                 .or_else(|_| std::env::var("OPENAI_API_KEY"))
-                .or_else(|_| std::env::var("OPENROUTER_API_KEY"))
                 .unwrap_or_default(),
             api_base: std::env::var("RIFTOR_API_BASE")
-                .unwrap_or_else(|_| "https://api.anthropic.com/v1/messages".into()),
+                .unwrap_or_else(|_| "https://api.deepseek.com/v1/chat/completions".into()),
             model: std::env::var("RIFTOR_MODEL")
-                .unwrap_or_else(|_| "claude-sonnet-4-6".into()),
+                .unwrap_or_else(|_| "deepseek-chat".into()),
             temperature: std::env::var("RIFTOR_TEMPERATURE")
                 .ok()
                 .and_then(|v| v.parse().ok())
@@ -35,7 +34,6 @@ impl Default for LlmConfig {
 #[derive(Debug, Serialize)]
 struct LlmRequest {
     model: String,
-    system: String,
     messages: Vec<LlmMessage>,
     temperature: f32,
     max_tokens: u32,
@@ -49,12 +47,17 @@ struct LlmMessage {
 
 #[derive(Debug, Deserialize)]
 struct LlmResponse {
-    content: Vec<LlmContentBlock>,
+    choices: Vec<LlmChoice>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LlmChoice {
+    message: LlmContentBlock,
 }
 
 #[derive(Debug, Deserialize)]
 struct LlmContentBlock {
-    text: String,
+    content: String,
 }
 
 #[derive(Debug)]
@@ -142,11 +145,16 @@ impl LlmClient {
 
         let request = LlmRequest {
             model: self.config.model.clone(),
-            system: system_prompt.to_string(),
-            messages: vec![LlmMessage {
-                role: "user".into(),
-                content: user_message.to_string(),
-            }],
+            messages: vec![
+                LlmMessage {
+                    role: "system".into(),
+                    content: system_prompt.to_string(),
+                },
+                LlmMessage {
+                    role: "user".into(),
+                    content: user_message.to_string(),
+                },
+            ],
             temperature: self.config.temperature,
             max_tokens: 1024,
         };
@@ -178,9 +186,8 @@ impl LlmClient {
         let resp = self
             .client
             .post(&self.config.api_base)
-            .header("x-api-key", &self.config.api_key)
-            .header("anthropic-version", "2023-06-01")
-            .header("content-type", "application/json")
+            .header("Authorization", format!("Bearer {}", &self.config.api_key))
+            .header("Content-Type", "application/json")
             .json(request)
             .timeout(Duration::from_secs(30))
             .send()
@@ -194,9 +201,9 @@ impl LlmClient {
 
         let llm_resp: LlmResponse = resp.json().await?;
         let text = llm_resp
-            .content
+            .choices
             .first()
-            .map(|b| b.text.clone())
+            .map(|c| c.message.content.clone())
             .unwrap_or_default();
 
         let json_str = text

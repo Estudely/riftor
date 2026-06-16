@@ -15,11 +15,13 @@ impl Handler {
     pub async fn new() -> anyhow::Result<Self> {
         let identity_manager = crate::identity::IdentityManager::load_or_create().await?;
         let node_id = identity_manager.get_info()?.node_id;
-        let engagement_manager = crate::engagement::EngagementManager::new(node_id);
         let queue = Arc::new(SubmissionQueue::new(256));
         let docs = Arc::new(crate::docs::DocsStore::new());
+        let engagement_manager = crate::engagement::EngagementManager::new(node_id.clone(), docs.clone());
         let llm_config = crate::llm::LlmConfig::default();
-        let processor = Arc::new(Processor::new(queue, docs, llm_config, ProcessorMode::Autonomous, 1));
+        let processor = Arc::new(Processor::new(queue.clone(), docs, llm_config, ProcessorMode::Autonomous, 1));
+        let processor_clone = processor.clone();
+        tokio::spawn(async move { processor_clone.start().await });
 
         Ok(Self {
             identity_manager,
@@ -29,12 +31,13 @@ impl Handler {
     }
 
     pub async fn new_with_processor(
-        _queue: Arc<SubmissionQueue>,
+        queue: Arc<SubmissionQueue>,
         processor: Arc<Processor>,
     ) -> anyhow::Result<Self> {
         let identity_manager = crate::identity::IdentityManager::load_or_create().await?;
         let node_id = identity_manager.get_info()?.node_id;
-        let engagement_manager = crate::engagement::EngagementManager::new(node_id);
+        let docs = Arc::new(crate::docs::DocsStore::new());
+        let engagement_manager = crate::engagement::EngagementManager::new(node_id, docs);
 
         Ok(Self {
             identity_manager,
@@ -192,11 +195,11 @@ impl Handler {
             },
         };
 
-        let submission_data = match params.get("submission") {
+        let submission_data = match params.get("submission").and_then(|s| s.get("data")) {
             Some(s) => s.clone(),
             None => return Response::Error {
                 id,
-                error: ResponseError { code: "INVALID_PARAMS".into(), message: "Missing 'submission'".into() },
+                error: ResponseError { code: "INVALID_PARAMS".into(), message: "Missing 'submission.data'".into() },
             },
         };
 
