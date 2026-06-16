@@ -870,18 +870,16 @@ class RiftorApp(App):
             nid = addr.get("node_id", "?")
             addrs = addr.get("direct_addresses", [])
             eng_id = state.meta.id
+            cmd = f'./riftor-meshd <<< \'{{"id":1,"method":"p2p_submit_remote","params":{{"node_id":"{nid}","addresses":{addrs},"engagement_id":"{eng_id}","submission":{{"type":"finding","data":{{"title":"Test","severity":"medium","target":"10.0.0.5","vuln_class":"test"}}}}}}}}\''
             lines = [
-                f"**P2P Info**",
-                f"NodeId: `{nid}`",
-                f"Addresses: `{addrs}`",
-                f"Engagement: `{eng_id}`",
+                f"NodeId: {nid}",
+                f"Addresses: {addrs}",
+                f"Engagement: {eng_id}",
                 "",
-                "**Test from another machine:**",
-                "```bash",
-                f'./riftor-meshd <<< \'{{"id":1,"method":"p2p_submit_remote","params":{{"node_id":"{nid}","addresses":{addrs},"engagement_id":"{eng_id}","submission":{{"type":"finding","data":{{"title":"Test","severity":"medium","target":"10.0.0.5","vuln_class":"test"}}}}}}}}\'',
-                "```",
+                "Run this on another machine:",
+                cmd,
             ]
-            self._markdown("\n".join(lines))
+            self._note("\n".join(lines))
         except Exception as e:
             self._error(f"Failed to get P2P info: {e}")
 
