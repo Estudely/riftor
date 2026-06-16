@@ -1,6 +1,7 @@
 use anyhow::Context;
 use serde::Serialize;
 use std::path::PathBuf;
+use tracing::warn;
 
 #[derive(Debug, Serialize)]
 pub struct IdentityInfo {
@@ -19,20 +20,25 @@ impl IdentityManager {
             let bytes = tokio::fs::read(&key_path)
                 .await
                 .context("Failed to read key file")?;
-            let arr: [u8; 32] = bytes
-                .try_into()
-                .map_err(|_| anyhow::anyhow!("Invalid key file: expected 32 bytes"))?;
-            let secret_key = iroh::SecretKey::from_bytes(&arr);
-            Ok(Self { secret_key })
-        } else {
-            let secret_key = iroh::SecretKey::generate();
-            let bytes = secret_key.to_bytes();
-            tokio::fs::create_dir_all(key_path.parent().unwrap()).await?;
-            tokio::fs::write(&key_path, bytes)
-                .await
-                .context("Failed to write key file")?;
-            Ok(Self { secret_key })
+            if bytes.len() == 32 {
+                let arr: [u8; 32] = bytes.try_into().unwrap();
+                let secret_key = iroh::SecretKey::from_bytes(&arr);
+                return Ok(Self { secret_key });
+            }
+            warn!("Invalid key file ({} bytes, expected 32). Regenerating.", bytes.len());
         }
+        Self::generate().await
+    }
+
+    async fn generate() -> anyhow::Result<Self> {
+        let key_path = key_path();
+        let secret_key = iroh::SecretKey::generate();
+        let bytes = secret_key.to_bytes();
+        tokio::fs::create_dir_all(key_path.parent().unwrap()).await?;
+        tokio::fs::write(&key_path, bytes)
+            .await
+            .context("Failed to write key file")?;
+        Ok(Self { secret_key })
     }
 
     pub fn get_info(&self) -> anyhow::Result<IdentityInfo> {
