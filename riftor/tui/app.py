@@ -623,25 +623,25 @@ class RiftorApp(App):
         self._shell_history.clear()
 
     # ---- mesh commands ----------------------------------------------------------
-    def _mesh_cmd(self, arg: str = "") -> None:
+    async def _mesh_cmd(self, arg: str = "") -> None:
         sub = arg.split()[0].lower() if arg else ""
         if sub == "mode":
-            self._mesh_mode_cmd(arg[len(sub):].strip())
+            await self._mesh_mode_cmd(arg[len(sub):].strip())
             return
         if sub == "queue":
-            self._mesh_queue_cmd()
+            await self._mesh_queue_cmd()
             return
         if sub == "processor":
-            self._mesh_processor_cmd()
+            await self._mesh_processor_cmd()
             return
         if sub == "review":
-            self._mesh_review_cmd()
+            await self._mesh_review_cmd()
             return
         if sub == "approve":
-            self._mesh_approve_cmd(arg[len(sub):].strip())
+            await self._mesh_approve_cmd(arg[len(sub):].strip())
             return
         if sub == "reject":
-            self._mesh_reject_cmd(arg[len(sub):].strip())
+            await self._mesh_reject_cmd(arg[len(sub):].strip())
             return
 
         mgr = getattr(self, "mesh_manager", None)
@@ -979,6 +979,7 @@ class RiftorApp(App):
             self._autoscroll = True
 
     def _command(self, text: str) -> None:
+        import asyncio
         parts = text.split(maxsplit=1)
         cmd = parts[0].lower()
         arg = parts[1].strip() if len(parts) > 1 else ""
@@ -1025,17 +1026,17 @@ class RiftorApp(App):
             "/memory": lambda: self._memory_cmd(arg),
             "/template": lambda: self._template_cmd(arg),
             "/clearlog": self._clearlog_cmd,
-            "/mesh": lambda: self._mesh_cmd(arg),
-            "/mesh-create": lambda: self._mesh_create_cmd(arg),
-            "/mesh-join": lambda: self._mesh_join_cmd(arg),
-            "/mesh-leave": self._mesh_leave_cmd,
-            "/mesh-invite": self._mesh_invite_cmd,
-            "/mesh-refresh": self._mesh_refresh_cmd,
-            "/mesh-queue": self._mesh_queue_cmd,
-            "/mesh-processor": self._mesh_processor_cmd,
-            "/mesh-review": self._mesh_review_cmd,
-            "/mesh-approve": lambda: self._mesh_approve_cmd(arg),
-            "/mesh-reject": lambda: self._mesh_reject_cmd(arg),
+            "/mesh": lambda: asyncio.create_task(self._mesh_cmd(arg)),
+            "/mesh-create": lambda: asyncio.create_task(self._mesh_create_cmd(arg)),
+            "/mesh-join": lambda: asyncio.create_task(self._mesh_join_cmd(arg)),
+            "/mesh-leave": lambda: asyncio.create_task(self._mesh_leave_cmd()),
+            "/mesh-invite": lambda: asyncio.create_task(self._mesh_invite_cmd()),
+            "/mesh-refresh": lambda: asyncio.create_task(self._mesh_refresh_cmd()),
+            "/mesh-queue": lambda: asyncio.create_task(self._mesh_queue_cmd()),
+            "/mesh-processor": lambda: asyncio.create_task(self._mesh_processor_cmd()),
+            "/mesh-review": lambda: asyncio.create_task(self._mesh_review_cmd()),
+            "/mesh-approve": lambda: asyncio.create_task(self._mesh_approve_cmd(arg)),
+            "/mesh-reject": lambda: asyncio.create_task(self._mesh_reject_cmd(arg)),
         }
         if cmd in ("/exit", "/quit"):
             self._save_session()
