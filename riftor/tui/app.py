@@ -41,6 +41,7 @@ from riftor.tui.config_screen import ConfigScreen
 from riftor.tui.screenshot_gallery import ScreenshotGalleryScreen
 from riftor.tui.theme import THEMES, css_variable_defaults, palette
 from riftor.tui.widgets import STAGE_NAMES, GENZ_STAGE_NAMES, GENZ_STAGE_LETTERS, Banner, CommandDropdown, FlockPane, PulseSpinner, StatusBar
+from riftor.mesh.sidebar import MeshSidebar
 
 # Optional inline image rendering. textual-image needs Python >= 3.12 and a
 # graphics-capable terminal (Kitty/Sixel); import at module top per its detection
@@ -155,7 +156,7 @@ _COMMANDS = [
     "/edit-finding", "/delete-finding", "/hosts", "/services", "/report",
     "/sessions", "/resume", "/new", "/theme", "/config", "/tools", "/permissions",
     "/lore", "/genz", "/cost", "/retry", "/continue", "/compact", "/copy", "/show",
-    "/timeline", "/audit", "/export", "/conversation", "/doctor", "/review", "/hypotheses", "/lesson", "/lessons", "/memory", "/template", "/browser", "/clearlog", "/screenshots", "/exit",
+    "/timeline", "/audit", "/export", "/conversation", "/doctor", "/review", "/hypotheses", "/lesson", "/lessons", "/memory", "/template", "/browser", "/clearlog", "/screenshots", "/mesh", "/mesh-create", "/mesh-join", "/mesh-leave", "/mesh-invite", "/mesh-refresh", "/exit",
 ]
 
 HELP = """\
@@ -343,7 +344,9 @@ class RiftorApp(App):
     def compose(self) -> ComposeResult:
         yield Banner(genz=self.config.genz, id="banner")
         yield Static(id="cwd-header")
-        yield VerticalScroll(id="chat")
+        with Horizontal(id="main-row"):
+            yield VerticalScroll(id="chat")
+            yield MeshSidebar(id="mesh-sidebar")
         yield Collapsible(
             RichLog(id="shell-log", highlight=True, markup=False),
             id="shell-pane",
@@ -382,7 +385,7 @@ class RiftorApp(App):
         except Exception:  # noqa: BLE001 — widgets may not be mounted yet
             pass
 
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:
         for theme in THEMES.values():
             self.register_theme(theme)
         self._apply_keybindings()
@@ -397,6 +400,23 @@ class RiftorApp(App):
         for err in getattr(self, "_plugin_errors", []):
             self._note(f"plugin '{err.module}' skipped: {err.error.splitlines()[-1]}")
         self._toolchain_heads_up()
+        # Initialize mesh P2P collaboration
+        from riftor.mesh import MeshManager
+        from riftor.mesh.commands import register_mesh_commands
+
+        try:
+            self.mesh_manager = MeshManager()
+            await self.mesh_manager.start()
+            identity = await self.mesh_manager.create_identity()
+            sidebar = self.query_one(MeshSidebar)
+            sidebar.set_manager(self.mesh_manager)
+            sidebar.update_connection_status(True)
+            register_mesh_commands(self, self.mesh_manager)
+            self._note(f"Mesh ready: {identity.get('node_id', 'unknown')[:12]}...")
+        except RuntimeError as e:
+            self._note(f"Mesh unavailable (daemon not found): {e}")
+        except Exception as e:
+            self._note(f"Mesh unavailable: {e}")
         # If the previous run crashed (incomplete session), prompt for recovery
         # after mount; otherwise resume the latest complete session as normal.
         if sessions.find_incomplete(self.workdir):
@@ -602,6 +622,128 @@ class RiftorApp(App):
         shell_pane.collapsed = True
         self._shell_history.clear()
 
+    # ---- mesh commands ----------------------------------------------------------
+    def _mesh_cmd(self) -> None:
+        mgr = getattr(self, "mesh_manager", None)
+        if mgr is None:
+            self._note("Mesh not available — daemon binary not found")
+            return
+        if not mgr.running:
+            self._note("Mesh not started")
+            return
+        state = mgr.current_state
+        if state is None:
+            lines = [
+                "**Mesh** — connected, no active engagement",
+                "",
+                "/mesh-create <name> — start a collaborative engagement",
+                "/mesh-join <invite> — join an existing engagement",
+            ]
+        else:
+            lines = [
+                f"**Mesh Engagement: {state.meta.name}**",
+                f"ID: `{state.meta.id}`",
+                f"Members: {len(state.members)}",
+                f"Findings: {len(state.findings)}",
+                f"Hosts: {len(state.hosts)} · Services: {len(state.services)}",
+                "",
+                "/mesh-invite — generate an invite code for peers",
+                "/mesh-leave — leave this engagement",
+                "/mesh-refresh — refresh state from peers",
+            ]
+        self._markdown("\n".join(lines))
+
+    async def _mesh_create_cmd(self, arg: str) -> None:
+        mgr = getattr(self, "mesh_manager", None)
+        if mgr is None or not mgr.running:
+            self._note("Mesh not available")
+            return
+        name = arg.strip()
+        if not name:
+            self._note("usage: /mesh-create <name>")
+            return
+        try:
+            meta = await mgr.create_engagement(name)
+            sidebar = self.query_one(MeshSidebar)
+            sidebar.update_connection_status(True, meta.name)
+            self._note(f"Mesh engagement created: {meta.name} ({meta.id})")
+        except Exception as e:
+            self._error(f"Mesh create failed: {e}")
+
+    async def _mesh_join_cmd(self, arg: str) -> None:
+        mgr = getattr(self, "mesh_manager", None)
+        if mgr is None or not mgr.running:
+            self._note("Mesh not available")
+            return
+        invite = arg.strip()
+        if not invite:
+            self._note("usage: /mesh-join <invite>")
+            return
+        try:
+            meta = await mgr.join_engagement(invite)
+            sidebar = self.query_one(MeshSidebar)
+            sidebar.update_connection_status(True, meta.name)
+            await mgr.refresh_state()
+            self._update_mesh_sidebar()
+            self._note(f"Joined mesh engagement: {meta.name} ({meta.id})")
+        except Exception as e:
+            self._error(f"Mesh join failed: {e}")
+
+    async def _mesh_leave_cmd(self) -> None:
+        mgr = getattr(self, "mesh_manager", None)
+        if mgr is None or not mgr.running:
+            self._note("Mesh not available")
+            return
+        try:
+            await mgr.leave_engagement()
+            sidebar = self.query_one(MeshSidebar)
+            sidebar.update_connection_status(True)
+            sidebar.update_members([])
+            self._note("Left mesh engagement")
+        except Exception as e:
+            self._error(f"Mesh leave failed: {e}")
+
+    async def _mesh_invite_cmd(self) -> None:
+        mgr = getattr(self, "mesh_manager", None)
+        if mgr is None or not mgr.running:
+            self._note("Mesh not available")
+            return
+        state = mgr.current_state
+        if state is None:
+            self._note("No active engagement — /mesh-create first")
+            return
+        try:
+            invite = await mgr.generate_invite(state.meta.id)
+            self._note(f"Invite code: {invite}")
+            self._last_output = invite
+        except Exception as e:
+            self._error(f"Mesh invite failed: {e}")
+
+    async def _mesh_refresh_cmd(self) -> None:
+        mgr = getattr(self, "mesh_manager", None)
+        if mgr is None or not mgr.running:
+            self._note("Mesh not available")
+            return
+        try:
+            state = await mgr.refresh_state()
+            self._update_mesh_sidebar()
+            self._note(
+                f"Mesh refreshed: {len(state.members)} members, "
+                f"{len(state.findings)} findings"
+            )
+        except Exception as e:
+            self._error(f"Mesh refresh failed: {e}")
+
+    def _update_mesh_sidebar(self) -> None:
+        mgr = getattr(self, "mesh_manager", None)
+        if mgr is None:
+            return
+        state = mgr.current_state
+        if state is None:
+            return
+        sidebar = self.query_one(MeshSidebar)
+        sidebar.update_members(state.members)
+
     async def _mount(self, widget) -> None:
         await self.chat.mount(widget)
         self._scroll_if_following()
@@ -762,6 +904,12 @@ class RiftorApp(App):
             "/memory": lambda: self._memory_cmd(arg),
             "/template": lambda: self._template_cmd(arg),
             "/clearlog": self._clearlog_cmd,
+            "/mesh": self._mesh_cmd,
+            "/mesh-create": lambda: self._mesh_create_cmd(arg),
+            "/mesh-join": lambda: self._mesh_join_cmd(arg),
+            "/mesh-leave": self._mesh_leave_cmd,
+            "/mesh-invite": self._mesh_invite_cmd,
+            "/mesh-refresh": self._mesh_refresh_cmd,
         }
         if cmd in ("/exit", "/quit"):
             self._save_session()

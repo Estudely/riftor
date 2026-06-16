@@ -470,3 +470,75 @@ ScreenshotGalleryScreen {
     border: none;
     margin: 0 0 0 2;
 }
+
+/* ─────────────────────── mesh sidebar ────────────────────────── */
+#main-row {
+    height: 1fr;
+}
+
+#main-row > #chat {
+    width: 1fr;
+}
+
+#mesh-sidebar {
+    width: 30;
+    background: $surface;
+    border-left: solid $border;
+    padding: 1 1 1 1;
+    overflow-y: auto;
+    scrollbar-color: $border;
+}
+
+#mesh-header {
+    height: auto;
+    padding-bottom: 1;
+    border-bottom: solid $border;
+}
+
+.sidebar-title {
+    text-style: bold;
+    color: $violet;
+}
+
+#mesh-status {
+    height: auto;
+    padding: 1 0 0 0;
+}
+
+#mesh-connection-status {
+    color: $foreground;
+}
+
+#mesh-engagement-name {
+    color: $muted;
+}
+
+#mesh-members {
+    height: auto;
+    margin-top: 1;
+}
+
+#mesh-activity {
+    height: auto;
+    margin-top: 1;
+}
+
+.section-header {
+    text-style: bold;
+    color: $cyan;
+    margin-bottom: 0;
+    padding: 0;
+}
+
+#mesh-members-list {
+    padding: 0;
+    margin: 0;
+    height: auto;
+}
+
+#mesh-activity-log {
+    height: auto;
+    background: $surface;
+    color: $muted;
+    padding: 0;
+}

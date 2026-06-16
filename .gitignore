@@ -29,3 +29,4 @@ reports/
 # internal AI planning/spec docs — kept locally, not shipped or tracked
 docs/superpowers/
 .env
+meshd/target/
