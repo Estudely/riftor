@@ -2,7 +2,7 @@
 
 > Feature branch: `feature/mesh-phase1`  
 > Last updated: 2026-06-16  
-> Status: **Phase 1+2 complete, P2P verified cross-machine**
+> Status: **MVP verified — P2P findings pipeline works end-to-end**
 
 ---
 
@@ -136,14 +136,14 @@
 ## Remaining Work
 
 ### Small (1-2 hours each)
-- [ ] **Route P2P submissions to processor** — current P2P handler echoes. Wire it to accept findings JSON and feed into the queue
 - [ ] **Persist endpoint identity** — each daemon restart generates new NodeId. Use identity.rs persisted key for the endpoint
 - [ ] **Fix unused variable warnings** — `queue` in handler, `warn`/`P2pStream` in main
 
 ### Medium (2-4 hours each)
+- [x] **Route P2P submissions to processor** — ✅ P2P handler now enqueues into Commander's queue
+- [x] **Real findings sync over P2P** — ✅ Worker submits over P2P → Commander processes → docs updated
 - [ ] **Swap docs stub → real iroh-docs** — CRDT-synced state. Needs `Docs::create(endpoint, author)` + `set_bytes`/`get_many`
 - [ ] **Swap gossip stub → real iroh-gossip** — topic-based pub/sub. Needs `GossipApi` wired to Router
-- [ ] **Real findings sync over P2P** — two daemons share engagement state. Commander publishes, workers sync
 - [ ] **Merge to main + release**
 
 ### Large (Phase 2 extras)
