@@ -23,18 +23,21 @@ async fn main() -> anyhow::Result<()> {
         .bind().await?;
     let node_id = router_ep.id();
     let router_addr = router_ep.addr();
+    let relay_urls: Vec<String> = router_addr.relay_urls().map(|u| u.to_string()).collect();
+    let direct_addrs: Vec<String> = router_addr.ip_addrs().map(|a| a.to_string()).collect();
     info!("iroh P2P endpoint bound — NodeId: {}", node_id);
     eprintln!("[riftor-meshd] NodeId: {}", node_id);
-    eprintln!("[riftor-meshd] Relay URLs: {:?}", router_addr.relay_urls().collect::<Vec<_>>());
-    eprintln!("[riftor-meshd] Direct addresses: {:?}", router_addr.ip_addrs().collect::<Vec<_>>());
+    eprintln!("[riftor-meshd] Relay URLs: {:?}", relay_urls);
+    eprintln!("[riftor-meshd] Direct addresses: {:?}", direct_addrs);
 
-    // Handler endpoint: used for outbound dials and get_node_addr
+    // Handler endpoint: used for outbound dials (separate port, shared internally by iroh)
     let handler_ep = Arc::new(
         iroh::endpoint::Endpoint::builder(iroh::endpoint::presets::Minimal)
             .bind().await?,
     );
 
-    let handler = Handler::new(handler_ep.clone()).await?;
+    // Pass P2P addresses to handler for get_node_addr RPC
+    let handler = Handler::new(handler_ep.clone(), node_id.to_string(), relay_urls, direct_addrs).await?;
 
     // Spawn P2P router
     let _router = meshd::p2p::spawn_router(router_ep);
@@ -81,6 +84,12 @@ async fn main() -> anyhow::Result<()> {
                 stdout.flush()?;
             }
         }
+    }
+
+    // Keep daemon alive for P2P if RIFTOR_MESH_P2P env var is set
+    if std::env::var("RIFTOR_MESH_P2P").is_ok() {
+        info!("stdin closed, keeping daemon alive for P2P connections. Press Ctrl+C to stop.");
+        tokio::signal::ctrl_c().await?;
     }
 
     info!("riftor-meshd shutting down");

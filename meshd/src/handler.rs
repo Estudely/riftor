@@ -9,12 +9,21 @@ pub struct Handler {
     identity_manager: crate::identity::IdentityManager,
     engagement_manager: crate::engagement::EngagementManager,
     processor: Arc<Processor>,
-    /// Real iroh Endpoint for P2P networking — NodeId, relay addresses, etc.
+    /// Real iroh Endpoint for outbound P2P dials
     endpoint: Arc<iroh::endpoint::Endpoint>,
+    /// P2P Router's addresses (for get_node_addr RPC)
+    p2p_node_id: String,
+    p2p_relay_urls: Vec<String>,
+    p2p_direct_addrs: Vec<String>,
 }
 
 impl Handler {
-    pub async fn new(endpoint: Arc<iroh::endpoint::Endpoint>) -> anyhow::Result<Self> {
+    pub async fn new(
+        endpoint: Arc<iroh::endpoint::Endpoint>,
+        p2p_node_id: String,
+        p2p_relay_urls: Vec<String>,
+        p2p_direct_addrs: Vec<String>,
+    ) -> anyhow::Result<Self> {
         let identity_manager = crate::identity::IdentityManager::load_or_create().await?;
         let node_id = endpoint.id().to_string();
 
@@ -52,6 +61,9 @@ impl Handler {
             engagement_manager,
             processor,
             endpoint,
+            p2p_node_id,
+            p2p_relay_urls,
+            p2p_direct_addrs,
         })
     }
 
@@ -85,6 +97,9 @@ impl Handler {
             engagement_manager,
             processor,
             endpoint,
+            p2p_node_id: String::new(),
+            p2p_relay_urls: Vec::new(),
+            p2p_direct_addrs: Vec::new(),
         })
     }
 
@@ -463,17 +478,12 @@ impl Handler {
     }
 
     async fn get_node_addr(&self, id: u64) -> Response {
-        let endpoint_addr = self.endpoint.addr();
-        let relay_urls: Vec<String> = endpoint_addr.relay_urls().map(|u| u.to_string()).collect();
-        let direct_addrs: Vec<String> =
-            endpoint_addr.ip_addrs().map(|a| a.to_string()).collect();
-
         Response::Success {
             id,
             result: json!({
-                "node_id": self.endpoint.id().to_string(),
-                "relay_urls": relay_urls,
-                "direct_addresses": direct_addrs,
+                "node_id": self.p2p_node_id,
+                "relay_urls": self.p2p_relay_urls,
+                "direct_addresses": self.p2p_direct_addrs,
             }),
         }
     }
