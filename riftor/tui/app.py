@@ -869,12 +869,10 @@ class RiftorApp(App):
             if isinstance(f, dict):
                 title = f.get('title','?')
                 sev = f.get('severity','?')
-                dec = f.get('decision','?')
             else:
-                title = getattr(f, 'title', '?')
-                sev = getattr(f, 'severity', '?')
-                dec = '?'
-            lines.append(f"- **{title}** [{sev}] `{dec}`")
+                title = f.title
+                sev = f.severity.value if hasattr(f.severity, 'value') else str(f.severity)
+            lines.append(f"- **{title}** [{sev}]")
         self._markdown("\n".join(lines))
 
     async def _mesh_test_cmd(self) -> None:
