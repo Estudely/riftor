@@ -6,6 +6,7 @@ Spawns and manages the riftor-meshd Rust binary as a subprocess.
 from __future__ import annotations
 
 import asyncio
+import os
 import signal
 import logging
 from pathlib import Path
@@ -39,11 +40,16 @@ class MeshDaemon:
 
         logger.info("Starting riftor-meshd: %s", self._binary_path)
 
+        # Build env with P2P keep-alive and PATH
+        env = os.environ.copy()
+        env["RIFTOR_MESH_P2P"] = "1"
+
         self._process = await asyncio.create_subprocess_exec(
             self._binary_path,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=env,
         )
 
         # Use subprocess streams directly — no need for connect_read_pipe/connect_write_pipe

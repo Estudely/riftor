@@ -173,7 +173,10 @@ pub async fn dial(
     if let Some(url) = relay_url {
         endpoint_addr = endpoint_addr.with_relay_url(url);
     }
-    let conn = endpoint.connect(endpoint_addr, ALPN).await?;
+    info!("Dialing {:?}", endpoint_addr);
+    let conn = endpoint.connect(endpoint_addr, ALPN)
+        .await
+        .map_err(|e| anyhow::anyhow!("P2P connection to {} failed: {}", endpoint_id, e))?;
     let (send, recv) = conn.open_bi().await?;
     Ok(P2pStream { send, recv })
 }
