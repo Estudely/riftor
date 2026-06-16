@@ -8,7 +8,9 @@ pub struct DocsStore {
 
 impl DocsStore {
     pub fn new() -> Self {
-        Self { state: Mutex::new(HashMap::new()) }
+        Self {
+            state: Mutex::new(HashMap::new()),
+        }
     }
 
     pub async fn open(&self, engagement_id: &str) -> anyhow::Result<()> {
@@ -17,7 +19,13 @@ impl DocsStore {
         Ok(())
     }
 
-    pub async fn insert(&self, engagement_id: &str, doc_type: &str, key: &str, value: Value) -> anyhow::Result<()> {
+    pub async fn insert(
+        &self,
+        engagement_id: &str,
+        doc_type: &str,
+        key: &str,
+        value: Value,
+    ) -> anyhow::Result<()> {
         let mut state = self.state.lock().await;
         let docs = state.entry(engagement_id.to_string()).or_default();
         let entries = docs.entry(doc_type.to_string()).or_default();
@@ -45,7 +53,10 @@ impl DocsStore {
             .iter()
             .filter_map(|(_, v)| {
                 let f_target = v.get("target").and_then(|t| t.as_str()).unwrap_or("");
-                let f_class = v.get("vuln_class").and_then(|c| c.as_str()).unwrap_or("");
+                let f_class = v
+                    .get("vuln_class")
+                    .and_then(|c| c.as_str())
+                    .unwrap_or("");
                 if f_target == target || f_class == vuln_class {
                     Some(v.clone())
                 } else {
@@ -57,9 +68,15 @@ impl DocsStore {
         Ok(candidates)
     }
 
-    pub async fn get_all(&self, engagement_id: &str, doc_type: &str) -> anyhow::Result<Vec<Value>> {
+    pub async fn get_all(
+        &self,
+        engagement_id: &str,
+        doc_type: &str,
+    ) -> anyhow::Result<Vec<Value>> {
         let state = self.state.lock().await;
         let docs = state.get(engagement_id).and_then(|d| d.get(doc_type));
-        Ok(docs.map(|entries| entries.iter().map(|(_, v)| v.clone()).collect()).unwrap_or_default())
+        Ok(docs
+            .map(|entries| entries.iter().map(|(_, v)| v.clone()).collect())
+            .unwrap_or_default())
     }
 }

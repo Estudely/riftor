@@ -66,7 +66,8 @@ impl EngagementManager {
             .decode(invite)
             .map_err(|e| anyhow::anyhow!("Invalid invite: {}", e))?;
         let invite_data: Value = serde_json::from_slice(&payload)?;
-        let engagement_id = invite_data["engagement_id"].as_str()
+        let engagement_id = invite_data["engagement_id"]
+            .as_str()
             .context("Invalid invite: missing engagement_id")?;
         self.docs.open(engagement_id).await?;
         self.gossip.join(engagement_id, "submit").await?;
@@ -90,14 +91,20 @@ impl EngagementManager {
         Ok(())
     }
 
-    pub async fn submit(&self, engagement_id: &str, submission: &Value) -> anyhow::Result<String> {
+    pub async fn submit(
+        &self,
+        engagement_id: &str,
+        submission: &Value,
+    ) -> anyhow::Result<String> {
         let submission_id = Uuid::new_v4().to_string();
         let entry = json!({
             "submission_id": submission_id,
             "submission": submission,
             "timestamp": chrono::Utc::now().to_rfc3339(),
         });
-        self.gossip.broadcast(engagement_id, "submit", entry).await?;
+        self.gossip
+            .broadcast(engagement_id, "submit", entry)
+            .await?;
         Ok(submission_id)
     }
 

@@ -14,12 +14,25 @@ pub struct Handler {
 impl Handler {
     pub async fn new() -> anyhow::Result<Self> {
         let identity_manager = crate::identity::IdentityManager::load_or_create().await?;
-        let node_id = identity_manager.get_info()?.node_id;
+        let info = identity_manager.get_info()?;
+        tracing::info!(
+            "Loaded identity: node_id={}, public_key={}",
+            info.node_id,
+            info.public_key
+        );
+        let node_id = info.node_id;
         let queue = Arc::new(SubmissionQueue::new(256));
         let docs = Arc::new(crate::docs::DocsStore::new());
-        let engagement_manager = crate::engagement::EngagementManager::new(node_id.clone(), docs.clone());
+        let engagement_manager =
+            crate::engagement::EngagementManager::new(node_id.clone(), docs.clone());
         let llm_config = crate::llm::LlmConfig::default();
-        let processor = Arc::new(Processor::new(queue.clone(), docs, llm_config, ProcessorMode::Autonomous, 1));
+        let processor = Arc::new(Processor::new(
+            queue.clone(),
+            docs,
+            llm_config,
+            ProcessorMode::Autonomous,
+            1,
+        ));
         let processor_clone = processor.clone();
         tokio::spawn(async move { processor_clone.start().await });
 
@@ -31,13 +44,14 @@ impl Handler {
     }
 
     pub async fn new_with_processor(
-        queue: Arc<SubmissionQueue>,
+        _queue: Arc<SubmissionQueue>,
         processor: Arc<Processor>,
     ) -> anyhow::Result<Self> {
         let identity_manager = crate::identity::IdentityManager::load_or_create().await?;
         let node_id = identity_manager.get_info()?.node_id;
         let docs = Arc::new(crate::docs::DocsStore::new());
-        let engagement_manager = crate::engagement::EngagementManager::new(node_id, docs);
+        let engagement_manager =
+            crate::engagement::EngagementManager::new(node_id, docs);
 
         Ok(Self {
             identity_manager,
@@ -57,7 +71,10 @@ impl Handler {
             "get_state" => self.get_state(request.id, request.params).await,
             "add_blob" => self.add_blob(request.id, request.params).await,
             "get_blob" => self.get_blob(request.id, request.params).await,
-            "ping" => Response::Success { id: request.id, result: json!({"pong": true}) },
+            "ping" => Response::Success {
+                id: request.id,
+                result: json!({"pong": true}),
+            },
             "get_queue_stats" => self.get_queue_stats(request.id, request.params).await,
             "get_review_queue" => self.get_review_queue(request.id, request.params).await,
             "set_processor_mode" => self.set_processor_mode(request.id, request.params).await,
@@ -76,10 +93,16 @@ impl Handler {
 
     async fn create_identity(&self, id: u64) -> Response {
         match self.identity_manager.get_info() {
-            Ok(info) => Response::Success { id, result: json!(info) },
+            Ok(info) => Response::Success {
+                id,
+                result: json!(info),
+            },
             Err(e) => Response::Error {
                 id,
-                error: ResponseError { code: "IDENTITY_ERROR".into(), message: e.to_string() },
+                error: ResponseError {
+                    code: "IDENTITY_ERROR".into(),
+                    message: e.to_string(),
+                },
             },
         }
     }
@@ -87,10 +110,15 @@ impl Handler {
     async fn create_engagement(&self, id: u64, params: Value) -> Response {
         let name = match params.get("name").and_then(|v| v.as_str()) {
             Some(n) => n.to_string(),
-            None => return Response::Error {
-                id,
-                error: ResponseError { code: "INVALID_PARAMS".into(), message: "Missing 'name'".into() },
-            },
+            None => {
+                return Response::Error {
+                    id,
+                    error: ResponseError {
+                        code: "INVALID_PARAMS".into(),
+                        message: "Missing 'name'".into(),
+                    },
+                }
+            }
         };
 
         match self.engagement_manager.create(name).await {
@@ -112,7 +140,10 @@ impl Handler {
             }
             Err(e) => Response::Error {
                 id,
-                error: ResponseError { code: "ENGAGEMENT_ERROR".into(), message: e.to_string() },
+                error: ResponseError {
+                    code: "ENGAGEMENT_ERROR".into(),
+                    message: e.to_string(),
+                },
             },
         }
     }
@@ -120,17 +151,28 @@ impl Handler {
     async fn generate_invite(&self, id: u64, params: Value) -> Response {
         let engagement_id = match params.get("engagement_id").and_then(|v| v.as_str()) {
             Some(eid) => eid.to_string(),
-            None => return Response::Error {
-                id,
-                error: ResponseError { code: "INVALID_PARAMS".into(), message: "Missing 'engagement_id'".into() },
-            },
+            None => {
+                return Response::Error {
+                    id,
+                    error: ResponseError {
+                        code: "INVALID_PARAMS".into(),
+                        message: "Missing 'engagement_id'".into(),
+                    },
+                }
+            }
         };
 
         match self.engagement_manager.generate_invite(&engagement_id).await {
-            Ok(invite) => Response::Success { id, result: json!({"invite": invite}) },
+            Ok(invite) => Response::Success {
+                id,
+                result: json!({"invite": invite}),
+            },
             Err(e) => Response::Error {
                 id,
-                error: ResponseError { code: "INVITE_ERROR".into(), message: e.to_string() },
+                error: ResponseError {
+                    code: "INVITE_ERROR".into(),
+                    message: e.to_string(),
+                },
             },
         }
     }
@@ -138,10 +180,15 @@ impl Handler {
     async fn join_engagement(&self, id: u64, params: Value) -> Response {
         let invite = match params.get("invite").and_then(|v| v.as_str()) {
             Some(i) => i.to_string(),
-            None => return Response::Error {
-                id,
-                error: ResponseError { code: "INVALID_PARAMS".into(), message: "Missing 'invite'".into() },
-            },
+            None => {
+                return Response::Error {
+                    id,
+                    error: ResponseError {
+                        code: "INVALID_PARAMS".into(),
+                        message: "Missing 'invite'".into(),
+                    },
+                }
+            }
         };
 
         match self.engagement_manager.join(&invite).await {
@@ -163,7 +210,10 @@ impl Handler {
             }
             Err(e) => Response::Error {
                 id,
-                error: ResponseError { code: "JOIN_ERROR".into(), message: e.to_string() },
+                error: ResponseError {
+                    code: "JOIN_ERROR".into(),
+                    message: e.to_string(),
+                },
             },
         }
     }
@@ -171,17 +221,28 @@ impl Handler {
     async fn leave_engagement(&self, id: u64, params: Value) -> Response {
         let engagement_id = match params.get("engagement_id").and_then(|v| v.as_str()) {
             Some(eid) => eid.to_string(),
-            None => return Response::Error {
-                id,
-                error: ResponseError { code: "INVALID_PARAMS".into(), message: "Missing 'engagement_id'".into() },
-            },
+            None => {
+                return Response::Error {
+                    id,
+                    error: ResponseError {
+                        code: "INVALID_PARAMS".into(),
+                        message: "Missing 'engagement_id'".into(),
+                    },
+                }
+            }
         };
 
         match self.engagement_manager.leave(&engagement_id).await {
-            Ok(()) => Response::Success { id, result: json!({"left": true}) },
+            Ok(()) => Response::Success {
+                id,
+                result: json!({"left": true}),
+            },
             Err(e) => Response::Error {
                 id,
-                error: ResponseError { code: "LEAVE_ERROR".into(), message: e.to_string() },
+                error: ResponseError {
+                    code: "LEAVE_ERROR".into(),
+                    message: e.to_string(),
+                },
             },
         }
     }
@@ -189,51 +250,81 @@ impl Handler {
     async fn submit(&self, id: u64, params: Value) -> Response {
         let engagement_id = match params.get("engagement_id").and_then(|v| v.as_str()) {
             Some(eid) => eid.to_string(),
-            None => return Response::Error {
-                id,
-                error: ResponseError { code: "INVALID_PARAMS".into(), message: "Missing 'engagement_id'".into() },
-            },
+            None => {
+                return Response::Error {
+                    id,
+                    error: ResponseError {
+                        code: "INVALID_PARAMS".into(),
+                        message: "Missing 'engagement_id'".into(),
+                    },
+                }
+            }
         };
 
         let submission_data = match params.get("submission").and_then(|s| s.get("data")) {
             Some(s) => s.clone(),
-            None => return Response::Error {
-                id,
-                error: ResponseError { code: "INVALID_PARAMS".into(), message: "Missing 'submission.data'".into() },
-            },
+            None => {
+                return Response::Error {
+                    id,
+                    error: ResponseError {
+                        code: "INVALID_PARAMS".into(),
+                        message: "Missing 'submission.data'".into(),
+                    },
+                }
+            }
         };
 
         let sub = Submission {
             submission_id: uuid::Uuid::new_v4().to_string(),
             engagement_id: engagement_id.clone(),
-            author_node_id: self.identity_manager.get_info().map(|i| i.node_id).unwrap_or_default(),
+            author_node_id: self
+                .identity_manager
+                .get_info()
+                .map(|i| i.node_id)
+                .unwrap_or_default(),
             data: submission_data,
         };
         let submission_id = sub.submission_id.clone();
-        self.processor.queue.enqueue(sub).await.map_err(|e| {
-            Response::Error {
+        self.processor
+            .queue
+            .enqueue(sub)
+            .await
+            .map_err(|e| Response::Error {
                 id,
-                error: ResponseError { code: "QUEUE_FULL".into(), message: e.to_string() },
-            }
-        }).map(|_| {
-            Response::Success { id, result: json!({"submission_id": submission_id}) }
-        }).unwrap_or_else(|e| e)
+                error: ResponseError {
+                    code: "QUEUE_FULL".into(),
+                    message: e.to_string(),
+                },
+            })
+            .map(|_| Response::Success {
+                id,
+                result: json!({"submission_id": submission_id}),
+            })
+            .unwrap_or_else(|e| e)
     }
 
     async fn get_state(&self, id: u64, params: Value) -> Response {
         let engagement_id = match params.get("engagement_id").and_then(|v| v.as_str()) {
             Some(eid) => eid.to_string(),
-            None => return Response::Error {
-                id,
-                error: ResponseError { code: "INVALID_PARAMS".into(), message: "Missing 'engagement_id'".into() },
-            },
+            None => {
+                return Response::Error {
+                    id,
+                    error: ResponseError {
+                        code: "INVALID_PARAMS".into(),
+                        message: "Missing 'engagement_id'".into(),
+                    },
+                }
+            }
         };
 
         match self.engagement_manager.get_state(&engagement_id).await {
             Ok(state) => Response::Success { id, result: state },
             Err(e) => Response::Error {
                 id,
-                error: ResponseError { code: "STATE_ERROR".into(), message: e.to_string() },
+                error: ResponseError {
+                    code: "STATE_ERROR".into(),
+                    message: e.to_string(),
+                },
             },
         }
     }
@@ -241,34 +332,55 @@ impl Handler {
     async fn add_blob(&self, id: u64, params: Value) -> Response {
         let engagement_id = match params.get("engagement_id").and_then(|v| v.as_str()) {
             Some(eid) => eid.to_string(),
-            None => return Response::Error {
-                id,
-                error: ResponseError { code: "INVALID_PARAMS".into(), message: "Missing 'engagement_id'".into() },
-            },
+            None => {
+                return Response::Error {
+                    id,
+                    error: ResponseError {
+                        code: "INVALID_PARAMS".into(),
+                        message: "Missing 'engagement_id'".into(),
+                    },
+                }
+            }
         };
 
         let data_b64 = match params.get("data").and_then(|v| v.as_str()) {
             Some(d) => d,
-            None => return Response::Error {
-                id,
-                error: ResponseError { code: "INVALID_PARAMS".into(), message: "Missing 'data'".into() },
-            },
+            None => {
+                return Response::Error {
+                    id,
+                    error: ResponseError {
+                        code: "INVALID_PARAMS".into(),
+                        message: "Missing 'data'".into(),
+                    },
+                }
+            }
         };
 
         use base64::Engine;
         let data = match base64::engine::general_purpose::STANDARD.decode(data_b64) {
             Ok(d) => d,
-            Err(e) => return Response::Error {
-                id,
-                error: ResponseError { code: "BASE64_ERROR".into(), message: e.to_string() },
-            },
+            Err(e) => {
+                return Response::Error {
+                    id,
+                    error: ResponseError {
+                        code: "BASE64_ERROR".into(),
+                        message: e.to_string(),
+                    },
+                }
+            }
         };
 
         match crate::blobs::add_blob(&engagement_id, &data).await {
-            Ok(hash) => Response::Success { id, result: json!({"hash": hash}) },
+            Ok(hash) => Response::Success {
+                id,
+                result: json!({"hash": hash}),
+            },
             Err(e) => Response::Error {
                 id,
-                error: ResponseError { code: "BLOB_ERROR".into(), message: e.to_string() },
+                error: ResponseError {
+                    code: "BLOB_ERROR".into(),
+                    message: e.to_string(),
+                },
             },
         }
     }
@@ -276,29 +388,45 @@ impl Handler {
     async fn get_blob(&self, id: u64, params: Value) -> Response {
         let engagement_id = match params.get("engagement_id").and_then(|v| v.as_str()) {
             Some(eid) => eid.to_string(),
-            None => return Response::Error {
-                id,
-                error: ResponseError { code: "INVALID_PARAMS".into(), message: "Missing 'engagement_id'".into() },
-            },
+            None => {
+                return Response::Error {
+                    id,
+                    error: ResponseError {
+                        code: "INVALID_PARAMS".into(),
+                        message: "Missing 'engagement_id'".into(),
+                    },
+                }
+            }
         };
 
         let hash = match params.get("hash").and_then(|v| v.as_str()) {
             Some(h) => h.to_string(),
-            None => return Response::Error {
-                id,
-                error: ResponseError { code: "INVALID_PARAMS".into(), message: "Missing 'hash'".into() },
-            },
+            None => {
+                return Response::Error {
+                    id,
+                    error: ResponseError {
+                        code: "INVALID_PARAMS".into(),
+                        message: "Missing 'hash'".into(),
+                    },
+                }
+            }
         };
 
         match crate::blobs::get_blob(&engagement_id, &hash).await {
             Ok(data) => {
                 use base64::Engine;
                 let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
-                Response::Success { id, result: json!({"data": b64}) }
+                Response::Success {
+                    id,
+                    result: json!({"data": b64}),
+                }
             }
             Err(e) => Response::Error {
                 id,
-                error: ResponseError { code: "BLOB_ERROR".into(), message: e.to_string() },
+                error: ResponseError {
+                    code: "BLOB_ERROR".into(),
+                    message: e.to_string(),
+                },
             },
         }
     }
@@ -306,61 +434,101 @@ impl Handler {
     async fn get_queue_stats(&self, id: u64, params: Value) -> Response {
         let _engagement_id = match params.get("engagement_id").and_then(|v| v.as_str()) {
             Some(eid) => eid.to_string(),
-            None => return Response::Error {
-                id,
-                error: ResponseError { code: "INVALID_PARAMS".into(), message: "Missing 'engagement_id'".into() },
-            },
+            None => {
+                return Response::Error {
+                    id,
+                    error: ResponseError {
+                        code: "INVALID_PARAMS".into(),
+                        message: "Missing 'engagement_id'".into(),
+                    },
+                }
+            }
         };
         let stats = self.processor.stats().await;
-        Response::Success { id, result: serde_json::to_value(stats).unwrap_or_default() }
+        Response::Success {
+            id,
+            result: serde_json::to_value(stats).unwrap_or_default(),
+        }
     }
 
     async fn get_review_queue(&self, id: u64, params: Value) -> Response {
         let _engagement_id = match params.get("engagement_id").and_then(|v| v.as_str()) {
             Some(eid) => eid.to_string(),
-            None => return Response::Error {
-                id,
-                error: ResponseError { code: "INVALID_PARAMS".into(), message: "Missing 'engagement_id'".into() },
-            },
+            None => {
+                return Response::Error {
+                    id,
+                    error: ResponseError {
+                        code: "INVALID_PARAMS".into(),
+                        message: "Missing 'engagement_id'".into(),
+                    },
+                }
+            }
         };
         let queue = self.processor.get_review_queue().await;
-        Response::Success { id, result: serde_json::to_value(queue).unwrap_or_default() }
+        Response::Success {
+            id,
+            result: serde_json::to_value(queue).unwrap_or_default(),
+        }
     }
 
     async fn set_processor_mode(&self, id: u64, params: Value) -> Response {
         let mode_str = match params.get("mode").and_then(|v| v.as_str()) {
             Some(m) => m,
-            None => return Response::Error {
-                id,
-                error: ResponseError { code: "INVALID_PARAMS".into(), message: "Missing 'mode'".into() },
-            },
+            None => {
+                return Response::Error {
+                    id,
+                    error: ResponseError {
+                        code: "INVALID_PARAMS".into(),
+                        message: "Missing 'mode'".into(),
+                    },
+                }
+            }
         };
         let mode = match mode_str {
             "autonomous" => ProcessorMode::Autonomous,
             "review" => ProcessorMode::ReviewRequired,
             "critical" => ProcessorMode::CriticalOnly,
-            _ => return Response::Error {
-                id,
-                error: ResponseError { code: "INVALID_PARAMS".into(), message: format!("Unknown mode: {}", mode_str) },
-            },
+            _ => {
+                return Response::Error {
+                    id,
+                    error: ResponseError {
+                        code: "INVALID_PARAMS".into(),
+                        message: format!("Unknown mode: {}", mode_str),
+                    },
+                }
+            }
         };
         self.processor.set_mode(mode).await;
-        Response::Success { id, result: json!({"mode": mode_str}) }
+        Response::Success {
+            id,
+            result: json!({"mode": mode_str}),
+        }
     }
 
     async fn approve_decision(&self, id: u64, params: Value) -> Response {
         let submission_id = match params.get("submission_id").and_then(|v| v.as_str()) {
             Some(sid) => sid.to_string(),
-            None => return Response::Error {
-                id,
-                error: ResponseError { code: "INVALID_PARAMS".into(), message: "Missing 'submission_id'".into() },
-            },
+            None => {
+                return Response::Error {
+                    id,
+                    error: ResponseError {
+                        code: "INVALID_PARAMS".into(),
+                        message: "Missing 'submission_id'".into(),
+                    },
+                }
+            }
         };
         match self.processor.approve_decision(&submission_id).await {
-            Ok(()) => Response::Success { id, result: json!({"approved": submission_id}) },
+            Ok(()) => Response::Success {
+                id,
+                result: json!({"approved": submission_id}),
+            },
             Err(e) => Response::Error {
                 id,
-                error: ResponseError { code: "APPROVE_ERROR".into(), message: e.to_string() },
+                error: ResponseError {
+                    code: "APPROVE_ERROR".into(),
+                    message: e.to_string(),
+                },
             },
         }
     }
@@ -368,36 +536,69 @@ impl Handler {
     async fn reject_decision(&self, id: u64, params: Value) -> Response {
         let submission_id = match params.get("submission_id").and_then(|v| v.as_str()) {
             Some(sid) => sid.to_string(),
-            None => return Response::Error {
-                id,
-                error: ResponseError { code: "INVALID_PARAMS".into(), message: "Missing 'submission_id'".into() },
-            },
+            None => {
+                return Response::Error {
+                    id,
+                    error: ResponseError {
+                        code: "INVALID_PARAMS".into(),
+                        message: "Missing 'submission_id'".into(),
+                    },
+                }
+            }
         };
-        let reason = params.get("reason").and_then(|v| v.as_str()).unwrap_or("rejected_by_operator");
-        self.processor.reject_decision(&submission_id, reason).await;
-        Response::Success { id, result: json!({"rejected": submission_id}) }
+        let reason = params
+            .get("reason")
+            .and_then(|v| v.as_str())
+            .unwrap_or("rejected_by_operator");
+        self.processor
+            .reject_decision(&submission_id, reason)
+            .await;
+        Response::Success {
+            id,
+            result: json!({"rejected": submission_id}),
+        }
     }
 
     async fn override_severity(&self, id: u64, params: Value) -> Response {
         let submission_id = match params.get("submission_id").and_then(|v| v.as_str()) {
             Some(sid) => sid.to_string(),
-            None => return Response::Error {
-                id,
-                error: ResponseError { code: "INVALID_PARAMS".into(), message: "Missing 'submission_id'".into() },
-            },
+            None => {
+                return Response::Error {
+                    id,
+                    error: ResponseError {
+                        code: "INVALID_PARAMS".into(),
+                        message: "Missing 'submission_id'".into(),
+                    },
+                }
+            }
         };
         let severity = match params.get("severity").and_then(|v| v.as_str()) {
             Some(s) => s.to_string(),
-            None => return Response::Error {
-                id,
-                error: ResponseError { code: "INVALID_PARAMS".into(), message: "Missing 'severity'".into() },
-            },
+            None => {
+                return Response::Error {
+                    id,
+                    error: ResponseError {
+                        code: "INVALID_PARAMS".into(),
+                        message: "Missing 'severity'".into(),
+                    },
+                }
+            }
         };
-        match self.processor.override_severity(&submission_id, &severity).await {
-            Ok(()) => Response::Success { id, result: json!({"overridden": submission_id, "severity": severity}) },
+        match self
+            .processor
+            .override_severity(&submission_id, &severity)
+            .await
+        {
+            Ok(()) => Response::Success {
+                id,
+                result: json!({"overridden": submission_id, "severity": severity}),
+            },
             Err(e) => Response::Error {
                 id,
-                error: ResponseError { code: "OVERRIDE_ERROR".into(), message: e.to_string() },
+                error: ResponseError {
+                    code: "OVERRIDE_ERROR".into(),
+                    message: e.to_string(),
+                },
             },
         }
     }
