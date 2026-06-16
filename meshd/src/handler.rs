@@ -103,6 +103,16 @@ impl Handler {
         })
     }
 
+    /// Access the submission queue (for P2P handler to enqueue directly).
+    pub fn submission_queue(&self) -> Arc<SubmissionQueue> {
+        self.processor.queue.clone()
+    }
+
+    /// Access the doc store (for P2P handler to serve state queries).
+    pub fn doc_store(&self) -> Arc<crate::docs::DocsStore> {
+        self.engagement_manager.docs.clone()
+    }
+
     pub async fn handle(&self, request: crate::protocol::Request) -> Response {
         match request.method.as_str() {
             "create_identity" => self.create_identity(request.id).await,
@@ -732,44 +742,29 @@ impl Handler {
         let node_id_str = match params.get("node_id").and_then(|v| v.as_str()) {
             Some(n) => n,
             None => {
-                return Response::Error {
-                    id,
-                    error: ResponseError {
-                        code: "INVALID_PARAMS".into(),
-                        message: "Missing 'node_id'".into(),
-                    },
-                }
+                return Response::Error { id, error: ResponseError { code: "INVALID_PARAMS".into(), message: "Missing 'node_id'".into() } }
             }
         };
         let node_id: iroh::EndpointId = match node_id_str.parse() {
             Ok(n) => n,
             Err(e) => {
-                return Response::Error {
-                    id,
-                    error: ResponseError {
-                        code: "INVALID_NODE_ID".into(),
-                        message: format!("Invalid node_id: {}", e),
-                    },
-                }
+                return Response::Error { id, error: ResponseError { code: "INVALID_NODE_ID".into(), message: format!("Invalid node_id: {}", e) } }
             }
         };
-
+        let engagement_id = params.get("engagement_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
         let submission = match params.get("submission") {
             Some(s) => s.clone(),
             None => {
-                return Response::Error {
-                    id,
-                    error: ResponseError {
-                        code: "INVALID_PARAMS".into(),
-                        message: "Missing 'submission'".into(),
-                    },
-                }
+                return Response::Error { id, error: ResponseError { code: "INVALID_PARAMS".into(), message: "Missing 'submission'".into() } }
             }
         };
+        let addrs: Vec<iroh::TransportAddr> = params.get("addresses").and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|a| a.as_str().and_then(|s| s.parse::<std::net::SocketAddr>().ok().map(|sa| iroh::TransportAddr::Ip(sa)))).collect())
+            .unwrap_or_default();
 
-        match crate::p2p::dial(&self.endpoint, node_id, vec![], None).await {
+        match crate::p2p::dial(&self.endpoint, node_id, addrs, None).await {
             Ok(mut stream) => {
-                let msg = json!({"method": "submit", "params": {"submission": submission}});
+                let msg = json!({"method": "submit", "params": {"engagement_id": engagement_id, "submission": submission}});
                 if let Err(e) = stream.send_json(&msg).await {
                     return Response::Error {
                         id,

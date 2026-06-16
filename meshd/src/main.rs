@@ -39,8 +39,10 @@ async fn main() -> anyhow::Result<()> {
     // Pass P2P addresses to handler for get_node_addr RPC
     let handler = Handler::new(handler_ep.clone(), node_id.to_string(), relay_urls, direct_addrs).await?;
 
-    // Spawn P2P router
-    let _router = meshd::p2p::spawn_router(router_ep);
+    // Spawn P2P router — wired to the same queue and docs as the handler
+    let p2p_queue = handler.submission_queue();
+    let p2p_docs = handler.doc_store();
+    let _router = meshd::p2p::spawn_router(router_ep, Some(p2p_queue), Some(p2p_docs));
     info!("P2P router started on ALPN: {:?}", String::from_utf8_lossy(meshd::p2p::ALPN));
 
     let stdin = io::stdin().lock();

@@ -33,7 +33,7 @@ struct InvitePayload {
 }
 
 pub struct EngagementManager {
-    docs: Arc<DocsStore>,
+    pub(crate) docs: Arc<DocsStore>,
     gossip: Arc<GossipStore>,
     engagements: tokio::sync::Mutex<Vec<EngagementMeta>>,
     node_id: String,
