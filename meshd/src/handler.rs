@@ -799,3 +799,79 @@ impl Handler {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    fn parse_addrs(params: &serde_json::Value) -> Vec<iroh::TransportAddr> {
+        params
+            .get("addresses")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|a| {
+                        a.as_str().and_then(|s| {
+                            s.parse::<std::net::SocketAddr>()
+                                .ok()
+                                .map(|sa| iroh::TransportAddr::Ip(sa))
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn test_parse_addresses_valid() {
+        let params = json!({
+            "addresses": ["100.78.171.49:57312", "172.17.0.1:57312"]
+        });
+        let addrs = parse_addrs(&params);
+        assert_eq!(addrs.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_addresses_empty_array() {
+        let params = json!({ "addresses": [] });
+        let addrs = parse_addrs(&params);
+        assert_eq!(addrs.len(), 0);
+    }
+
+    #[test]
+    fn test_parse_addresses_missing_key() {
+        let params = json!({});
+        let addrs = parse_addrs(&params);
+        assert_eq!(addrs.len(), 0);
+    }
+
+    #[test]
+    fn test_parse_addresses_not_an_array() {
+        let params = json!({ "addresses": "not-an-array" });
+        let addrs = parse_addrs(&params);
+        assert_eq!(addrs.len(), 0);
+    }
+
+    #[test]
+    fn test_parse_addresses_mixed_valid_invalid() {
+        let params = json!({
+            "addresses": ["100.78.171.49:57312", "not-an-addr", "172.17.0.1:57312", null, "999.999.999.999:99999"]
+        });
+        let addrs = parse_addrs(&params);
+        assert_eq!(addrs.len(), 2, "only the two valid SocketAddrs should be parsed");
+    }
+
+    #[test]
+    fn test_parse_localhost() {
+        let params = json!({ "addresses": ["127.0.0.1:8080"] });
+        let addrs = parse_addrs(&params);
+        assert_eq!(addrs.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_ipv6() {
+        let params = json!({ "addresses": ["::1:8080", "[::1]:8080"] });
+        let addrs = parse_addrs(&params);
+        assert_eq!(addrs.len(), 1, "only [::1]:8080 is a valid SocketAddr literal");
+    }
+}

@@ -646,6 +646,9 @@ class RiftorApp(App):
         if sub == "test":
             await self._mesh_test_cmd()
             return
+        if sub == "findings":
+            await self._mesh_findings_cmd()
+            return
 
         mgr = getattr(self, "mesh_manager", None)
         if mgr is None:
@@ -854,6 +857,25 @@ class RiftorApp(App):
             self._note(f"Rejected: {result.get('status', 'ok')}")
         except Exception as e:
             self._error(f"Failed: {e}")
+
+    async def _mesh_findings_cmd(self) -> None:
+        mgr = getattr(self, "mesh_manager", None)
+        state = mgr.current_state if mgr else None
+        if not state or not state.findings:
+            self._note("No findings yet")
+            return
+        lines = [f"**{len(state.findings)} findings:**", ""]
+        for f in state.findings:
+            if isinstance(f, dict):
+                title = f.get('title','?')
+                sev = f.get('severity','?')
+                dec = f.get('decision','?')
+            else:
+                title = getattr(f, 'title', '?')
+                sev = getattr(f, 'severity', '?')
+                dec = '?'
+            lines.append(f"- **{title}** [{sev}] `{dec}`")
+        self._markdown("\n".join(lines))
 
     async def _mesh_test_cmd(self) -> None:
         """Print the P2P addresses and a test command for cross-machine submission."""
