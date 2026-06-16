@@ -3,6 +3,7 @@ use crate::gossip::GossipStore;
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::sync::Arc;
 use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -11,75 +12,133 @@ pub struct EngagementMeta {
     pub name: String,
     pub created_at: String,
     pub node_id: String,
+    /// P2P namespace identifier for this engagement.
+    /// Currently a UUID; will transition to iroh-docs NamespaceId.
+    pub namespace_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct InvitePayload {
+    /// P2P namespace identifier
+    namespace_id: String,
+    /// NodeId of the inviter (to connect to for sync)
+    node_id: String,
+    /// Engagement UUID (for application-level identification)
+    engagement_id: String,
+    /// Relay URLs of the inviter node
+    relay_urls: Vec<String>,
+    /// Direct IP addresses of the inviter node
+    direct_addresses: Vec<String>,
+    created_at: String,
 }
 
 pub struct EngagementManager {
-    docs: std::sync::Arc<DocsStore>,
-    gossip: GossipStore,
+    docs: Arc<DocsStore>,
+    gossip: Arc<GossipStore>,
     engagements: tokio::sync::Mutex<Vec<EngagementMeta>>,
     node_id: String,
+    relay_urls: Vec<String>,
+    direct_addresses: Vec<String>,
 }
 
 impl EngagementManager {
-    pub fn new(node_id: String, docs: std::sync::Arc<DocsStore>) -> Self {
+    pub fn new(
+        node_id: String,
+        docs: Arc<DocsStore>,
+        gossip: Arc<GossipStore>,
+        endpoint: Arc<iroh::endpoint::Endpoint>,
+    ) -> Self {
+        let endpoint_addr = endpoint.addr();
         Self {
             docs,
-            gossip: GossipStore::new(),
+            gossip,
             engagements: tokio::sync::Mutex::new(Vec::new()),
             node_id,
+            relay_urls: endpoint_addr.relay_urls().map(|u| u.to_string()).collect(),
+            direct_addresses: endpoint_addr.ip_addrs().map(|a| a.to_string()).collect(),
         }
     }
 
     pub async fn create(&self, name: String) -> anyhow::Result<EngagementMeta> {
         let id = Uuid::new_v4().to_string();
-        let meta = EngagementMeta {
-            id: id.clone(),
-            name,
-            created_at: chrono::Utc::now().to_rfc3339(),
-            node_id: self.node_id.clone(),
-        };
+        // Generate a namespace ID for future iroh-docs integration.
+        // Currently a UUID; will become a real iroh-docs NamespaceId.
+        let namespace_id = Uuid::new_v4().to_string();
+
         self.docs.open(&id).await?;
         self.gossip.join(&id, "submit").await?;
         self.gossip.join(&id, "activity").await?;
         self.gossip.join(&id, "presence").await?;
         self.gossip.join(&id, "processed").await?;
+
+        let meta = EngagementMeta {
+            id: id.clone(),
+            name,
+            created_at: chrono::Utc::now().to_rfc3339(),
+            node_id: self.node_id.clone(),
+            namespace_id,
+        };
+
         let mut engagements = self.engagements.lock().await;
         engagements.push(meta.clone());
         Ok(meta)
     }
 
     pub async fn generate_invite(&self, engagement_id: &str) -> anyhow::Result<String> {
-        let invite_id = Uuid::new_v4().to_string();
-        let invite_data = json!({
-            "engagement_id": engagement_id,
-            "invite_id": invite_id,
-            "created_at": chrono::Utc::now().to_rfc3339(),
-        });
-        let payload = serde_json::to_string(&invite_data)?;
+        let engagements = self.engagements.lock().await;
+        let meta = engagements
+            .iter()
+            .find(|e| e.id == engagement_id)
+            .context("Engagement not found")?;
+
+        let invite = InvitePayload {
+            namespace_id: meta.namespace_id.clone(),
+            node_id: self.node_id.clone(),
+            engagement_id: engagement_id.to_string(),
+            relay_urls: self.relay_urls.clone(),
+            direct_addresses: self.direct_addresses.clone(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+        };
+
+        let payload = serde_json::to_string(&invite)?;
         use base64::Engine;
         Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload.as_bytes()))
     }
 
-    pub async fn join(&self, invite: &str) -> anyhow::Result<EngagementMeta> {
+    pub async fn join(&self, invite_b64: &str) -> anyhow::Result<EngagementMeta> {
         use base64::Engine;
         let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .decode(invite)
-            .map_err(|e| anyhow::anyhow!("Invalid invite: {}", e))?;
-        let invite_data: Value = serde_json::from_slice(&payload)?;
-        let engagement_id = invite_data["engagement_id"]
-            .as_str()
-            .context("Invalid invite: missing engagement_id")?;
-        self.docs.open(engagement_id).await?;
-        self.gossip.join(engagement_id, "submit").await?;
-        self.gossip.join(engagement_id, "activity").await?;
-        self.gossip.join(engagement_id, "presence").await?;
-        self.gossip.join(engagement_id, "processed").await?;
+            .decode(invite_b64)
+            .map_err(|e| anyhow::anyhow!("Invalid invite base64: {}", e))?;
+        let invite: InvitePayload =
+            serde_json::from_slice(&payload).context("Invalid invite payload")?;
+
+        // Open the engagement's docs namespace (in-memory stub for now;
+        // will transition to real iroh-docs open_namespace)
+        self.docs.open(&invite.engagement_id).await?;
+
+        // Join gossip topics
+        self.gossip
+            .join(&invite.engagement_id, "submit")
+            .await?;
+        self.gossip
+            .join(&invite.engagement_id, "activity")
+            .await?;
+        self.gossip
+            .join(&invite.engagement_id, "presence")
+            .await?;
+        self.gossip
+            .join(&invite.engagement_id, "processed")
+            .await?;
+
         let meta = EngagementMeta {
-            id: engagement_id.to_string(),
-            name: format!("Joined {}", engagement_id),
+            id: invite.engagement_id.clone(),
+            name: format!("Joined {}", invite.engagement_id),
             created_at: chrono::Utc::now().to_rfc3339(),
             node_id: self.node_id.clone(),
+            namespace_id: invite.namespace_id.clone(),
         };
+
         let mut engagements = self.engagements.lock().await;
         engagements.push(meta.clone());
         Ok(meta)

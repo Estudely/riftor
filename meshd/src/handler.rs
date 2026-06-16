@@ -1,6 +1,6 @@
 use crate::protocol::{Response, ResponseError};
 use crate::processor::{Processor, ProcessorMode};
-use crate::queue::{SubmissionQueue, Submission};
+use crate::queue::{Submission, SubmissionQueue};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tracing::warn;
@@ -9,22 +9,33 @@ pub struct Handler {
     identity_manager: crate::identity::IdentityManager,
     engagement_manager: crate::engagement::EngagementManager,
     processor: Arc<Processor>,
+    /// Real iroh Endpoint for P2P networking — NodeId, relay addresses, etc.
+    endpoint: Arc<iroh::endpoint::Endpoint>,
 }
 
 impl Handler {
-    pub async fn new() -> anyhow::Result<Self> {
+    pub async fn new(endpoint: Arc<iroh::endpoint::Endpoint>) -> anyhow::Result<Self> {
         let identity_manager = crate::identity::IdentityManager::load_or_create().await?;
-        let info = identity_manager.get_info()?;
+        let node_id = endpoint.id().to_string();
+
         tracing::info!(
-            "Loaded identity: node_id={}, public_key={}",
-            info.node_id,
-            info.public_key
+            "Loaded identity: node_id={} public_key={}",
+            node_id,
+            identity_manager.public_key()
         );
-        let node_id = info.node_id;
-        let queue = Arc::new(SubmissionQueue::new(256));
+
         let docs = Arc::new(crate::docs::DocsStore::new());
-        let engagement_manager =
-            crate::engagement::EngagementManager::new(node_id.clone(), docs.clone());
+        let gossip = Arc::new(crate::gossip::GossipStore::new());
+
+        let engagement_manager = crate::engagement::EngagementManager::new(
+            node_id.clone(),
+            docs.clone(),
+            gossip.clone(),
+            endpoint.clone(),
+        );
+
+        let queue = Arc::new(SubmissionQueue::new(256));
+
         let llm_config = crate::llm::LlmConfig::default();
         let processor = Arc::new(Processor::new(
             queue.clone(),
@@ -40,6 +51,7 @@ impl Handler {
             identity_manager,
             engagement_manager,
             processor,
+            endpoint,
         })
     }
 
@@ -49,14 +61,30 @@ impl Handler {
     ) -> anyhow::Result<Self> {
         let identity_manager = crate::identity::IdentityManager::load_or_create().await?;
         let node_id = identity_manager.get_info()?.node_id;
+
+        // Create iroh endpoint for P2P networking
+        let endpoint = Arc::new(
+            iroh::endpoint::Endpoint::builder(iroh::endpoint::presets::Minimal)
+                .bind()
+                .await?,
+        );
+        tracing::info!("Endpoint bound: {}", endpoint.id());
+
         let docs = Arc::new(crate::docs::DocsStore::new());
-        let engagement_manager =
-            crate::engagement::EngagementManager::new(node_id, docs);
+        let gossip = Arc::new(crate::gossip::GossipStore::new());
+
+        let engagement_manager = crate::engagement::EngagementManager::new(
+            node_id,
+            docs,
+            gossip,
+            endpoint.clone(),
+        );
 
         Ok(Self {
             identity_manager,
             engagement_manager,
             processor,
+            endpoint,
         })
     }
 
@@ -71,6 +99,7 @@ impl Handler {
             "get_state" => self.get_state(request.id, request.params).await,
             "add_blob" => self.add_blob(request.id, request.params).await,
             "get_blob" => self.get_blob(request.id, request.params).await,
+            "get_node_addr" => self.get_node_addr(request.id).await,
             "ping" => Response::Success {
                 id: request.id,
                 result: json!({"pong": true}),
@@ -123,7 +152,7 @@ impl Handler {
 
         match self.engagement_manager.create(name).await {
             Ok(meta) => {
-                let result = match serde_json::to_value(meta) {
+                let result = match serde_json::to_value(&meta) {
                     Ok(r) => r,
                     Err(e) => {
                         warn!(%e, "Failed to serialize response meta");
@@ -193,7 +222,7 @@ impl Handler {
 
         match self.engagement_manager.join(&invite).await {
             Ok(meta) => {
-                let result = match serde_json::to_value(meta) {
+                let result = match serde_json::to_value(&meta) {
                     Ok(r) => r,
                     Err(e) => {
                         warn!(%e, "Failed to serialize response meta");
@@ -428,6 +457,22 @@ impl Handler {
                     message: e.to_string(),
                 },
             },
+        }
+    }
+
+    async fn get_node_addr(&self, id: u64) -> Response {
+        let endpoint_addr = self.endpoint.addr();
+        let relay_urls: Vec<String> = endpoint_addr.relay_urls().map(|u| u.to_string()).collect();
+        let direct_addrs: Vec<String> =
+            endpoint_addr.ip_addrs().map(|a| a.to_string()).collect();
+
+        Response::Success {
+            id,
+            result: json!({
+                "node_id": self.endpoint.id().to_string(),
+                "relay_urls": relay_urls,
+                "direct_addresses": direct_addrs,
+            }),
         }
     }
 
