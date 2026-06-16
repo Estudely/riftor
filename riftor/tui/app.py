@@ -643,6 +643,9 @@ class RiftorApp(App):
         if sub == "reject":
             await self._mesh_reject_cmd(arg[len(sub):].strip())
             return
+        if sub == "test":
+            await self._mesh_test_cmd()
+            return
 
         mgr = getattr(self, "mesh_manager", None)
         if mgr is None:
@@ -662,20 +665,17 @@ class RiftorApp(App):
         else:
             lines = [
                 f"**Mesh Engagement: {state.meta.name}**",
-                f"ID: `{state.meta.id}`",
-                f"Members: {len(state.members)}",
-                f"Findings: {len(state.findings)}",
+                f"Engagement ID: `{state.meta.id}`",
+                f"Members: {len(state.members)} · Findings: {len(state.findings)}",
                 f"Hosts: {len(state.hosts)} · Services: {len(state.services)}",
                 "",
-                "/mesh-invite — generate an invite code for peers",
+                "/mesh-invite — generate invite for peers",
+                "/mesh-test — show P2P test command (cross-machine)",
                 "/mesh-leave — leave this engagement",
-                "/mesh-refresh — refresh state from peers",
-                "/mesh mode <autonomous|review|critical> — set processor mode",
-                "/mesh queue — show submission queue stats",
-                "/mesh processor — show processor status",
-                "/mesh review — show pending review decisions",
-                "/mesh approve <submission_id> — approve a decision",
-                "/mesh reject <submission_id> <reason> — reject a decision",
+                "/mesh-refresh — refresh state",
+                "/mesh mode <autonomous|review|critical>",
+                "/mesh queue — processor queue stats",
+                "/mesh processor — processor status",
             ]
         self._markdown("\n".join(lines))
 
@@ -854,6 +854,36 @@ class RiftorApp(App):
             self._note(f"Rejected: {result.get('status', 'ok')}")
         except Exception as e:
             self._error(f"Failed: {e}")
+
+    async def _mesh_test_cmd(self) -> None:
+        """Print the P2P addresses and a test command for cross-machine submission."""
+        mgr = getattr(self, "mesh_manager", None)
+        if mgr is None or not mgr.running:
+            self._note("Mesh not available")
+            return
+        state = mgr.current_state
+        if state is None:
+            self._note("No active engagement. Use /mesh-create first.")
+            return
+        try:
+            addr = await mgr.get_p2p_addr()
+            nid = addr.get("node_id", "?")
+            addrs = addr.get("direct_addresses", [])
+            eng_id = state.meta.id
+            lines = [
+                f"**P2P Info**",
+                f"NodeId: `{nid}`",
+                f"Addresses: `{addrs}`",
+                f"Engagement: `{eng_id}`",
+                "",
+                "**Test from another machine:**",
+                "```bash",
+                f'./riftor-meshd <<< \'{{"id":1,"method":"p2p_submit_remote","params":{{"node_id":"{nid}","addresses":{addrs},"engagement_id":"{eng_id}","submission":{{"type":"finding","data":{{"title":"Test","severity":"medium","target":"10.0.0.5","vuln_class":"test"}}}}}}}}\'',
+                "```",
+            ]
+            self._markdown("\n".join(lines))
+        except Exception as e:
+            self._error(f"Failed to get P2P info: {e}")
 
     def _update_mesh_sidebar(self) -> None:
         mgr = getattr(self, "mesh_manager", None)

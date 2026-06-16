@@ -98,6 +98,14 @@ class MeshManager:
         self._current_engagement = await client.get_state(state.meta.id)
         return self._current_engagement
 
+    async def get_p2p_addr(self) -> dict:
+        """Get this node's P2P address for cross-machine testing."""
+        self._ensure_running()
+        resp = await self._daemon.request("get_node_addr")
+        if not resp.ok:
+            raise RuntimeError(f"Failed to get P2P address: {resp.error}")
+        return resp.result or {}
+
     async def get_queue_stats(self) -> dict:
         state = self._ensure_engagement()
         return await self._ensure_client().get_queue_stats(state.meta.id)
