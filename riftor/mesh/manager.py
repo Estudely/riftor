@@ -100,7 +100,7 @@ class MeshManager:
 
     async def get_p2p_addr(self) -> dict:
         """Get this node's P2P address for cross-machine testing."""
-        self._ensure_running()
+        self._ensure_client()
         resp = await self._daemon.request("get_node_addr")
         if not resp.ok:
             raise RuntimeError(f"Failed to get P2P address: {resp.error}")
