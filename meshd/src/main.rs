@@ -130,5 +130,9 @@ async fn main() -> anyhow::Result<()> {
     }
 
     info!("riftor-meshd shutting down");
+    // Close endpoints gracefully so the iroh sockets and blobs store release
+    // their resources instead of being dropped abruptly.
+    let _ = _router.shutdown().await;
+    handler_ep.close().await;
     Ok(())
 }
