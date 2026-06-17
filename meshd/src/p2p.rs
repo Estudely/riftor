@@ -146,20 +146,24 @@ async fn handle_p2p_message(
 
 /// Start the P2P router, taking ownership of the endpoint.
 ///
-/// Registers all three protocols on the SAME endpoint: the riftor-mesh
-/// protocol (queue + p2p doc queries), iroh-docs, and iroh-gossip.
+/// Registers all protocols on the SAME endpoint: the riftor-mesh
+/// protocol (queue + p2p doc queries), iroh-docs, iroh-gossip, and iroh-blobs.
+/// The blobs ALPN is required so iroh-docs peers can download entry content
+/// (not just metadata) during sync.
 pub fn spawn_router(
     endpoint: Endpoint,
     queue: Option<Arc<crate::queue::SubmissionQueue>>,
     docs: Option<Arc<crate::docs::DocsStore>>,
     docs_proto: iroh_docs::protocol::Docs,
     gossip_proto: iroh_gossip::net::Gossip,
+    blobs_proto: iroh_blobs::BlobsProtocol,
 ) -> Router {
     let handler = Arc::new(MeshProtocolHandler { queue, docs });
     iroh::protocol::Router::builder(endpoint)
         .accept(ALPN, handler)
         .accept(iroh_docs::ALPN, docs_proto)
         .accept(iroh_gossip::net::GOSSIP_ALPN, gossip_proto)
+        .accept(iroh_blobs::ALPN, blobs_proto)
         .spawn()
 }
 
