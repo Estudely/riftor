@@ -127,8 +127,15 @@ uv run python dev/mesh_live_test.py
 - [ ] `join_engagement` runs `docs.import_ticket` (a P2P dial) on the daemon's
   single-threaded request loop; with no transport it blocks indefinitely.
   Spawn the import or bound it with a timeout so the loop stays responsive.
+- [ ] The blobs `FsStore` takes an exclusive redb lock on
+  `~/.local/share/riftor-mesh/`, so a stale/crashed daemon blocks a new one
+  from starting (it hangs waiting for the lock). Consider a lock-timeout or a
+  per-daemon data-dir.
 - [ ] Presence heartbeat task has no cancellation handle, so a node keeps
   heartbeating after `leave`.
+- [ ] `get_state` returns findings/hosts/services only — no `members`, so the
+  TUI member list never populates from presence heartbeats. Maintain a
+  client-side last-seen map in the presence handler, or add a members section.
 - [ ] Dedup on the 2nd+ finding still calls the LLM (needs an API key); the
   first finding in a fresh engagement publishes offline.
 
