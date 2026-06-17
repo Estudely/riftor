@@ -89,7 +89,7 @@ async fn entries_survive_reopen() {
             .expect("namespace not found in reopened store");
 
         let stream = doc
-            .get_many(Query::key_prefix(b"finding/".to_vec()))
+            .get_many(Query::key_prefix(b"finding/"))
             .await
             .unwrap();
         futures::pin_mut!(stream);
