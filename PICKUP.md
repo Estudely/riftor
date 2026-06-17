@@ -25,8 +25,8 @@ uv run riftor
 | `src/queue.rs` | Bounded mpsc submission queue with stats |
 | `src/prompts.rs` | Dedup + severity LLM prompt templates |
 | `src/engagement.rs` | Engagement CRUD, invite encode/decode, state queries |
-| `src/docs.rs` | In-memory doc store (swap to real iroh-docs for CRDT sync) |
-| `src/gossip.rs` | In-memory gossip store (swap to real iroh-gossip for pub/sub) |
+| `src/docs.rs` | iroh-docs CRDT replica per engagement (persisted, read-ticket replicas) |
+| `src/gossip.rs` | iroh-gossip topic pub/sub (real `join`/`broadcast`/`subscribe`) |
 | `src/protocol.rs` | JSON-line types: Request, Response, Event |
 | `tests/p2p_test.rs` | ✅ Two endpoints echo over iroh QUIC (integration test) |
 | `tests/processor_test.rs` | ✅ Queue, modes, review operations |
@@ -115,13 +115,22 @@ uv run python dev/mesh_live_test.py
 ## Remaining Work
 
 ### Small
-- [ ] Persist endpoint identity across restarts (use identity.rs key for iroh Endpoint)
-- [ ] Fix unused import warnings
+- [x] Persist endpoint identity across restarts (use identity.rs key for iroh Endpoint)
+- [x] Fix unused import warnings
 
 ### Medium
-- [ ] Swap docs stub → real iroh-docs (CRDT synced state)
-- [ ] Swap gossip stub → real iroh-gossip (topic pub/sub)
+- [x] Swap docs stub → real iroh-docs (CRDT synced state, persisted, read-ticket replicas)
+- [x] Swap gossip stub → real iroh-gossip (topic pub/sub + live MeshEvent bridge to TUI)
 - [ ] Merge to main + release
+
+### Follow-ups discovered during iroh integration
+- [ ] `join_engagement` runs `docs.import_ticket` (a P2P dial) on the daemon's
+  single-threaded request loop; with no transport it blocks indefinitely.
+  Spawn the import or bound it with a timeout so the loop stays responsive.
+- [ ] Presence heartbeat task has no cancellation handle, so a node keeps
+  heartbeating after `leave`.
+- [ ] Dedup on the 2nd+ finding still calls the LLM (needs an API key); the
+  first finding in a fresh engagement publishes offline.
 
 ### Large (Phase 2 extras)
 - [ ] Kanban task board
@@ -130,8 +139,11 @@ uv run python dev/mesh_live_test.py
 
 ## Key Architecture Decisions
 
-- **Hub-and-spoke**: Commander is source of truth, Workers submit via P2P
+- **Hub-and-spoke**: Commander is source of truth (writes), Workers hold read-only iroh-docs replicas
+- **iroh-docs**: one CRDT namespace per engagement, persisted under `~/.local/share/riftor-mesh/`; Workers join via a read-only `DocTicket` in the invite
+- **iroh-gossip**: topics `riftor/{engagement}/{submit,activity,presence,processed}`; receive loops forward decoded messages as JSON-line `MeshEvent`s on daemon stdout → Python `events.py` → live sidebar
+- **All ALPNs on one Router**: `riftor-mesh/0` + iroh-docs + iroh-gossip + **iroh-blobs** (blobs is required so docs peers download entry content, not just metadata)
 - **Rust sidecar**: `riftor-meshd` wraps iroh, speaks JSON-line over stdin/stdout
-- **Two endpoints**: Router endpoint (P2P incoming) + Handler endpoint (outbound dials)
+- **Two endpoints**: Router endpoint (P2P incoming, persisted identity) + Handler endpoint (outbound dials)
 - **P2P keep-alive**: Set `RIFTOR_MESH_P2P=1` env var for daemon to stay alive
 - **LLM via DeepSeek**: OpenRouter-compatible API, circuit breaker at 5 failures

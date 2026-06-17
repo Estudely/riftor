@@ -44,9 +44,9 @@ All cross-machine verified 2026-06-16.
 ┌─ riftor-meshd (Rust daemon) ───────────────────┐
 │  Handler ──► Processor ──► LLM Client (DeepSeek)│
 │     │              │                             │
-│  docs (stub)   gossip (stub)   blobs (stub)     │
+│  docs (iroh-docs)  gossip (iroh-gossip)  blobs (iroh-blobs) │
 │     │              │                             │
-│  Router (ALPN: riftor-mesh/0) ◄── P2P QUIC ──► │
+│  Router (ALPN: riftor-mesh/0 + iroh-docs + iroh-gossip + iroh-blobs) ◄── P2P QUIC ──► │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -61,8 +61,9 @@ All cross-machine verified 2026-06-16.
 | `meshd/src/handler.rs` | 15 RPC handlers: CRUD, submit, processor control, P2P dial |
 | `meshd/src/identity.rs` | Real iroh SecretKey, persisted to disk |
 | `meshd/src/engagement.rs` | Engagement CRUD, invite encode/decode, state queries |
-| `meshd/src/docs.rs` | In-memory doc store (ready for iroh-docs swap) |
-| `meshd/src/gossip.rs` | In-memory gossip store (ready for iroh-gossip swap) |
+| `meshd/src/mesh_stack.rs` | Builds the shared iroh stack (blobs+gossip+docs) on the router endpoint, persistent with in-memory fallback |
+| `meshd/src/docs.rs` | iroh-docs CRDT replica per engagement (persisted; Commander writes, Workers get read-only `DocTicket` replicas) |
+| `meshd/src/gossip.rs` | iroh-gossip topic pub/sub (`join`/`broadcast`/`subscribe_stream` over real gossip) |
 | `meshd/src/blobs.rs` | In-memory blob store |
 | `meshd/src/queue.rs` | Bounded mpsc submission queue with stats |
 | `meshd/src/llm.rs` | LLM client: DeepSeek HTTP, 3-retry, circuit breaker |
@@ -167,8 +168,8 @@ All cross-machine verified 2026-06-16.
 ### Medium (2-4 hours each)
 - [x] **Route P2P submissions to processor** — ✅ P2P handler now enqueues into Commander's queue
 - [x] **Real findings sync over P2P** — ✅ Worker submits over P2P → Commander processes → docs updated
-- [ ] **Swap docs stub → real iroh-docs** — CRDT-synced state. Needs `Docs::create(endpoint, author)` + `set_bytes`/`get_many`
-- [ ] **Swap gossip stub → real iroh-gossip** — topic-based pub/sub. Needs `GossipApi` wired to Router
+- [x] **Swap docs stub → real iroh-docs** — ✅ CRDT-synced state, persisted to disk, read-only `DocTicket` replicas; namespace per engagement
+- [x] **Swap gossip stub → real iroh-gossip** — ✅ topic pub/sub wired to Router; receive loops bridge gossip → JSON-line `MeshEvent` → Python TUI live updates
 - [ ] **Merge to main + release**
 
 ### Large (Phase 2 extras)
