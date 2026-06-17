@@ -11,13 +11,8 @@ impl ProtocolHandler for EchoHandler {
         while let Ok((mut send, mut recv)) = connection.accept_bi().await {
             tokio::spawn(async move {
                 let mut buf = [0u8; 1024];
-                loop {
-                    match recv.read(&mut buf).await {
-                        Ok(Some(n)) => {
-                            let _ = send.write_all(&buf[..n]).await;
-                        }
-                        _ => break,
-                    }
+                while let Ok(Some(n)) = recv.read(&mut buf).await {
+                    let _ = send.write_all(&buf[..n]).await;
                 }
             });
         }
@@ -37,7 +32,7 @@ async fn test_p2p_echo_between_two_endpoints() {
 
     // Spawn router on endpoint A with echo handler
     let _router_a = iroh::protocol::Router::builder(ep_a)
-        .accept(b"riftor-mesh/0".to_vec(), Arc::new(EchoHandler))
+        .accept(b"riftor-mesh/0", Arc::new(EchoHandler))
         .spawn();
 
     sleep(Duration::from_millis(200)).await;

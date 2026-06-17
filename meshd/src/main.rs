@@ -1,9 +1,9 @@
 use meshd::handler::Handler;
-use meshd::p2p::{self, P2pStream};
+use meshd::identity::IdentityManager;
 use meshd::protocol::{read_request, write_response, Response, ResponseError};
 use std::io::{self, BufRead, Write};
 use std::sync::Arc;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -17,9 +17,17 @@ async fn main() -> anyhow::Result<()> {
 
     info!("riftor-meshd starting");
 
+    // --- Load persisted identity ---
+    // The secret key is persisted to disk so the P2P NodeId stays stable across
+    // restarts; otherwise invites would break every time the daemon relaunches.
+    let identity = IdentityManager::load_or_create().await?;
+    info!("Loaded persisted identity — NodeId: {}", identity.node_id());
+
     // --- Create iroh Endpoints ---
-    // Router endpoint: handles incoming P2P protocol connections
+    // Router endpoint: handles incoming P2P protocol connections. Uses the
+    // persisted secret key so peers can dial the same NodeId after a restart.
     let router_ep = iroh::endpoint::Endpoint::builder(iroh::endpoint::presets::Minimal)
+        .secret_key(identity.secret_key().clone())
         .bind().await?;
     let node_id = router_ep.id();
     let router_addr = router_ep.addr();

@@ -2,8 +2,16 @@ use serde_json::Value;
 use std::collections::HashMap;
 use tokio::sync::Mutex;
 
+type EngagementState = HashMap<String, Vec<(String, Value)>>;
+
 pub struct DocsStore {
-    state: Mutex<HashMap<String, HashMap<String, Vec<(String, Value)>>>>,
+    state: Mutex<HashMap<String, EngagementState>>,
+}
+
+impl Default for DocsStore {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DocsStore {

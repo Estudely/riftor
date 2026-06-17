@@ -696,7 +696,7 @@ impl Handler {
             .and_then(|v| v.as_array())
             .map(|arr| {
                 arr.iter().filter_map(|a| {
-                    a.as_str().and_then(|s| s.parse::<std::net::SocketAddr>().ok().map(|sa| iroh::TransportAddr::Ip(sa)))
+                    a.as_str().and_then(|s| s.parse::<std::net::SocketAddr>().ok().map(iroh::TransportAddr::Ip))
                 }).collect()
             })
             .unwrap_or_default();
@@ -759,7 +759,7 @@ impl Handler {
             }
         };
         let addrs: Vec<iroh::TransportAddr> = params.get("addresses").and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|a| a.as_str().and_then(|s| s.parse::<std::net::SocketAddr>().ok().map(|sa| iroh::TransportAddr::Ip(sa)))).collect())
+            .map(|arr| arr.iter().filter_map(|a| a.as_str().and_then(|s| s.parse::<std::net::SocketAddr>().ok().map(iroh::TransportAddr::Ip))).collect())
             .unwrap_or_default();
         tracing::info!("p2p_submit_remote: parsed {} addresses from params", addrs.len());
 
@@ -814,7 +814,7 @@ mod tests {
                         a.as_str().and_then(|s| {
                             s.parse::<std::net::SocketAddr>()
                                 .ok()
-                                .map(|sa| iroh::TransportAddr::Ip(sa))
+                                .map(iroh::TransportAddr::Ip)
                         })
                     })
                     .collect()

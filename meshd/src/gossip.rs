@@ -6,6 +6,12 @@ pub struct GossipStore {
     topics: Mutex<HashMap<String, Vec<Value>>>,
 }
 
+impl Default for GossipStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GossipStore {
     pub fn new() -> Self {
         Self {

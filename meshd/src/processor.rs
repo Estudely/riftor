@@ -140,7 +140,7 @@ impl Processor {
         };
 
         // Stage 4: Reject vague submissions
-        if confidence.map_or(false, |c| c < 0.2) {
+        if confidence.is_some_and(|c| c < 0.2) {
             let title = finding["title"].as_str().unwrap_or("");
             if title.len() < 10 {
                 return Ok(PendingDecision {

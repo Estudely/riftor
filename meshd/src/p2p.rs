@@ -3,7 +3,7 @@ use iroh::protocol::{ProtocolHandler, Router};
 use iroh::EndpointId;
 use serde_json::Value;
 use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::info;
 
 /// ALPN for the riftor-mesh protocol
 pub const ALPN: &[u8] = b"riftor-mesh/0";
@@ -36,22 +36,17 @@ impl ProtocolHandler for MeshProtocolHandler {
                 // Read line by line (JSON-line protocol)
                 let mut buf = [0u8; 8192];
                 let mut line_buf = Vec::new();
-                loop {
-                    match recv.read(&mut buf).await {
-                        Ok(Some(n)) => {
-                            for &byte in &buf[..n] {
-                                if byte == b'\n' {
-                                    // Complete line received
-                                    let line = String::from_utf8_lossy(&line_buf);
-                                    let response = handle_p2p_message(&line, &q, &d).await;
-                                    let _ = send.write_all(&response).await;
-                                    line_buf.clear();
-                                } else {
-                                    line_buf.push(byte);
-                                }
-                            }
+                while let Ok(Some(n)) = recv.read(&mut buf).await {
+                    for &byte in &buf[..n] {
+                        if byte == b'\n' {
+                            // Complete line received
+                            let line = String::from_utf8_lossy(&line_buf);
+                            let response = handle_p2p_message(&line, &q, &d).await;
+                            let _ = send.write_all(&response).await;
+                            line_buf.clear();
+                        } else {
+                            line_buf.push(byte);
                         }
-                        _ => break,
                     }
                 }
             });
@@ -157,7 +152,7 @@ pub fn spawn_router(
 ) -> Router {
     let handler = Arc::new(MeshProtocolHandler { queue, docs });
     iroh::protocol::Router::builder(endpoint)
-        .accept(ALPN.to_vec(), handler)
+        .accept(ALPN, handler)
         .spawn()
 }
 
