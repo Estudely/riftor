@@ -17,9 +17,10 @@ base64 = "0.22"
 dirs = "5"
 chrono = { version = "0.4", features = ["serde"] }
 futures = "0.3"
-iroh-docs = "0.101.0"
+iroh-docs = { version = "0.101.0", features = ["fs-store"] }
 iroh-gossip = "0.101.0"
-iroh-blobs = "0.103.0"
+iroh-blobs = { version = "0.103.0", features = ["fs-store"] }
+blake3 = "1"
 
 [lib]
 name = "meshd"
