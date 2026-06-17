@@ -180,4 +180,48 @@ mod tests {
         assert_eq!(all.len(), 1);
         assert_eq!(all[0]["title"], "SQLi");
     }
+
+    #[tokio::test]
+    async fn doc_type_prefix_isolation() {
+        let store = mem_store().await;
+        store.open("eng1").await.unwrap();
+        store
+            .insert("eng1", "finding", "f1", json!({"title": "SQLi"}))
+            .await
+            .unwrap();
+        store
+            .insert("eng1", "host", "h1", json!({"ip": "10.0.0.1"}))
+            .await
+            .unwrap();
+        let findings = store.get_all("eng1", "finding").await.unwrap();
+        let hosts = store.get_all("eng1", "host").await.unwrap();
+        assert_eq!(findings.len(), 1);
+        assert_eq!(hosts.len(), 1);
+        assert_eq!(findings[0]["title"], "SQLi");
+        assert_eq!(hosts[0]["ip"], "10.0.0.1");
+    }
+
+    #[tokio::test]
+    async fn get_all_unknown_engagement_is_empty() {
+        let store = mem_store().await;
+        let res = store.get_all("nope", "finding").await.unwrap();
+        assert!(res.is_empty());
+    }
+
+    #[tokio::test]
+    async fn query_similar_filters_by_target_or_class() {
+        let store = mem_store().await;
+        store.open("eng1").await.unwrap();
+        store
+            .insert("eng1", "finding", "f1", json!({"target": "a", "vuln_class": "xss"}))
+            .await
+            .unwrap();
+        store
+            .insert("eng1", "finding", "f2", json!({"target": "b", "vuln_class": "sqli"}))
+            .await
+            .unwrap();
+        let hits = store.query_similar("eng1", "a", "none", 10).await.unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0]["target"], "a");
+    }
 }
