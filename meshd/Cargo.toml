@@ -22,6 +22,9 @@ iroh-gossip = "0.101.0"
 iroh-blobs = { version = "0.103.0", features = ["fs-store"] }
 blake3 = "1"
 
+[dev-dependencies]
+tempfile = "3"
+
 [lib]
 name = "meshd"
 path = "src/lib.rs"
