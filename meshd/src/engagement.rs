@@ -3,6 +3,7 @@ use crate::gossip::GossipStore;
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -39,6 +40,7 @@ pub struct EngagementManager {
     pub(crate) docs: Arc<DocsStore>,
     gossip: Arc<GossipStore>,
     engagements: tokio::sync::Mutex<Vec<EngagementMeta>>,
+    presence_tasks: tokio::sync::Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,
     node_id: String,
     relay_urls: Vec<String>,
     direct_addresses: Vec<String>,
@@ -57,6 +59,7 @@ impl EngagementManager {
             docs,
             gossip,
             engagements: tokio::sync::Mutex::new(Vec::new()),
+            presence_tasks: tokio::sync::Mutex::new(HashMap::new()),
             node_id,
             relay_urls: endpoint_addr.relay_urls().map(|u| u.to_string()).collect(),
             direct_addresses: endpoint_addr.ip_addrs().map(|a| a.to_string()).collect(),
@@ -104,7 +107,8 @@ impl EngagementManager {
     /// every 15s. Best-effort: broadcast errors are ignored and the task
     /// never panics or blocks engagement creation.
     fn spawn_presence(&self, engagement_id: String, node_id: String, gossip: Arc<GossipStore>) {
-        tokio::spawn(async move {
+        let eid = engagement_id.clone();
+        let handle = tokio::spawn(async move {
             let mut tick = tokio::time::interval(std::time::Duration::from_secs(15));
             // Skip the immediate first tick so we don't broadcast before
             // settling; subsequent ticks fire every 15s.
@@ -113,13 +117,19 @@ impl EngagementManager {
                 tick.tick().await;
                 let _ = gossip
                     .broadcast(
-                        &engagement_id,
+                        &eid,
                         "presence",
                         json!({"node_id": node_id, "ts": chrono::Utc::now().to_rfc3339()}),
                     )
                     .await;
             }
         });
+        // Store handle for cancellation on leave
+        if let Ok(mut tasks) = self.presence_tasks.try_lock() {
+            tasks.insert(engagement_id, handle);
+        } else {
+            tracing::warn!("Could not acquire presence_tasks lock; heartbeat won't be cancellable");
+        }
     }
 
     pub async fn create(&self, name: String) -> anyhow::Result<EngagementMeta> {
@@ -195,8 +205,19 @@ impl EngagementManager {
         if let Some(ticket_str) = &invite.doc_ticket {
             match ticket_str.parse::<iroh_docs::DocTicket>() {
                 Ok(ticket) => {
-                    if let Err(e) = self.docs.import_ticket(&invite.engagement_id, ticket).await {
-                        tracing::warn!("docs import failed: {e}; joining without replica");
+                    match tokio::time::timeout(
+                        std::time::Duration::from_secs(10),
+                        self.docs.import_ticket(&invite.engagement_id, ticket),
+                    )
+                    .await
+                    {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => {
+                            tracing::warn!("docs import failed: {e}; joining without replica")
+                        }
+                        Err(_) => tracing::warn!(
+                            "docs import timed out after 10s; joining without replica"
+                        ),
                     }
                 }
                 Err(e) => tracing::warn!("bad doc_ticket in invite: {e}; legacy join"),
@@ -242,6 +263,11 @@ impl EngagementManager {
     }
 
     pub async fn leave(&self, engagement_id: &str) -> anyhow::Result<()> {
+        // Cancel presence heartbeat
+        if let Some(handle) = self.presence_tasks.lock().await.remove(engagement_id) {
+            handle.abort();
+        }
+        // Remove from engagements list
         let mut engagements = self.engagements.lock().await;
         engagements.retain(|e| e.id != engagement_id);
         Ok(())
