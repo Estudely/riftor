@@ -10,3 +10,4 @@ pub mod llm;
 pub mod prompts;
 pub mod processor;
 pub mod p2p;
+pub mod mesh_stack;
