@@ -29,6 +29,9 @@ struct InvitePayload {
     relay_urls: Vec<String>,
     /// Direct IP addresses of the inviter node
     direct_addresses: Vec<String>,
+    /// iroh-docs read ticket for the engagement replica (None for legacy invites)
+    #[serde(default)]
+    doc_ticket: Option<String>,
     created_at: String,
 }
 
@@ -61,11 +64,14 @@ impl EngagementManager {
 
     pub async fn create(&self, name: String) -> anyhow::Result<EngagementMeta> {
         let id = Uuid::new_v4().to_string();
-        // Generate a namespace ID for future iroh-docs integration.
-        // Currently a UUID; will become a real iroh-docs NamespaceId.
-        let namespace_id = Uuid::new_v4().to_string();
 
         self.docs.open(&id).await?;
+        let namespace_id = self
+            .docs
+            .namespace_id(&id)
+            .await
+            .map(|n| n.to_string())
+            .unwrap_or_default();
         self.gossip.join(&id, "submit").await?;
         self.gossip.join(&id, "activity").await?;
         self.gossip.join(&id, "presence").await?;
@@ -91,12 +97,20 @@ impl EngagementManager {
             .find(|e| e.id == engagement_id)
             .context("Engagement not found")?;
 
+        let doc_ticket = self
+            .docs
+            .read_ticket(engagement_id)
+            .await
+            .ok()
+            .map(|t| t.to_string());
+
         let invite = InvitePayload {
             namespace_id: meta.namespace_id.clone(),
             node_id: self.node_id.clone(),
             engagement_id: engagement_id.to_string(),
             relay_urls: self.relay_urls.clone(),
             direct_addresses: self.direct_addresses.clone(),
+            doc_ticket,
             created_at: chrono::Utc::now().to_rfc3339(),
         };
 
@@ -113,9 +127,21 @@ impl EngagementManager {
         let invite: InvitePayload =
             serde_json::from_slice(&payload).context("Invalid invite payload")?;
 
-        // Open the engagement's docs namespace (in-memory stub for now;
-        // will transition to real iroh-docs open_namespace)
-        self.docs.open(&invite.engagement_id).await?;
+        // Import the read ticket if present (adopts the inviter's namespace);
+        // fall back to opening a local replica only for legacy invites.
+        if let Some(ticket_str) = &invite.doc_ticket {
+            match ticket_str.parse::<iroh_docs::DocTicket>() {
+                Ok(ticket) => {
+                    if let Err(e) = self.docs.import_ticket(&invite.engagement_id, ticket).await {
+                        tracing::warn!("docs import failed: {e}; joining without replica");
+                    }
+                }
+                Err(e) => tracing::warn!("bad doc_ticket in invite: {e}; legacy join"),
+            }
+        } else {
+            tracing::warn!("invite has no doc_ticket; legacy join (no CRDT replica)");
+            self.docs.open(&invite.engagement_id).await?;
+        }
 
         // Join gossip topics
         self.gossip
