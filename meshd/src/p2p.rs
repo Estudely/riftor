@@ -158,8 +158,8 @@ pub fn spawn_router(
     let handler = Arc::new(MeshProtocolHandler { queue, docs });
     iroh::protocol::Router::builder(endpoint)
         .accept(ALPN, handler)
-        .accept(iroh_docs::ALPN.to_vec(), docs_proto)
-        .accept(iroh_gossip::net::GOSSIP_ALPN.to_vec(), gossip_proto)
+        .accept(iroh_docs::ALPN, docs_proto)
+        .accept(iroh_gossip::net::GOSSIP_ALPN, gossip_proto)
         .spawn()
 }
 
