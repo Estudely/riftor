@@ -44,13 +44,36 @@ async fn main() -> anyhow::Result<()> {
             .bind().await?,
     );
 
-    // Pass P2P addresses to handler for get_node_addr RPC
-    let handler = Handler::new(handler_ep.clone(), node_id.to_string(), relay_urls, direct_addrs).await?;
+    // Build the shared iroh stack (blobs + gossip + docs) on the router endpoint.
+    let stack = meshd::mesh_stack::MeshStack::build(router_ep.clone()).await?;
+    let blobs_api = stack.blobs_api();
+    let docs_store = Arc::new(
+        meshd::docs::DocsStore::new(stack.docs.clone(), blobs_api).await?,
+    );
+    let gossip_store = Arc::new(meshd::gossip::GossipStore::new());
 
-    // Spawn P2P router — wired to the same queue and docs as the handler
+    // Pass P2P addresses to handler for get_node_addr RPC
+    let handler = Handler::new(
+        handler_ep.clone(),
+        docs_store.clone(),
+        gossip_store.clone(),
+        node_id.to_string(),
+        relay_urls,
+        direct_addrs,
+    )
+    .await?;
+
+    // Spawn P2P router — wired to the same queue and docs as the handler, and
+    // hosting docs + gossip ALPNs on the SAME router endpoint alongside riftor-mesh/0.
     let p2p_queue = handler.submission_queue();
     let p2p_docs = handler.doc_store();
-    let _router = meshd::p2p::spawn_router(router_ep, Some(p2p_queue), Some(p2p_docs));
+    let _router = meshd::p2p::spawn_router(
+        router_ep,
+        Some(p2p_queue),
+        Some(p2p_docs),
+        stack.docs.clone(),
+        stack.gossip.clone(),
+    );
     info!("P2P router started on ALPN: {:?}", String::from_utf8_lossy(meshd::p2p::ALPN));
 
     let stdin = io::stdin().lock();

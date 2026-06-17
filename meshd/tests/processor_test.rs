@@ -1,9 +1,28 @@
-use meshd::queue::{SubmissionQueue, Submission};
+use iroh::endpoint::Endpoint;
+use iroh_blobs::store::mem::MemStore;
+use iroh_docs::protocol::Docs;
+use iroh_gossip::net::Gossip;
 use meshd::docs::DocsStore;
 use meshd::llm::LlmConfig;
 use meshd::processor::{Processor, ProcessorMode};
+use meshd::queue::{Submission, SubmissionQueue};
 use serde_json::json;
 use std::sync::Arc;
+
+async fn mem_docs() -> Arc<DocsStore> {
+    let ep = Endpoint::builder(iroh::endpoint::presets::Minimal)
+        .bind()
+        .await
+        .unwrap();
+    let gossip = Gossip::builder().spawn(ep.clone());
+    let blobs = MemStore::new();
+    let docs = Docs::memory()
+        .spawn(ep, (*blobs).clone(), gossip)
+        .await
+        .unwrap();
+    let blobs_api = Arc::new((*blobs).clone());
+    Arc::new(DocsStore::new(docs, blobs_api).await.unwrap())
+}
 
 #[tokio::test]
 async fn test_queue_enqueue_dequeue() {
@@ -24,7 +43,7 @@ async fn test_queue_enqueue_dequeue() {
 #[tokio::test]
 async fn test_processor_validate_rejects_missing_title() {
     let queue = Arc::new(SubmissionQueue::new(10));
-    let docs = Arc::new(DocsStore::new());
+    let docs = mem_docs().await;
     let processor = Processor::new(
         queue.clone(), docs, LlmConfig::default(),
         ProcessorMode::Autonomous, 1,
@@ -50,7 +69,7 @@ async fn test_processor_validate_rejects_missing_title() {
 #[tokio::test]
 async fn test_processor_mode_persistence() {
     let queue = Arc::new(SubmissionQueue::new(10));
-    let docs = Arc::new(DocsStore::new());
+    let docs = mem_docs().await;
     let processor = Processor::new(
         queue, docs, LlmConfig::default(),
         ProcessorMode::Autonomous, 1,
@@ -74,7 +93,7 @@ async fn test_processor_mode_persistence() {
 #[tokio::test]
 async fn test_review_queue_operations() {
     let queue = Arc::new(SubmissionQueue::new(10));
-    let docs = Arc::new(DocsStore::new());
+    let docs = mem_docs().await;
     let processor = Processor::new(
         queue, docs, LlmConfig::default(),
         ProcessorMode::ReviewRequired, 1,
@@ -91,7 +110,7 @@ async fn test_review_queue_operations() {
 #[tokio::test]
 async fn test_processor_stats_defaults() {
     let queue = Arc::new(SubmissionQueue::new(10));
-    let docs = Arc::new(DocsStore::new());
+    let docs = mem_docs().await;
     let processor = Processor::new(
         queue, docs, LlmConfig::default(),
         ProcessorMode::Autonomous, 3,

@@ -20,6 +20,8 @@ pub struct Handler {
 impl Handler {
     pub async fn new(
         endpoint: Arc<iroh::endpoint::Endpoint>,
+        docs: Arc<crate::docs::DocsStore>,
+        gossip: Arc<crate::gossip::GossipStore>,
         p2p_node_id: String,
         p2p_relay_urls: Vec<String>,
         p2p_direct_addrs: Vec<String>,
@@ -33,9 +35,6 @@ impl Handler {
             identity_manager.public_key()
         );
 
-        let docs = Arc::new(crate::docs::DocsStore::new());
-        let gossip = Arc::new(crate::gossip::GossipStore::new());
-
         let engagement_manager = crate::engagement::EngagementManager::new(
             node_id.clone(),
             docs.clone(),
@@ -48,7 +47,7 @@ impl Handler {
         let llm_config = crate::llm::LlmConfig::default();
         let processor = Arc::new(Processor::new(
             queue.clone(),
-            docs,
+            docs.clone(),
             llm_config,
             ProcessorMode::Autonomous,
             1,
@@ -67,6 +66,7 @@ impl Handler {
         })
     }
 
+    #[cfg(test)]
     pub async fn new_with_processor(
         _queue: Arc<SubmissionQueue>,
         processor: Arc<Processor>,
@@ -82,7 +82,10 @@ impl Handler {
         );
         tracing::info!("Endpoint bound: {}", endpoint.id());
 
-        let docs = Arc::new(crate::docs::DocsStore::new());
+        let stack = crate::mesh_stack::MeshStack::build((*endpoint).clone()).await?;
+        let docs = Arc::new(
+            crate::docs::DocsStore::new(stack.docs.clone(), stack.blobs_api()).await?,
+        );
         let gossip = Arc::new(crate::gossip::GossipStore::new());
 
         let engagement_manager = crate::engagement::EngagementManager::new(
