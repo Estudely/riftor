@@ -3393,6 +3393,7 @@ dependencies = [
  "anyhow",
  "base64",
  "blake3",
+ "bytes",
  "chrono",
  "dirs",
  "futures",
