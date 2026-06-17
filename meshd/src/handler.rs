@@ -57,6 +57,7 @@ impl Handler {
             llm_config,
             ProcessorMode::Autonomous,
             1,
+            Some(gossip.clone()),
         ));
         let processor_clone = processor.clone();
         tokio::spawn(async move { processor_clone.start().await });

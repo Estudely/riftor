@@ -46,7 +46,7 @@ async fn test_processor_validate_rejects_missing_title() {
     let docs = mem_docs().await;
     let processor = Processor::new(
         queue.clone(), docs, LlmConfig::default(),
-        ProcessorMode::Autonomous, 1,
+        ProcessorMode::Autonomous, 1, None,
     );
 
     let _sub = Submission {
@@ -72,7 +72,7 @@ async fn test_processor_mode_persistence() {
     let docs = mem_docs().await;
     let processor = Processor::new(
         queue, docs, LlmConfig::default(),
-        ProcessorMode::Autonomous, 1,
+        ProcessorMode::Autonomous, 1, None,
     );
 
     let stats = processor.stats().await;
@@ -96,7 +96,7 @@ async fn test_review_queue_operations() {
     let docs = mem_docs().await;
     let processor = Processor::new(
         queue, docs, LlmConfig::default(),
-        ProcessorMode::ReviewRequired, 1,
+        ProcessorMode::ReviewRequired, 1, None,
     );
 
     // Initially empty
@@ -113,7 +113,7 @@ async fn test_processor_stats_defaults() {
     let docs = mem_docs().await;
     let processor = Processor::new(
         queue, docs, LlmConfig::default(),
-        ProcessorMode::Autonomous, 3,
+        ProcessorMode::Autonomous, 3, None,
     );
 
     let stats = processor.stats().await;

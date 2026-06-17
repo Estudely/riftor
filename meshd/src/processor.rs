@@ -46,6 +46,7 @@ pub struct Processor {
     mode: Mutex<ProcessorMode>,
     review_queue: Mutex<Vec<PendingDecision>>,
     worker_count: usize,
+    gossip: Option<Arc<crate::gossip::GossipStore>>,
 }
 
 impl Processor {
@@ -55,6 +56,7 @@ impl Processor {
         llm_config: LlmConfig,
         mode: ProcessorMode,
         worker_count: usize,
+        gossip: Option<Arc<crate::gossip::GossipStore>>,
     ) -> Self {
         let llm = Arc::new(LlmClient::new(llm_config));
         Self {
@@ -64,6 +66,7 @@ impl Processor {
             mode: Mutex::new(mode),
             review_queue: Mutex::new(Vec::new()),
             worker_count,
+            gossip,
         }
     }
 
@@ -245,6 +248,15 @@ impl Processor {
             doc_value["decision"] = json!(decision.decision);
             let _ = self.docs.insert(&engagement_id, "finding", &finding_key, doc_value).await;
             info!("Auto-published: {}", decision.submission_id);
+            if let Some(gossip) = &self.gossip {
+                let _ = gossip
+                    .broadcast(
+                        &engagement_id,
+                        "processed",
+                        serde_json::json!({"event": "finding_published", "key": finding_key}),
+                    )
+                    .await;
+            }
         }
     }
 
@@ -282,6 +294,15 @@ impl Processor {
             }
             doc_value["decision"] = json!(decision.decision);
             self.docs.insert(&decision.engagement_id, "finding", &finding_key, doc_value).await?;
+            if let Some(gossip) = &self.gossip {
+                let _ = gossip
+                    .broadcast(
+                        &decision.engagement_id,
+                        "processed",
+                        serde_json::json!({"event": "finding_published", "key": finding_key}),
+                    )
+                    .await;
+            }
         }
         Ok(())
     }
