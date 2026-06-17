@@ -29,6 +29,7 @@ class MeshProtocol:
         self._pending: dict[int, asyncio.Future[MeshResponse]] = {}
         self._read_task: asyncio.Task | None = None
         self._event_sink: Callable[[dict], Awaitable[None]] | None = None
+        self._event_tasks: set[asyncio.Task] = set()
 
     def set_event_sink(self, sink: Callable[[dict], Awaitable[None]] | None) -> None:
         """Register an async callback for pushed (non-Response) daemon lines."""
@@ -38,6 +39,8 @@ class MeshProtocol:
         self._read_task = asyncio.create_task(self._read_loop())
 
     async def stop(self) -> None:
+        for task in list(self._event_tasks):
+            task.cancel()
         if self._read_task:
             self._read_task.cancel()
             try:
@@ -98,9 +101,20 @@ class MeshProtocol:
                         ))
             elif self._event_sink is not None:
                 # Pushed lines (gossip-derived MeshEvent lines, etc.) have no
-                # pending request to resolve — hand them to the event sink.
-                try:
-                    await self._event_sink(data)
-                except Exception:
-                    pass
+                # pending request to resolve. Dispatch the sink in its own task
+                # rather than awaiting it here: a sink handler may itself issue
+                # an RPC (e.g. get_state on a 'processed' event), whose response
+                # can only be resolved by this read loop — awaiting inline would
+                # deadlock until the request times out.
+                task = asyncio.create_task(self._dispatch_event(data))
+                self._event_tasks.add(task)
+                task.add_done_callback(self._event_tasks.discard)
+
+    async def _dispatch_event(self, data: dict) -> None:
+        if self._event_sink is None:
+            return
+        try:
+            await self._event_sink(data)
+        except Exception:
+            pass
 

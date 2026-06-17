@@ -240,15 +240,18 @@ impl Processor {
             info!("Decision queued for review: {}", decision.submission_id);
             queue.push(decision);
         } else {
-            let finding_key = format!("finding/{}", decision.submission_id);
             let mut doc_value = decision.finding.clone();
             if let Some(sev) = &decision.severity {
                 doc_value["severity"] = json!(sev);
             }
             doc_value["decision"] = json!(decision.decision);
-            let _ = self.docs.insert(&engagement_id, "finding", &finding_key, doc_value).await;
+            let _ = self
+                .docs
+                .insert(&engagement_id, "finding", &decision.submission_id, doc_value)
+                .await;
             info!("Auto-published: {}", decision.submission_id);
             if let Some(gossip) = &self.gossip {
+                let finding_key = format!("finding/{}", decision.submission_id);
                 let _ = gossip
                     .broadcast(
                         &engagement_id,
@@ -287,14 +290,16 @@ impl Processor {
         let mut queue = self.review_queue.lock().await;
         if let Some(pos) = queue.iter().position(|d| d.submission_id == submission_id) {
             let decision = queue.remove(pos);
-            let finding_key = format!("finding/{}", decision.submission_id);
             let mut doc_value = decision.finding.clone();
             if let Some(sev) = &decision.severity {
                 doc_value["severity"] = json!(sev);
             }
             doc_value["decision"] = json!(decision.decision);
-            self.docs.insert(&decision.engagement_id, "finding", &finding_key, doc_value).await?;
+            self.docs
+                .insert(&decision.engagement_id, "finding", &decision.submission_id, doc_value)
+                .await?;
             if let Some(gossip) = &self.gossip {
+                let finding_key = format!("finding/{}", decision.submission_id);
                 let _ = gossip
                     .broadcast(
                         &decision.engagement_id,
