@@ -63,7 +63,12 @@ impl MeshStack {
         dir: &PathBuf,
     ) -> anyhow::Result<(Docs, Arc<iroh_blobs::api::Store>)> {
         tokio::fs::create_dir_all(dir).await?;
-        let blobs = FsStore::load(dir.join("blobs")).await?;
+        let blobs = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            FsStore::load(dir.join("blobs")),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("blobs store open timed out (is another daemon running?)"))??;
         let blobs_api = Arc::new((*blobs).clone());
         let docs = Docs::persistent(dir.clone())
             .spawn(endpoint.clone(), (*blobs).clone(), gossip.clone())
