@@ -42,6 +42,7 @@ pub struct EngagementManager {
     node_id: String,
     relay_urls: Vec<String>,
     direct_addresses: Vec<String>,
+    event_sink: Option<tokio::sync::mpsc::UnboundedSender<crate::protocol::Event>>,
 }
 
 impl EngagementManager {
@@ -59,7 +60,44 @@ impl EngagementManager {
             node_id,
             relay_urls: endpoint_addr.relay_urls().map(|u| u.to_string()).collect(),
             direct_addresses: endpoint_addr.ip_addrs().map(|a| a.to_string()).collect(),
+            event_sink: None,
         }
+    }
+
+    /// Register the sink that gossip-derived events are forwarded to. Optional:
+    /// without a sink (tests/headless), receive loops still run but drop events.
+    pub fn set_event_sink(
+        &mut self,
+        tx: tokio::sync::mpsc::UnboundedSender<crate::protocol::Event>,
+    ) {
+        self.event_sink = Some(tx);
+    }
+
+    /// Spawn a task that decodes incoming gossip messages on a topic and
+    /// forwards them as `MeshEvent`s to the event sink (if any).
+    fn spawn_receive_loop(
+        &self,
+        engagement_id: String,
+        subtopic: String,
+        mut receiver: iroh_gossip::api::GossipReceiver,
+    ) {
+        let sink = self.event_sink.clone();
+        tokio::spawn(async move {
+            use futures::StreamExt;
+            while let Some(ev) = receiver.next().await {
+                if let Ok(iroh_gossip::api::Event::Received(m)) = ev {
+                    if let Ok(payload) = serde_json::from_slice::<serde_json::Value>(&m.content) {
+                        if let Some(sink) = &sink {
+                            let _ = sink.send(crate::protocol::Event::MeshEvent {
+                                engagement_id: engagement_id.clone(),
+                                subtopic: subtopic.clone(),
+                                payload,
+                            });
+                        }
+                    }
+                }
+            }
+        });
     }
 
     pub async fn create(&self, name: String) -> anyhow::Result<EngagementMeta> {
@@ -72,10 +110,11 @@ impl EngagementManager {
             .await
             .map(|n| n.to_string())
             .unwrap_or_default();
-        self.gossip.join(&id, "submit").await?;
-        self.gossip.join(&id, "activity").await?;
-        self.gossip.join(&id, "presence").await?;
-        self.gossip.join(&id, "processed").await?;
+        let bootstrap: Vec<iroh::EndpointId> = Vec::new();
+        for sub in ["submit", "activity", "presence", "processed"] {
+            let recv = self.gossip.join(&id, sub, bootstrap.clone()).await?;
+            self.spawn_receive_loop(id.clone(), sub.to_string(), recv);
+        }
 
         let meta = EngagementMeta {
             id: id.clone(),
@@ -143,19 +182,21 @@ impl EngagementManager {
             self.docs.open(&invite.engagement_id).await?;
         }
 
-        // Join gossip topics
-        self.gossip
-            .join(&invite.engagement_id, "submit")
-            .await?;
-        self.gossip
-            .join(&invite.engagement_id, "activity")
-            .await?;
-        self.gossip
-            .join(&invite.engagement_id, "presence")
-            .await?;
-        self.gossip
-            .join(&invite.engagement_id, "processed")
-            .await?;
+        // Join gossip topics, bootstrapping from the inviter's EndpointId.
+        let bootstrap: Vec<iroh::EndpointId> = match invite.node_id.parse::<iroh::EndpointId>() {
+            Ok(id) => vec![id],
+            Err(e) => {
+                tracing::warn!("bad inviter node_id '{}' in invite: {e}; bootstrapping empty", invite.node_id);
+                Vec::new()
+            }
+        };
+        for sub in ["submit", "activity", "presence", "processed"] {
+            let recv = self
+                .gossip
+                .join(&invite.engagement_id, sub, bootstrap.clone())
+                .await?;
+            self.spawn_receive_loop(invite.engagement_id.clone(), sub.to_string(), recv);
+        }
 
         let meta = EngagementMeta {
             id: invite.engagement_id.clone(),

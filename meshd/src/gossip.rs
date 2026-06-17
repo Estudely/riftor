@@ -121,14 +121,12 @@ mod tests {
                     .await
                     .unwrap();
             }
-            if let Ok(Some(ev)) =
+            if let Ok(Some(Ok(Event::Received(m)))) =
                 tokio::time::timeout(Duration::from_millis(200), recv_b.next()).await
             {
-                if let Ok(Event::Received(m)) = ev {
-                    let v: Value = serde_json::from_slice(&m.content).unwrap();
-                    got = Some(v);
-                    break;
-                }
+                let v: Value = serde_json::from_slice(&m.content).unwrap();
+                got = Some(v);
+                break;
             }
         }
         assert_eq!(got.unwrap()["msg"], "hello");

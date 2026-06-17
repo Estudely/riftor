@@ -25,6 +25,9 @@ impl Handler {
         p2p_node_id: String,
         p2p_relay_urls: Vec<String>,
         p2p_direct_addrs: Vec<String>,
+        event_sink: Option<
+            tokio::sync::mpsc::UnboundedSender<crate::protocol::Event>,
+        >,
     ) -> anyhow::Result<Self> {
         let identity_manager = crate::identity::IdentityManager::load_or_create().await?;
         let node_id = endpoint.id().to_string();
@@ -35,12 +38,15 @@ impl Handler {
             identity_manager.public_key()
         );
 
-        let engagement_manager = crate::engagement::EngagementManager::new(
+        let mut engagement_manager = crate::engagement::EngagementManager::new(
             node_id.clone(),
             docs.clone(),
             gossip.clone(),
             endpoint.clone(),
         );
+        if let Some(tx) = event_sink {
+            engagement_manager.set_event_sink(tx);
+        }
 
         let queue = Arc::new(SubmissionQueue::new(256));
 
@@ -86,7 +92,7 @@ impl Handler {
         let docs = Arc::new(
             crate::docs::DocsStore::new(stack.docs.clone(), stack.blobs_api()).await?,
         );
-        let gossip = Arc::new(crate::gossip::GossipStore::new());
+        let gossip = Arc::new(crate::gossip::GossipStore::new(stack.gossip.clone()));
 
         let engagement_manager = crate::engagement::EngagementManager::new(
             node_id,

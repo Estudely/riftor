@@ -24,9 +24,13 @@ pub struct ResponseError {
 }
 
 #[derive(Debug, Serialize)]
-pub struct Event {
-    pub event: String,
-    pub data: Value,
+#[serde(tag = "type")]
+pub enum Event {
+    MeshEvent {
+        engagement_id: String,
+        subtopic: String,
+        payload: Value,
+    },
 }
 
 pub fn read_request(line: &str) -> Result<Request, serde_json::Error> {

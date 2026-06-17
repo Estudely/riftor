@@ -50,7 +50,14 @@ async fn main() -> anyhow::Result<()> {
     let docs_store = Arc::new(
         meshd::docs::DocsStore::new(stack.docs.clone(), blobs_api.clone()).await?,
     );
-    let gossip_store = Arc::new(meshd::gossip::GossipStore::new());
+    let gossip_store = Arc::new(meshd::gossip::GossipStore::new(stack.gossip.clone()));
+
+    // Channel for daemon-originated events (e.g. gossip-derived MeshEvents).
+    // A dedicated task drains it to stdout as JSON lines so the Python TUI can
+    // consume live updates. Created before the handler so the engagement
+    // manager can be given the sink.
+    let (event_tx, mut event_rx) =
+        tokio::sync::mpsc::unbounded_channel::<meshd::protocol::Event>();
 
     // Pass P2P addresses to handler for get_node_addr RPC
     let handler = Handler::new(
@@ -60,6 +67,7 @@ async fn main() -> anyhow::Result<()> {
         node_id.to_string(),
         relay_urls,
         direct_addrs,
+        Some(event_tx),
     )
     .await?;
 
@@ -79,6 +87,23 @@ async fn main() -> anyhow::Result<()> {
         blobs_proto,
     );
     info!("P2P router started on ALPN: {:?}", String::from_utf8_lossy(meshd::p2p::ALPN));
+
+    // Drain daemon-originated events to stdout as JSON lines. This task uses its
+    // OWN stdout handle rather than sharing the request loop's locked handle:
+    // the request loop holds an exclusive `io::stdout().lock()` for its whole
+    // duration, so sharing would deadlock. Each event is a single complete JSON
+    // line, and writes flush while the request loop is idle waiting on stdin —
+    // good enough atomicity for the Python line-reader.
+    tokio::spawn(async move {
+        use std::io::Write;
+        let mut out = std::io::stdout();
+        while let Some(ev) = event_rx.recv().await {
+            if let Ok(json) = serde_json::to_string(&ev) {
+                let _ = writeln!(out, "{json}");
+                let _ = out.flush();
+            }
+        }
+    });
 
     let stdin = io::stdin().lock();
     let mut stdout = io::stdout().lock();
