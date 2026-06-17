@@ -9,6 +9,7 @@ import asyncio
 import os
 import signal
 import logging
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from riftor.mesh.protocol import MeshProtocol, MeshResponse
@@ -23,6 +24,16 @@ class MeshDaemon:
         self._binary_path = binary_path or self._find_binary()
         self._process: asyncio.subprocess.Process | None = None
         self._protocol: MeshProtocol | None = None
+        self._event_sink: Callable[[dict], Awaitable[None]] | None = None
+
+    def set_event_sink(self, sink: Callable[[dict], Awaitable[None]] | None) -> None:
+        """Register a callback for pushed daemon lines (e.g. MeshEvent lines).
+
+        Safe to call before or after :meth:`start`.
+        """
+        self._event_sink = sink
+        if self._protocol is not None:
+            self._protocol.set_event_sink(sink)
 
     @property
     def protocol(self) -> MeshProtocol:
@@ -57,6 +68,8 @@ class MeshDaemon:
             self._process.stdout,   # StreamReader
             self._process.stdin,    # StreamWriter-like (has write + drain)
         )
+        if self._event_sink is not None:
+            self._protocol.set_event_sink(self._event_sink)
         await self._protocol.start()
         logger.info("riftor-meshd started")
 

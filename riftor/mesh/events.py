@@ -19,6 +19,11 @@ class MeshEventHandler:
             "engagement_created": [],
             "engagement_joined": [],
             "daemon_started": [],
+            # gossip-derived subtopics emitted by the daemon as MeshEvent lines
+            "processed": [],
+            "activity": [],
+            "presence": [],
+            "submit": [],
         }
 
     def on(self, event: str, callback: MeshCallback) -> None:
@@ -36,3 +41,27 @@ class MeshEventHandler:
                 await cb(event, data)
             except Exception:
                 logger.exception("Error in mesh event handler for %s", event)
+
+
+async def route_mesh_line(data: dict, handler: MeshEventHandler) -> bool:
+    """Route a parsed daemon stdout line to the event handler.
+
+    Recognizes gossip-derived ``MeshEvent`` lines of the shape::
+
+        {"type": "MeshEvent", "engagement_id": ..., "subtopic": ..., "payload": ...}
+
+    and dispatches them to ``handler`` keyed by ``subtopic``. Non-MeshEvent
+    lines (e.g. ``Response`` lines) are ignored. Returns ``True`` if the line
+    was a MeshEvent that got dispatched, ``False`` otherwise.
+    """
+    if not isinstance(data, dict) or data.get("type") != "MeshEvent":
+        return False
+    subtopic = data.get("subtopic")
+    if not subtopic:
+        return False
+    body = {
+        "engagement_id": data.get("engagement_id"),
+        "payload": data.get("payload"),
+    }
+    await handler.dispatch(subtopic, body)
+    return True

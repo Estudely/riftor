@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from riftor.mesh.daemon import MeshDaemon
 from riftor.mesh.client import MeshClient
-from riftor.mesh.events import MeshEventHandler
+from riftor.mesh.events import MeshEventHandler, route_mesh_line
 from riftor.mesh.models import (
     MeshEngagementState, EngagementMeta, MeshFinding,
 )
@@ -40,10 +40,15 @@ class MeshManager:
     async def start(self) -> None:
         if self._running:
             return
+        self._daemon.set_event_sink(self._on_daemon_line)
         await self._daemon.start()
         self._client = MeshClient(self._daemon)
         self._running = True
         await self._events.dispatch("daemon_started", {})
+
+    async def _on_daemon_line(self, data: dict) -> None:
+        """Route a pushed daemon line to the event handler (MeshEvent lines)."""
+        await route_mesh_line(data, self._events)
 
     async def stop(self) -> None:
         if not self._running:

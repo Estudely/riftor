@@ -412,6 +412,7 @@ class RiftorApp(App):
             sidebar.set_manager(self.mesh_manager)
             sidebar.update_connection_status(True)
             register_mesh_commands(self, self.mesh_manager)
+            self._wire_mesh_events(self.mesh_manager, sidebar)
             self._note(f"Mesh ready: {identity.get('node_id', 'unknown')[:12]}...")
         except RuntimeError as e:
             self._note(f"Mesh unavailable (daemon not found): {e}")
@@ -914,6 +915,33 @@ class RiftorApp(App):
             return
         sidebar = self.query_one(MeshSidebar)
         sidebar.update_members(state.members)
+
+    def _wire_mesh_events(self, manager, sidebar: MeshSidebar) -> None:
+        """Register live handlers for gossip-derived MeshEvent subtopics."""
+
+        async def on_processed(event: str, data: dict) -> None:
+            try:
+                await manager.refresh_state()
+                self._update_mesh_sidebar()
+            except Exception:  # noqa: BLE001
+                pass
+            payload = data.get("payload") or {}
+            key = payload.get("key") or payload.get("event") or "finding"
+            sidebar.add_activity(f"\u2713 finding: {key}")
+
+        async def on_activity(event: str, data: dict) -> None:
+            payload = data.get("payload") or {}
+            text = payload.get("message") or payload.get("event") or str(payload)
+            sidebar.add_activity(text)
+
+        async def on_presence(event: str, data: dict) -> None:
+            state = manager.current_state
+            if state is not None:
+                sidebar.update_members(state.members)
+
+        manager.events.on("processed", on_processed)
+        manager.events.on("activity", on_activity)
+        manager.events.on("presence", on_presence)
 
     async def _mount(self, widget) -> None:
         await self.chat.mount(widget)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 
@@ -27,6 +28,11 @@ class MeshProtocol:
         self._next_id = 0
         self._pending: dict[int, asyncio.Future[MeshResponse]] = {}
         self._read_task: asyncio.Task | None = None
+        self._event_sink: Callable[[dict], Awaitable[None]] | None = None
+
+    def set_event_sink(self, sink: Callable[[dict], Awaitable[None]] | None) -> None:
+        """Register an async callback for pushed (non-Response) daemon lines."""
+        self._event_sink = sink
 
     async def start(self) -> None:
         self._read_task = asyncio.create_task(self._read_loop())
@@ -77,9 +83,10 @@ class MeshProtocol:
             except json.JSONDecodeError:
                 continue
 
-            if "event" in data:
-                pass  # Events handled externally
-            elif "id" in data:
+            if not isinstance(data, dict):
+                continue
+
+            if "id" in data and data.get("type") != "MeshEvent":
                 req_id = data.get("id")
                 if req_id is not None and req_id in self._pending:
                     future = self._pending[req_id]
@@ -89,4 +96,11 @@ class MeshProtocol:
                             result=data.get("result"),
                             error=data.get("error"),
                         ))
+            elif self._event_sink is not None:
+                # Pushed lines (gossip-derived MeshEvent lines, etc.) have no
+                # pending request to resolve — hand them to the event sink.
+                try:
+                    await self._event_sink(data)
+                except Exception:
+                    pass
 
