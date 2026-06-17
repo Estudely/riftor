@@ -24,6 +24,7 @@ class MeshManager:
         self._events = MeshEventHandler()
         self._current_engagement: MeshEngagementState | None = None
         self._running = False
+        self._members: dict[str, dict] = {}  # node_id -> {"node_id": str, "last_seen": str, "online": bool}
 
     @property
     def events(self) -> MeshEventHandler:
@@ -36,6 +37,18 @@ class MeshManager:
     @property
     def running(self) -> bool:
         return self._running
+
+    def update_member_presence(self, node_id: str, ts: str) -> None:
+        """Track a presence heartbeat from a peer node."""
+        self._members[node_id] = {
+            "node_id": node_id,
+            "last_seen": ts,
+            "online": True,
+        }
+
+    @property
+    def members(self) -> list[dict]:
+        return list(self._members.values())
 
     async def start(self) -> None:
         if self._running:

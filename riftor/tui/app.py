@@ -935,9 +935,12 @@ class RiftorApp(App):
             sidebar.add_activity(text)
 
         async def on_presence(event: str, data: dict) -> None:
-            state = manager.current_state
-            if state is not None:
-                sidebar.update_members(state.members)
+            payload = data.get("payload") or {}
+            node_id = payload.get("node_id")
+            ts = payload.get("ts", "")
+            if node_id:
+                manager.update_member_presence(node_id, ts)
+            sidebar.update_members(manager.members)
 
         manager.events.on("processed", on_processed)
         manager.events.on("activity", on_activity)

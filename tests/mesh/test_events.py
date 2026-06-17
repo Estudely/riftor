@@ -1,5 +1,6 @@
 """Tests for mesh event handling and daemon line routing."""
 import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from riftor.mesh.events import MeshEventHandler, route_mesh_line
 
@@ -128,3 +129,36 @@ async def _until(pred):
 
     while not pred():
         await asyncio.sleep(0.01)
+
+
+@pytest.mark.asyncio
+@patch("riftor.mesh.manager.MeshDaemon")
+async def test_presence_updates_member_list(mock_daemon_cls):
+    """A presence heartbeat should populate the manager's members map."""
+    mock_daemon = MagicMock()
+    mock_daemon.start = AsyncMock()
+    mock_daemon.stop = AsyncMock()
+    mock_daemon_cls.return_value = mock_daemon
+
+    from riftor.mesh.manager import MeshManager
+
+    manager = MeshManager()
+    await manager.start()
+
+    assert manager.members == []
+
+    manager.update_member_presence("node-abc", "2026-06-17T00:00:00Z")
+    members = manager.members
+    assert len(members) == 1
+    assert members[0]["node_id"] == "node-abc"
+    assert members[0]["last_seen"] == "2026-06-17T00:00:00Z"
+    assert members[0]["online"] is True
+
+    manager.update_member_presence("node-xyz", "2026-06-17T00:00:15Z")
+    assert len(manager.members) == 2
+
+    manager.update_member_presence("node-abc", "2026-06-17T00:00:30Z")
+    assert len(manager.members) == 2
+    assert manager.members[0]["last_seen"] == "2026-06-17T00:00:30Z"
+
+    await manager.stop()
