@@ -100,6 +100,28 @@ impl EngagementManager {
         });
     }
 
+    /// Spawn a fire-and-forget task that broadcasts a `presence` heartbeat
+    /// every 15s. Best-effort: broadcast errors are ignored and the task
+    /// never panics or blocks engagement creation.
+    fn spawn_presence(&self, engagement_id: String, node_id: String, gossip: Arc<GossipStore>) {
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(15));
+            // Skip the immediate first tick so we don't broadcast before
+            // settling; subsequent ticks fire every 15s.
+            tick.tick().await;
+            loop {
+                tick.tick().await;
+                let _ = gossip
+                    .broadcast(
+                        &engagement_id,
+                        "presence",
+                        json!({"node_id": node_id, "ts": chrono::Utc::now().to_rfc3339()}),
+                    )
+                    .await;
+            }
+        });
+    }
+
     pub async fn create(&self, name: String) -> anyhow::Result<EngagementMeta> {
         let id = Uuid::new_v4().to_string();
 
@@ -115,6 +137,8 @@ impl EngagementManager {
             let recv = self.gossip.join(&id, sub, bootstrap.clone()).await?;
             self.spawn_receive_loop(id.clone(), sub.to_string(), recv);
         }
+
+        self.spawn_presence(id.clone(), self.node_id.clone(), self.gossip.clone());
 
         let meta = EngagementMeta {
             id: id.clone(),
@@ -197,6 +221,12 @@ impl EngagementManager {
                 .await?;
             self.spawn_receive_loop(invite.engagement_id.clone(), sub.to_string(), recv);
         }
+
+        self.spawn_presence(
+            invite.engagement_id.clone(),
+            self.node_id.clone(),
+            self.gossip.clone(),
+        );
 
         let meta = EngagementMeta {
             id: invite.engagement_id.clone(),
