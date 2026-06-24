@@ -153,9 +153,11 @@ class PromptInput(Input):
 _COMMANDS = [
     "/help", "/clear", "/model", "/stage", "/scope", "/findings", "/finding",
     "/edit-finding", "/delete-finding", "/hosts", "/services", "/report",
-    "/sessions", "/resume", "/new", "/theme", "/config", "/tools", "/permissions",
-    "/lore", "/genz", "/cost", "/retry", "/continue", "/compact", "/copy", "/show",
-    "/timeline", "/audit", "/export", "/conversation", "/doctor", "/review", "/hypotheses", "/lesson", "/lessons", "/memory", "/template", "/browser", "/clearlog", "/screenshots", "/exit",
+    "/sessions", "/resume", "/new", "/theme", "/config", "/tools", "/skills",
+    "/permissions", "/lore", "/genz", "/cost", "/retry", "/continue",
+    "/compact", "/timeline", "/audit", "/export", "/conversation",
+    "/doctor", "/review", "/memory", "/template", "/browser",
+    "/screenshots", "/exit",
 ]
 
 HELP = """\
@@ -165,7 +167,6 @@ _Conversation_
 - `/help` — show this help · `/clear` — clear conversation (`Ctrl+L`)
 - `/retry` — re-run the last turn · `/continue [N]` — extend the step budget
 - `/compact` — shrink old tool output to free context
-- `/copy` — copy the last agent/tool output · `/show <id>` — expand a tool result
 - `/cost` — token + cost for this session
 - `/conversation` — export the full conversation as markdown
 
@@ -178,23 +179,25 @@ _Engagement_
 - `/hosts` · `/services` — discovered infrastructure
 - `/report [md|html|json|sarif|both|all]` — write a report to `.riftor/reports/`
 - `/timeline` — engagement activity log · `/export` — archive the whole engagement
-- `/memory` — durable notes for this engagement · `/memory add [tag] <text>` · `/memory rm <id>` · `/memory clear`
-- `/template [webapp|api|network|ad]` — apply an engagement playbook (sets stage + guides the agent) · `/template off`
+- `/memory [add <tag> <text>|rm <id>|clear]` — engagement notes, hypotheses, and durable lessons
+- `/template [webapp|api|network|ad]` — apply an engagement playbook · `/template off`
+
+_Skills_
+- `/skills` — browse the 351 built-in pentest skills by domain
+- `/skills search <q>` — keyword search (e.g. `/skills search sqli`)
+- `/skills load <name>` — load a full practitioner workflow
+- `/skills group <domain>` — filter by domain (e.g. `red-teaming`, `api-security`)
 
 _Settings & sessions_
-- `/model [name]` — show or switch the model · `/theme [name]` (dark: rift/dusk/void/fracture/singularity · light: dawn/paper)
+- `/model [name]` — show or switch the model · `/theme [name]` (rift/dusk/void/fracture/singularity/dawn/paper)
 - `/config` — settings panel · `/permissions` — review allow/deny rules
 - `/lore` — toggle the rift persona · `/genz` — toggle Gen Z / Chakla Baaj mode 🦅
 - `/audit` — recent tool-call audit log
 - `/doctor` — check which external recon tools (nmap/httpx/…) are installed
-- `/browser [headed|headless|close]` — browser status / mode / teardown
-- `/screenshots` — browse, view, and delete browser screenshots
+- `/browser [headed|headless|close]` — browser mode / teardown · `/screenshots` — view captures
 - `/review` — self-critique findings for false positives before reporting
-- `/hypotheses` — list tracked hypotheses (open leads)
-- `/lesson <text>` — teach a durable lesson (persists across sessions)
-- `/lessons` — list all saved lessons
 - `/sessions` · `/resume <id>` · `/new` — manage saved sessions
-- `/tools` — list tools · `/exit` — quit (`Ctrl+C`)
+- `/tools` — list available agent tools · `/exit` — quit (`Ctrl+C`)
 
 Type anything else to task the agent. `↑/↓` recall input · `PgUp/PgDn` scroll ·
 `Esc` cancels a running response. Drag to select text, `Ctrl+Y` copies it.
@@ -204,6 +207,7 @@ Type anything else to task the agent. `↑/↓` recall input · `PgUp/PgDn` scro
 # (command, display, help) for the Ctrl+P command palette.
 _PALETTE_COMMANDS = [
     ("/help", "Help", "Show all commands"),
+    ("/skills", "Skills", "Browse 351 pentest workflows"),
     ("/findings", "Findings", "List findings (severity-sorted)"),
     ("/hosts", "Hosts", "List discovered hosts"),
     ("/services", "Services", "List discovered services"),
@@ -723,6 +727,7 @@ class RiftorApp(App):
         handlers = {
             "/help": lambda: self._markdown(HELP),
             "/tools": self._tools_cmd,
+            "/skills": lambda: self._skills_cmd(arg),
             "/clear": self.action_clear,
             "/lore": self._lore_cmd,
             "/genz": self._genz_cmd,
@@ -784,6 +789,51 @@ class RiftorApp(App):
             for t in self.tools
         )
         self._markdown(f"**tools**\n\n{listing}")
+
+    def _skills_cmd(self, arg: str) -> None:
+        """/skills [search <q>|load <name>|group <domain>] — browse/search pentest skills."""
+        parts = arg.split(maxsplit=1)
+        sub = parts[0].lower() if parts else ""
+        rest = parts[1] if len(parts) > 1 else ""
+        try:
+            from riftor.tools.engagement import _discover_skills, _format_skill_list, _load_skill_file
+            entry_map, all_entries = _discover_skills(self.config, self.engagement)
+            if not all_entries:
+                self._note("no skills found — built-in skills may not be installed")
+                return
+            if sub == "search":
+                ql = rest.lower().replace(" ", "-").replace("_", "-")
+                candidates = [e for e in all_entries if ql in e[0].lower()]
+                if not candidates:
+                    candidates = [e for e in all_entries
+                                  if any(ql in str(t).lower() for t in e[3] if t) or ql in e[2].lower()]
+                if len(candidates) == 1:
+                    result = _load_skill_file(candidates[0])
+                    self._markdown(result.content)
+                elif candidates:
+                    result = _format_skill_list(candidates, f"Matches for '{rest}':", max_skills=20)
+                    self._markdown(result.content)
+                else:
+                    self._note(f"no skills matching '{rest}'")
+            elif sub == "load":
+                matches = [e for e in all_entries if e[0] == rest]
+                if matches:
+                    result = _load_skill_file(matches[0])
+                    self._markdown(result.content)
+                else:
+                    self._note(f"skill '{rest}' not found — try /skills search")
+            elif sub == "group":
+                filtered = [e for e in all_entries if rest.lower() in e[4].lower() or rest.lower() in e[1].lower()]
+                if filtered:
+                    result = _format_skill_list(filtered, f"Skills in '{rest}':", max_skills=50)
+                    self._markdown(result.content)
+                else:
+                    self._note(f"no skills in domain '{rest}' — try /skills to browse")
+            else:
+                result = _format_skill_list(all_entries, f"Available skills ({len(all_entries)}):", max_skills=50)
+                self._markdown(result.content)
+        except Exception as e:
+            self._note(f"skills error: {e}")
 
     def _lore_cmd(self) -> None:
         self.config.lore = not self.config.lore
