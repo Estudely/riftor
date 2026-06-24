@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from riftor.engagement.cvss import base_score, severity_from_score
@@ -457,58 +458,241 @@ class GenerateReportTool(Tool):
         return ToolResult("wrote report:\n" + "\n".join(str(p) for p in paths))
 
 
+def _discover_skills(config, engagement) -> tuple[dict, list]:
+    """Discover skills from built-in, config, and engagement roots.
+
+    Returns (name_to_entry, all_entries) where each entry is
+    (kebab_name, display_title, description, tags, subdomain, path).
+    First root wins on name collisions.
+    """
+    import os
+    from importlib import resources
+
+    discovered: list[tuple[str, str, str, list[str], str, Path]] = []
+    seen: set[str] = set()
+
+    roots: list[Path] = []
+    try:
+        pkg_skills = resources.files("riftor.skills")
+        if pkg_skills.is_dir() and (pkg_skills / "index.json").is_file():
+            roots.append(Path(str(pkg_skills)))
+    except Exception:
+        pass
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    roots.append(Path(base) / "riftor" / "skills")
+    if engagement:
+        roots.append(engagement.dir / "skills")
+    if config and config.skills_dir:
+        roots.append(Path(config.skills_dir).expanduser())
+
+    for root in roots:
+        if not root.exists():
+            continue
+        if (root / "skills").is_dir():
+            skills_subdir = root / "skills"
+            index_path = root / "index.json"
+        elif (root / "index.json").is_file() and any(root.glob("*/SKILL.md")):
+            skills_subdir = root
+            index_path = root / "index.json"
+        else:
+            skills_subdir = None
+            index_path = None
+
+        if skills_subdir and skills_subdir.is_dir():
+            index_data = None
+            if index_path and index_path.is_file():
+                try:
+                    index_data = json.loads(index_path.read_text())
+                except (json.JSONDecodeError, OSError):
+                    pass
+            if index_data:
+                entries = index_data.get("skills", [])
+                for entry in entries:
+                    kname = entry.get("name", "")
+                    if kname in seen:
+                        continue
+                    desc = entry.get("description", "")
+                    tags_list = entry.get("tags", [])
+                    subd = entry.get("subdomain", "")
+                    skill_path = root / entry.get("path", f"skills/{kname}")
+                    # Resolve subdomain from SKILL.md if index lacks it
+                    if not subd and skill_path.is_dir():
+                        meta = _read_frontmatter(skill_path / "SKILL.md")
+                        subd = meta.get("subdomain", "")
+                    discovered.append((kname, kname, desc, tags_list, subd, skill_path))
+                    seen.add(kname)
+            else:
+                for skill_md in sorted(skills_subdir.glob("*/SKILL.md")):
+                    name_dir = skill_md.parent.name
+                    if name_dir in seen:
+                        continue
+                    meta = _read_frontmatter(skill_md)
+                    desc = meta.get("description", "").strip()
+                    tags_list = meta.get("tags", [])
+                    subd = meta.get("subdomain", "")
+                    discovered.append(
+                        (name_dir, meta.get("name", name_dir), desc, tags_list, subd, skill_md)
+                    )
+                    seen.add(name_dir)
+        else:
+            for mdfile in sorted(root.glob("*.md")):
+                flat_name = mdfile.stem
+                if flat_name in seen:
+                    continue
+                meta = _read_frontmatter(mdfile)
+                title = meta.get("name", flat_name)
+                desc = meta.get("description", "").strip()
+                tags_list = meta.get("tags", [])
+                subd = meta.get("subdomain", "")
+                discovered.append((flat_name, title, desc, tags_list, subd, mdfile))
+                seen.add(flat_name)
+
+    return {e[0]: e for e in discovered}, discovered
+
+
 class LoadSkillTool(Tool):
     name = "load_skill"
     description = (
-        "Load an operator-provided methodology skill for a domain, if one exists. "
-        "Skills carry checklists, payloads, tool commands, and evidence standards "
-        "(e.g. recon, exploitation, payloads, reporting). When a matching skill is "
-        "available, prefer it; if none is found this returns the list of available "
-        "skills (which may be empty) — just proceed with your own judgment."
+        "Load a pentest methodology skill, if one is available. Skills carry "
+        "step-by-step workflows, tool commands, prerequisites, and verification "
+        "checklists written by practitioners. Call with `name` to search (e.g. "
+        "'recon', 'pentest', 'sqli', 'kerberoasting', 'AD' — partial match OK). "
+        "Call with `group` set to a domain (e.g. 'penetration-testing', "
+        "'web-application-security', 'red-teaming') or `list` to browse the catalog. "
+        "When a skill is found, prefer its workflow over working from memory. "
+        "If nothing matches, just proceed with your own judgment."
     )
     parameters = {
         "type": "object",
         "properties": {
             "name": {
                 "type": "string",
-                "description": "Skill name (e.g. 'recon', 'exploitation', 'payloads', 'reporting')",
+                "description": (
+                    "Skill name or keyword to search (partial match OK). Examples: "
+                    "'recon', 'pentest', 'sqli', 'kerberoasting', 'volatility'. "
+                    "Use 'list' or omit for a catalog overview."
+                ),
+            },
+            "group": {
+                "type": "string",
+                "description": (
+                    "Filter by domain/subdomain. Examples: 'penetration-testing', "
+                    "'web-application-security', 'red-teaming', 'digital-forensics', "
+                    "'cloud-security', 'api-security'. Use with or without `name`."
+                ),
             },
         },
-        "required": ["name"],
     }
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
-        import os
-        skill_name = str(args.get("name", "")).strip().lower()
-        if not skill_name:
-            return ToolResult("error: skill name is required", is_error=True)
-        if not skill_name.endswith(".md"):
-            skill_name += ".md"
+        query = str(args.get("name", "")).strip()
+        group_filter = str(args.get("group", "")).strip().lower()
+        list_mode = not query or query.lower() in ("list", "")
 
-        # Search in XDG config skills dir, then engagement dir
-        search_paths = []
-        base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
-        search_paths.append(Path(base) / "riftor" / "skills" / skill_name)
-        if ctx.engagement:
-            search_paths.append(ctx.engagement.dir / "skills" / skill_name)
+        _, all_entries = _discover_skills(ctx.config, ctx.engagement)
+        if not all_entries:
+            return ToolResult("no skills found.")
 
-        for p in search_paths:
-            if p.exists():
-                try:
-                    content = p.read_text()[:24000]
-                    return ToolResult(f"# SKILL: {skill_name}\n\n{content}")
-                except OSError as e:
-                    return ToolResult(f"error reading skill: {e}", is_error=True)
+        discovered = all_entries
 
-        available = []
-        for sp in search_paths:
-            if sp.parent.exists():
-                available.extend(f.stem for f in sp.parent.glob("*.md"))
-        avail_str = ", ".join(sorted(set(available))) if available else "(none found)"
-        return ToolResult(
-            f"skill '{skill_name}' not found. Available: {avail_str}. "
-            f"Searched: {', '.join(str(p.parent) for p in search_paths)}"
-        )
+        # ---- Filter ----
+        if group_filter:
+            discovered = [
+                d for d in discovered
+                if group_filter in d[4].lower() or group_filter in d[1].lower()
+            ]
+            if not discovered:
+                return ToolResult(
+                    f"no skills found under domain '{group_filter}'. "
+                    f"Try calling without `group` to see available domains."
+                )
+
+        # ---- Search ----
+        if not list_mode:
+            ql = query.lower().replace(" ", "-").replace("_", "-")
+            candidates = [d for d in discovered if ql in d[0].lower()]
+            if not candidates:
+                candidates = [
+                    d for d in discovered
+                    if any(ql in str(t).lower() for t in d[3] if t) or ql in d[2].lower()
+                ]
+            if len(candidates) == 1:
+                return _load_skill_file(candidates[0])
+            if candidates:
+                return _format_skill_list(candidates, f"Matches for '{query}':", max_skills=20)
+            return ToolResult(
+                f"skill '{query}' not found among {len(discovered)} available skills."
+            )
+
+        return _format_skill_list(discovered, f"Available skills ({len(discovered)}):", max_skills=50)
+
+
+def _read_frontmatter(path: Path) -> dict:
+    """Extract YAML frontmatter from a markdown file. Returns {} on failure."""
+    import yaml
+    try:
+        text = path.read_text()
+        if not text.startswith("---"):
+            return {}
+        end = text.find("---", 3)
+        if end == -1:
+            return {}
+        return yaml.safe_load(text[3:end]) or {}
+    except Exception:
+        return {}
+
+
+def _load_skill_file(entry: tuple) -> ToolResult:
+    """Load and return the full SKILL.md content."""
+    kname, title, desc, tags, subd, path = entry
+    read_path = path
+    if read_path.is_dir():
+        read_path = read_path / "SKILL.md"
+    try:
+        content = read_path.read_text()
+        if read_path.name == "SKILL.md":
+            # Full skill file from agentskills.io repo
+            truncated = content[:24000]
+            header = f"# SKILL: {title}\n(subdomain: {subd})\n"
+            return ToolResult(header + truncated)
+        else:
+            # Flat .md file
+            truncated = content[:24000]
+            return ToolResult(f"# SKILL: {kname}\n\n{truncated}")
+    except OSError as e:
+        return ToolResult(f"error reading skill: {e}", is_error=True)
+
+
+def _format_skill_list(entries: list, heading: str, max_skills: int = 50) -> ToolResult:
+    """Format a list of skills grouped by subdomain."""
+    grouped: dict[str, list] = {}
+    for kname, title, desc, tags, subd, path in entries:
+        bucket = subd or "(uncategorized)"
+        grouped.setdefault(bucket, []).append((kname, title, desc, tags))
+
+    lines = [heading, ""]
+    shown = 0
+    for bucket in sorted(grouped):
+        skills_in_bucket = grouped[bucket]
+        lines.append(f"## {bucket} ({len(skills_in_bucket)})")
+        for kname, title, desc, tags in skills_in_bucket:
+            if shown >= max_skills:
+                break
+            tag_str = ", ".join(str(t) for t in tags[:5] if t) if tags else ""
+            d = desc[:120].replace("\n", " ") if desc else "(no description)"
+            tag_suffix = f" [{tag_str}]" if tag_str else ""
+            display = title if title != kname else kname
+            lines.append(f"- **{display}** — {d}{tag_suffix}")
+            shown += 1
+        if shown >= max_skills:
+            break
+        lines.append("")
+
+    if len(entries) > max_skills:
+        lines.append(f"\n(Showing {max_skills} of {len(entries)} skills. "
+                      f"Narrow your search with `name` or `group`.)")
+    lines.append("\nTo load one, call `load_skill` with its exact `name`.")
+    return ToolResult("\n".join(lines))
 
 
 class WordlistTool(Tool):

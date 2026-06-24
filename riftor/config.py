@@ -78,6 +78,10 @@ class Config(BaseModel):
     # Optional extra root searched by the `wordlist` tool (in addition to known
     # SecLists/system locations). None => only the known roots are probed.
     wordlists_dir: str | None = None
+    # Optional root for agent skills. Point this at a clone of
+    # https://github.com/mukul975/Anthropic-Cybersecurity-Skills to give the
+    # agent 817 curated pentest/DFIR/cloud/threat-hunt workflows.
+    skills_dir: str | None = None
     # Operator plugins (.py / packages under ~/.config/riftor/plugins exporting
     # a module-level TOOLS list). Loaded at startup. plugins_enabled is the kill
     # switch; deny wins over allow.
@@ -252,6 +256,8 @@ class Config(BaseModel):
             f"browser_persistent_profile = {str(self.browser_persistent_profile).lower()}",
             f'wordlists_dir = "{self.wordlists_dir}"' if self.wordlists_dir
             else '# wordlists_dir = "/usr/share/seclists"',
+            'skills_dir = "%s"' % self.skills_dir if self.skills_dir
+            else '# skills_dir = "/opt/Anthropic-Cybersecurity-Skills"',
             f"onboarded = {str(self.onboarded).lower()}",
             f"plugins_enabled = {str(self.plugins_enabled).lower()}",
             f"plugins_allow = [{', '.join(repr(x) for x in self.plugins_allow)}]",

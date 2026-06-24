@@ -202,7 +202,9 @@ async def test_list_hypotheses_tool_filters(toolctx):
 
 
 async def test_load_skill_missing_returns_listing_not_error(toolctx):
-    # No skills ship by default; the tool should degrade gracefully, not error.
+    # Skills now ship bundled with riftor; the tool should return matches
+    # or degrade gracefully if the package data is somehow unavailable.
     r = await tools.get("load_skill").execute({"name": "recon"}, toolctx)
     assert not r.is_error
-    assert "not found" in r.content
+    # Should either find skills or say "no skills found" (both are valid)
+    assert "not found" in r.content or "Matches" in r.content or "Available" in r.content
