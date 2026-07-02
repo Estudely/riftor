@@ -22,6 +22,7 @@ async def main() -> None:
 
     cfgmod.CONFIG_DIR = Path(workdir)
     cfgmod.CONFIG_PATH = Path(workdir) / "config.toml"
+    cfgmod.PERMISSIONS_PATH = Path(workdir) / "permissions.toml"
     app = RiftorApp(cfg, workdir=Path(workdir))
     async with app.run_test() as pilot:
         # composes with the core widgets

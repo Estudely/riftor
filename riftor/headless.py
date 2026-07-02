@@ -16,7 +16,8 @@ from typing import Callable
 from riftor import tools
 from riftor.agent.context import Context
 from riftor.agent.provider import Provider, ProviderError, ToolCall
-from riftor.config import PERMISSIONS_PATH, Config
+from riftor.config import Config
+from riftor import config as configmod
 from riftor.engagement import Engagement
 from riftor.safety.audit import AuditLog
 from riftor.safety.permissions import Permissions
@@ -85,7 +86,7 @@ async def _run(cfg: Config, workdir: Path, prompt: str, scope_file: str | None, 
             engagement.import_scope(Path(scope_file).expanduser().read_text(encoding="utf-8"))
         except Exception as exc:  # noqa: BLE001
             print(f"riftor: scope file error: {exc}", file=sys.stderr)
-    permissions = Permissions.load(PERMISSIONS_PATH)
+    permissions = Permissions.load(configmod.PERMISSIONS_PATH)
     audit = AuditLog()
     toolctx = ToolContext(
         workdir=workdir,

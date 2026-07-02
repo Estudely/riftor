@@ -31,7 +31,7 @@ from riftor.agent import antiloop
 from riftor.agent import session as sessions
 from riftor.agent.context import Context
 from riftor.agent.provider import Provider, ProviderError, ToolCall, Turn, Usage
-from riftor.config import PERMISSIONS_PATH
+from riftor import config as configmod
 from riftor.engagement import Engagement
 from riftor.engagement.report import write_reports
 from riftor.safety.audit import AuditLog
@@ -311,7 +311,7 @@ class RiftorApp(App):
         self.tools = tools.all_tools()
         self.tool_schemas = tools.schemas()
         self.engagement = Engagement(self.workdir)
-        self.permissions = Permissions.load(PERMISSIONS_PATH)
+        self.permissions = Permissions.load(configmod.PERMISSIONS_PATH)
         self.audit = AuditLog()
         self.max_steps = config.max_steps
         self.session_id = sessions.new_id()
