@@ -1824,6 +1824,7 @@ source = { editable = "." }
 dependencies = [
     { name = "litellm" },
     { name = "pydantic" },
+    { name = "pyyaml" },
     { name = "textual" },
 ]
 
@@ -1851,6 +1852,7 @@ requires-dist = [
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.380" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "riftor", extras = ["browser"], marker = "extra == 'dev'" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
     { name = "textual", specifier = ">=0.79" },
