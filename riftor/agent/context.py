@@ -161,17 +161,30 @@ class Context:
         return changed
 
     def repair(self) -> int:
-        """Ensure every assistant tool_call has a following tool result.
+        """Ensure every assistant tool_call has a tool result somewhere.
 
         If a turn was interrupted (cancel, new message mid-run, error), an
         assistant ``tool_use`` can be left without its ``tool_result``, which
         Anthropic rejects. We insert a synthetic result for each missing id,
         immediately after that assistant message's existing tool results.
+
+        A tool_call_id is only "missing" if NO tool result for it exists
+        anywhere in the history — not just in the consecutive block after the
+        assistant message. A resumed session can interleave the real result
+        further down; synthesizing a second one there would create a duplicate
+        tool_call_id, which the provider rejects with a 400 (issue #115).
         Returns the number of synthetic results inserted.
         """
+        messages = self._messages
+        # First pass: every tool_call_id that already has a result ANYWHERE.
+        all_provided: set[str] = set()
+        for m in messages:
+            if m.get("role") == "tool":
+                tid = m.get("tool_call_id")
+                if tid:
+                    all_provided.add(tid)
         repaired: list[dict] = []
         inserted = 0
-        messages = self._messages
         i = 0
         while i < len(messages):
             msg = messages[i]
@@ -179,13 +192,14 @@ class Context:
             if msg.get("role") == "assistant" and msg.get("tool_calls"):
                 expected = [tc.get("id") for tc in msg["tool_calls"] if tc.get("id")]
                 j = i + 1
-                provided: set[str] = set()
+                # Keep the consecutive tool-result block attached to this turn.
                 while j < len(messages) and messages[j].get("role") == "tool":
                     repaired.append(messages[j])
-                    provided.add(messages[j].get("tool_call_id"))
                     j += 1
                 for tid in expected:
-                    if tid not in provided:
+                    # Only synthesize when the id has NO result anywhere in the
+                    # whole history — never when it's provided out of position.
+                    if tid not in all_provided:
                         repaired.append(
                             {
                                 "role": "tool",
@@ -193,6 +207,7 @@ class Context:
                                 "content": "[interrupted: no tool result was recorded]",
                             }
                         )
+                        all_provided.add(tid)  # don't double-insert for repeats
                         inserted += 1
                 i = j
                 continue

@@ -8,7 +8,10 @@ the agent keeps its memory across runs.
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 import time
+import uuid
 from pathlib import Path
 
 
@@ -28,7 +31,10 @@ def _title(messages: list[dict]) -> str:
 
 
 def new_id() -> str:
-    return time.strftime("%Y%m%d-%H%M%S")
+    # Second-resolution timestamp + a short random suffix so two sessions started
+    # in the same clock second (e.g. /new then immediately tasking, or two
+    # windows) don't collide onto the same file (issue #112).
+    return time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:4]
 
 
 def save(
@@ -57,10 +63,21 @@ def save(
         "title": _title(messages),
         "messages": messages,
     }
-    # atomic write: tmp + replace, so a crash never leaves a half-written file
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    tmp.replace(path)
+    # atomic write: unique tmp + replace, so a crash never leaves a half-written
+    # file AND two processes writing the same session don't clobber each other's
+    # tmp file (issue #112). mkstemp gives a per-writer name in the same dir so
+    # the final os.replace is atomic on the same filesystem.
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(path.parent), prefix=f"{session_id}.", suffix=".json.tmp"
+    )
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=2)
+        tmp.replace(path)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
     return path
 
 
