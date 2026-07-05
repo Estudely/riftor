@@ -53,8 +53,11 @@ GENZ_PREAMBLE = (
     "6. When the work is done, drop a clean summary ending with \"no cap.\""
 )
 
-# Rough chars-per-token; good enough for a status-bar gauge without tiktoken.
-_CHARS_PER_TOKEN = 4
+# Rough chars-per-token for the status-bar gauge. Biased toward *over-counting*
+# (3 not 4) so the 80% context-window warning fires early rather than late —
+# code/base64/nmap output has a higher token density than English prose, and a
+# late warning means a non-retryable context-length error from the provider.
+_CHARS_PER_TOKEN = 3
 
 
 def _load_system_prompt() -> str:
