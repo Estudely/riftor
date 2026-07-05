@@ -13,6 +13,7 @@ import asyncio
 import json
 import os
 import re
+import threading
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, AsyncIterator
 
@@ -23,25 +24,38 @@ if TYPE_CHECKING:
 # needed on the first model call, so we import + configure it lazily — keeping app
 # startup fast. The cost then hides behind the network round-trip of that call.
 _litellm = None
+# Reentrant: _init_litellm -> _register_codex_provider -> codex_provider imports
+# call _get_litellm() again on the SAME thread during registration. A plain Lock
+# would self-deadlock here (issue #123); an RLock lets the same thread re-enter.
+_litellm_lock = threading.RLock()
 
 
 def _get_litellm():
     global _litellm
-    if _litellm is None:
-        _litellm = _init_litellm()
-    return _litellm
+    if _litellm is not None:
+        return _litellm
+    with _litellm_lock:
+        # Double-checked: another thread may have finished while we waited.
+        if _litellm is None:
+            _litellm = _init_litellm()
+        return _litellm
 
 
 def _init_litellm():
-    """Import and configure litellm once. Guarded by the caller's None-check so
-    a concurrent first-call race at worst imports litellm twice (harmless — the
-    codex registration has its own dedup guard)."""
+    """Import and configure litellm once, then register the codex handler.
+
+    ``_litellm`` is published to the module global *before* codex registration
+    because that registration re-enters ``_get_litellm()`` on the same thread
+    (codex_provider.py) — it must see the configured module, not recurse.
+    """
+    global _litellm
     os.environ.setdefault("LITELLM_LOG", "ERROR")
     import litellm
 
     litellm.telemetry = False
     litellm.drop_params = True
     litellm.suppress_debug_info = True
+    _litellm = litellm  # publish before the reentrant codex registration
     _register_codex_provider(litellm)
     return litellm
 
