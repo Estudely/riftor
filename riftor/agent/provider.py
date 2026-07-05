@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, AsyncIterator
 
@@ -115,23 +116,55 @@ class ProviderError(Exception):
         self.retryable = retryable
 
 
+def _status_code(exc: Exception) -> int | None:
+    """Best-effort HTTP status from a litellm/httpx exception.
+
+    litellm's typed exceptions carry ``status_code``; httpx nests it under
+    ``.response.status_code``. Using the real code avoids the substring-matching
+    false positives (issue #117) where a message mentioning a port or byte count
+    like "5000" was misread as a 500 server error.
+    """
+    for attr in ("status_code", "code"):
+        val = getattr(exc, attr, None)
+        if isinstance(val, int):
+            return val
+    resp = getattr(exc, "response", None)
+    code = getattr(resp, "status_code", None)
+    return code if isinstance(code, int) else None
+
+
 def classify_error(exc: Exception) -> ProviderError:
-    """Map a raw litellm/network exception to an actionable ProviderError."""
-    name = type(exc).__name__
+    """Map a raw litellm/network exception to an actionable ProviderError.
+
+    Prefers the exception's typed name and HTTP status code; only falls back to
+    scanning the message text (with word-boundary anchors) so status-like digits
+    embedded in a message can't cause a misclassification (issue #117).
+    """
+    name = type(exc).__name__.lower()
     text = str(exc)
     low = text.lower()
-    if "authentication" in name.lower() or "auth" in low or "api key" in low or "401" in text:
+    status = _status_code(exc)
+
+    # A standalone HTTP status token in the message, only as a fallback when the
+    # exception carries no real status_code attribute.
+    def _msg_has_status(*codes: str) -> bool:
+        return any(re.search(rf"\b{c}\b", text) for c in codes)
+
+    if status == 401 or status == 403 or "authentication" in name or "auth" in low \
+            or "api key" in low or (status is None and _msg_has_status("401", "403")):
         return ProviderError(
             "auth",
             "authentication failed — check your API key (env var or /config). " + text[:200],
             retryable=False,
         )
-    if "ratelimit" in name.lower() or "rate limit" in low or "429" in text:
+    if status == 429 or "ratelimit" in name or "rate limit" in low \
+            or (status is None and _msg_has_status("429")):
         return ProviderError("rate_limit", "rate limited by the provider — backing off. " + text[:160],
                              retryable=True)
-    if "timeout" in name.lower() or "timed out" in low:
+    if "timeout" in name or "timed out" in low:
         return ProviderError("timeout", "request timed out. " + text[:160], retryable=True)
-    if any(code in text for code in ("500", "502", "503", "504", "529")) or "overloaded" in low:
+    if (status is not None and 500 <= status <= 599) or "overloaded" in low \
+            or (status is None and _msg_has_status("500", "502", "503", "504", "529")):
         return ProviderError("server", "provider server error — retrying. " + text[:160], retryable=True)
     if "connection" in low or "network" in low or "getaddrinfo" in low:
         return ProviderError("network", "network error reaching the provider. " + text[:160],
@@ -142,7 +175,8 @@ def classify_error(exc: Exception) -> ProviderError:
             "context window exceeded — clear/compact the conversation (/clear or /compact). " + text[:160],
             retryable=False,
         )
-    if "badrequest" in name.lower() or "invalid" in low or "400" in text:
+    if status == 400 or "badrequest" in name or "invalid" in low \
+            or (status is None and _msg_has_status("400")):
         return ProviderError("validation", "request rejected by the provider. " + text[:200],
                              retryable=False)
     return ProviderError("unknown", text[:240] or name, retryable=False)
@@ -276,22 +310,42 @@ class Provider:
 
             for tc in getattr(delta, "tool_calls", None) or []:
                 tc_id = getattr(tc, "id", None)
+                fn = getattr(tc, "function", None)
+                fn_name = getattr(fn, "name", None) if fn is not None else None
                 # Spec-conformant streams (OpenAI/litellm) tag every fragment with a
                 # stable ``index`` so fragments of one call reassemble correctly.
                 # Some providers omit it; defaulting all of them to 0 (the old bug)
-                # collapsed distinct calls onto one slot — only the last survived and
-                # the args concatenated into invalid JSON. When ``index`` is absent we
-                # start a fresh slot on each new ``id`` and otherwise append to the
-                # most recent one (a continuation fragment of the same call).
+                # collapsed distinct calls onto one slot. When ``index`` is absent we
+                # resolve the slot by the strongest signal available — id, then a
+                # fresh-name fragment, then a same-name continuation — and only fall
+                # back to "most recent" as a last resort (issue #116).
                 raw_idx = getattr(tc, "index", None)
                 if raw_idx is not None:
                     key: object = ("idx", raw_idx)
-                elif tc_id is not None and not any(
-                    s.get("id") == tc_id for s in acc.values()
-                ):
-                    key = ("seq", _seq)
-                    _seq += 1
+                elif tc_id is not None:
+                    # Match an existing slot with this id (continuation), else new.
+                    key = next(
+                        (k for k, s in acc.items() if s.get("id") == tc_id), None
+                    )  # type: ignore[assignment]
+                    if key is None:
+                        key = ("seq", _seq)
+                        _seq += 1
+                elif fn_name is not None:
+                    # No id/index but a name present → this fragment starts (or is)
+                    # a distinct call. Reuse a same-named slot only if it's still
+                    # waiting for its arguments; otherwise start a fresh slot so two
+                    # same-named calls don't merge.
+                    key = next(
+                        (k for k, s in acc.items()
+                         if s.get("name") == fn_name and not s.get("args")),
+                        None,
+                    )  # type: ignore[assignment]
+                    if key is None:
+                        key = ("seq", _seq)
+                        _seq += 1
                 elif acc:
+                    # Pure continuation fragment (no id, no index, no name): the only
+                    # safe assumption is it continues the most recently touched call.
                     key = next(reversed(acc))
                 else:
                     key = ("seq", _seq)
@@ -299,12 +353,12 @@ class Provider:
                 slot = acc.setdefault(key, {"id": None, "name": None, "args": ""})
                 if tc_id:
                     slot["id"] = tc_id
-                fn = getattr(tc, "function", None)
                 if fn is not None:
-                    if getattr(fn, "name", None):
-                        slot["name"] = fn.name
-                    if getattr(fn, "arguments", None):
-                        slot["args"] += fn.arguments
+                    if fn_name:
+                        slot["name"] = fn_name
+                    fn_args = getattr(fn, "arguments", None)
+                    if fn_args:
+                        slot["args"] += fn_args
 
         tool_calls: list[ToolCall] = []
         raw_tool_calls: list[dict] = []
