@@ -358,3 +358,90 @@ def test_classify_message_fallback_when_no_status():
     """With no status_code attribute, fall back to a word-boundary match."""
     err = prov.classify_error(Exception("HTTP 502 Bad Gateway"))
     assert err.kind == "server"
+
+
+# --- cost estimation (#114) ---------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_cost_estimated_from_tokens_when_provider_omits_it(monkeypatch):
+    """litellm's streamed usage has no .cost; the Turn must still carry a cost
+    derived from the token counts (issue #114)."""
+    class _Usage:
+        prompt_tokens = 1000
+        completion_tokens = 500
+        cost = None  # provider did not supply cost
+
+    class _Delta:
+        content = "hi"
+        reasoning_content = None
+        tool_calls = None
+
+    class _Choice:
+        def __init__(self):
+            self.delta = _Delta()
+
+    class _Chunk:
+        def __init__(self, usage=None):
+            self.choices = [_Choice()]
+            self.usage = usage
+
+    async def _fake_stream():
+        yield _Chunk()
+        yield _Chunk(usage=_Usage())
+
+    async def _fake_acompletion(self, **kwargs):
+        return _fake_stream()
+
+    # Stub _estimate_cost so the test doesn't depend on litellm's pricing table.
+    monkeypatch.setattr(prov.Provider, "_acompletion", _fake_acompletion)
+    monkeypatch.setattr(prov.Provider, "_estimate_cost", lambda self, usage: 0.0123)
+
+    p = Provider_for_test()
+    turn = None
+    async for event, payload in p.stream_turn([{"role": "user", "content": "go"}]):
+        if event == "done":
+            turn = payload
+    assert turn is not None
+    assert turn.usage.prompt_tokens == 1000
+    assert turn.usage.completion_tokens == 500
+    assert turn.usage.cost == 0.0123
+
+
+@pytest.mark.asyncio
+async def test_cost_not_estimated_when_no_tokens(monkeypatch):
+    """No token usage → don't call the pricing table (keeps offline tests offline)."""
+    called = {"n": 0}
+
+    class _Delta:
+        content = "hi"
+        reasoning_content = None
+        tool_calls = None
+
+    class _Chunk:
+        def __init__(self):
+            self.choices = [type("Ch", (), {"delta": _Delta()})()]
+            self.usage = None  # no usage at all
+
+    async def _fake_stream():
+        yield _Chunk()
+
+    async def _fake_acompletion(self, **kwargs):
+        return _fake_stream()
+
+    def _spy(self, usage):
+        called["n"] += 1
+        return 0.0
+
+    monkeypatch.setattr(prov.Provider, "_acompletion", _fake_acompletion)
+    monkeypatch.setattr(prov.Provider, "_estimate_cost", _spy)
+    p = Provider_for_test()
+    async for event, payload in p.stream_turn([{"role": "user", "content": "go"}]):
+        pass
+    assert called["n"] == 0
+
+
+def test_provider_supplied_cost_is_kept(monkeypatch):
+    """When litellm DOES supply a cost, we keep it (don't override)."""
+    u = prov._extract_usage(type("C", (), {"usage": type("U", (), {
+        "prompt_tokens": 10, "completion_tokens": 5, "cost": 0.5})()})())
+    assert u is not None and u.cost == 0.5

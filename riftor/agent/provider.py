@@ -389,6 +389,13 @@ class Provider:
         if raw_tool_calls:
             assistant_message["tool_calls"] = raw_tool_calls
 
+        # litellm's streamed usage rarely carries `.cost` (it's only populated
+        # when a cost success_callback is configured, which we don't). Derive the
+        # cost from the token counts so /cost and the status bar aren't stuck at
+        # $0.0000 (issue #114). Best-effort: unknown models just leave cost at 0.
+        if usage.cost == 0.0 and (usage.prompt_tokens or usage.completion_tokens):
+            usage.cost = self._estimate_cost(usage)
+
         yield (
             "done",
             Turn(
@@ -398,3 +405,25 @@ class Provider:
                 usage=usage,
             ),
         )
+
+    def _estimate_cost(self, usage: Usage) -> float:
+        """Compute USD cost from token counts via litellm's pricing table.
+
+        Returns 0.0 for models litellm doesn't have pricing for (rather than
+        raising) — the gauge simply stays at 0 in that case.
+        """
+        try:
+            litellm = _get_litellm()
+            model = self.config.model
+            if model.startswith("codex/"):
+                from riftor.agent.codex_provider import to_litellm_model
+
+                model = to_litellm_model(model)
+            cost = litellm.completion_cost(
+                model=model,
+                prompt_tokens=usage.prompt_tokens,
+                completion_tokens=usage.completion_tokens,
+            )
+            return float(cost or 0.0)
+        except Exception:  # noqa: BLE001 — pricing is best-effort, never fatal
+            return 0.0
