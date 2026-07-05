@@ -445,3 +445,37 @@ def test_provider_supplied_cost_is_kept(monkeypatch):
     u = prov._extract_usage(type("C", (), {"usage": type("U", (), {
         "prompt_tokens": 10, "completion_tokens": 5, "cost": 0.5})()})())
     assert u is not None and u.cost == 0.5
+
+
+# --- thread-safe lazy litellm init (#123) -------------------------------------
+
+def test_get_litellm_concurrent_first_calls_return_same_instance():
+    """Many threads racing on the first _get_litellm() must all get the one
+    configured instance without deadlocking (issue #123). The codex registration
+    re-enters _get_litellm() on the same thread, so the lock must be reentrant."""
+    import threading
+
+    saved = prov._litellm
+    try:
+        prov._litellm = None  # force a fresh init under contention
+        results: list = []
+        barrier = threading.Barrier(8)
+
+        def worker():
+            barrier.wait()  # release all threads at once to maximize contention
+            results.append(prov._get_litellm())
+
+        threads = [threading.Thread(target=worker) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)  # if the RLock regresses to a deadlock, this trips
+
+        assert all(not t.is_alive() for t in threads), "a thread deadlocked"
+        assert len(results) == 8
+        assert all(r is results[0] for r in results), "threads saw different instances"
+        # codex handler still registered exactly once
+        entries = list(getattr(results[0], "custom_provider_map", None) or [])
+        assert sum(1 for e in entries if e.get("provider") == "codex") == 1
+    finally:
+        prov._litellm = saved
