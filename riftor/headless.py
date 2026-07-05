@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Callable
 
 from riftor import tools
+from riftor.agent import session as sessions
 from riftor.agent.context import Context
 from riftor.agent.provider import Provider, ProviderError, ToolCall
 from riftor.config import Config
@@ -104,9 +105,20 @@ async def _run(cfg: Config, workdir: Path, prompt: str, scope_file: str | None, 
 
     context.add_user(prompt)
     max_steps = 10**9 if yolo else cfg.max_steps
+    # Persist the session so a crashed headless run (OOM, SIGTERM, network drop)
+    # leaves a resumable checkpoint, matching the TUI's behavior (issue #120).
+    sid = sessions.new_id()
+
+    def _checkpoint(complete: bool) -> None:
+        try:
+            sessions.save(workdir, sid, context.dump(), cfg.model, complete=complete)
+        except Exception:  # noqa: BLE001 — never let checkpointing break the run
+            pass
+
     try:
         for _ in range(max_steps):
             context.repair()
+            _checkpoint(complete=False)  # per-step checkpoint before the model call
             text_parts: list[str] = []
             turn = None
             try:
@@ -124,6 +136,7 @@ async def _run(cfg: Config, workdir: Path, prompt: str, scope_file: str | None, 
                         turn = payload  # type: ignore[assignment]  # ("done", Turn)
             except ProviderError as exc:
                 print(f"\nriftor: provider error [{exc.kind}] — {exc}", file=sys.stderr)
+                _checkpoint(complete=False)  # leave a resumable checkpoint on error
                 return 1
             if turn is None:
                 break
@@ -132,6 +145,7 @@ async def _run(cfg: Config, workdir: Path, prompt: str, scope_file: str | None, 
                 break
             for call in turn.tool_calls:
                 await _run_tool_headless(call, engagement, permissions, audit, toolctx, context, yolo=yolo)
+        _checkpoint(complete=True)  # ran to completion → mark the session done
     finally:
         if toolctx.browser is not None and toolctx.browser.launched:
             try:
