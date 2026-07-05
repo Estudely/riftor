@@ -12,6 +12,49 @@ def test_default_deny_blocks_rm_rf():
     assert not perms.is_denied("bash", "ls -la")
 
 
+def test_default_deny_catches_separated_flags():
+    """rm with recursive+force in any flag arrangement must be caught (issue #109)."""
+    perms = Permissions()
+    variants = [
+        "rm -rf /",
+        "rm -fr /",
+        "rm -r -f /",
+        "rm -f -r /",
+        "rm --recursive --force /tmp/x",
+        "rm --force --recursive /tmp/x",
+    ]
+    for v in variants:
+        assert perms.is_denied("bash", v), f"separated-flag rm not caught: {v!r}"
+
+
+def test_default_deny_catches_rm_r_on_absolute_paths():
+    """rm -r on an absolute path is destructive even without -f (issue #109)."""
+    perms = Permissions()
+    for v in ["rm -r /", "rm -r /etc", "rm -r /home", "rm -r /tmp/x"]:
+        assert perms.is_denied("bash", v), f"rm -r on abs path not caught: {v!r}"
+    # relative paths and non-recursive rm must NOT be flagged
+    assert not perms.is_denied("bash", "rm -r relative-dir")
+    assert not perms.is_denied("bash", "rm single-file.txt")
+    assert not perms.is_denied("bash", "grep -r pattern /")  # grep -r, not rm -r
+
+
+def test_default_deny_catches_alternative_destructive_tools():
+    """find -delete, find -exec rm, mke2fs, nvme/vda writes (issue #109)."""
+    perms = Permissions()
+    destructive = [
+        "find / -delete",
+        "find / -exec rm {} \\;",
+        "mke2fs /dev/sda1",
+        "dd if=/dev/zero of=/dev/nvme0n1",
+        "dd if=/dev/zero of=/dev/vda",
+        "cat /dev/urandom > /dev/sda",
+    ]
+    for v in destructive:
+        assert perms.is_denied("bash", v), f"destructive cmd not caught: {v!r}"
+    # find without -delete/-exec rm must NOT be flagged
+    assert not perms.is_denied("bash", "find . -name '*.py'")
+
+
 def test_default_deny_catches_fork_bomb_variants():
     """The fork-bomb guard must match the readable spaced form, not just the
     compact one — shells accept whitespace between every token."""
