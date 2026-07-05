@@ -17,6 +17,20 @@ _PR_CHANGED = {"N": 0.85, "L": 0.68, "H": 0.5}
 _CIA = {"H": 0.56, "L": 0.22, "N": 0.0}
 _REQUIRED = ("AV", "AC", "PR", "UI", "S", "C", "I", "A")
 
+# Allowed metric values — any vector with an unrecognised value is rejected
+# (returns None) rather than silently mis-scored. Only S has values outside the
+# metric→weight dicts (U/C), so it gets its own set.
+_VALID_VALUES: dict[str, set[str]] = {
+    "AV": set(_AV),
+    "AC": set(_AC),
+    "PR": set(_PR_UNCHANGED),
+    "UI": set(_UI),
+    "S": {"U", "C"},
+    "C": set(_CIA),
+    "I": set(_CIA),
+    "A": set(_CIA),
+}
+
 
 def parse_vector(vector: str) -> dict[str, str] | None:
     if not vector:
@@ -28,6 +42,11 @@ def parse_vector(vector: str) -> dict[str, str] | None:
             metrics[key.upper()] = value.upper()
     if not all(m in metrics for m in _REQUIRED):
         return None
+    # Reject vectors with invalid metric values (e.g. S:X) instead of silently
+    # treating them as a default. The official spec says invalid → reject.
+    for m, val in metrics.items():
+        if m in _VALID_VALUES and val not in _VALID_VALUES[m]:
+            return None
     return metrics
 
 

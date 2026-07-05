@@ -40,6 +40,7 @@ def engagement_injection(workdir: Path | None) -> str:
                 TEMPLATES,
             )
             conn = sqlite3.connect(str(db_path))
+            conn.execute("PRAGMA busy_timeout=5000")  # wait instead of SQLITE_BUSY
             try:
                 row = conn.execute(
                     "SELECT value FROM meta WHERE key=?",

@@ -8,17 +8,37 @@ side effects (running tools, injecting tool results); this module only decides
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 
 WARN_AT = 3   # operator gets a heads-up; the tool still runs
 STOP_AT = 5   # hard stop: skip the call and end the turn
 WINDOW = 20   # how many recent call signatures to remember
 
+# Display signatures are truncated for readability, but the dedup key is a hash
+# of the *full* signature so two calls that differ only past the truncation
+# point are not falsely counted as repeats (issue #118).
+_DISPLAY_LEN = 200
+
 
 def call_signature(name: str, arguments: dict) -> str:
-    """Stable signature for a tool call: name + whitespace-normalized args."""
+    """Stable signature for a tool call: name + whitespace-normalized args, hashed.
+
+    Returns a short hash that uniquely represents the full call. The hash is
+    deterministic for identical arguments, and distinct for arguments that
+    differ anywhere (not just in the first N characters). Whitespace within
+    argument values is collapsed so ``ls   -la`` and ``ls -la`` hash the same.
+    """
+    norm = {k: " ".join(str(v).split()) for k, v in arguments.items()}
+    raw = f"{name}:{json.dumps(norm, sort_keys=True, separators=(',', ':'))}"
+    return hashlib.sha1(raw.encode()).hexdigest()[:16]
+
+
+def display_signature(name: str, arguments: dict) -> str:
+    """Human-readable one-liner for operator-facing messages (truncated)."""
     sig = f"{name}:{' '.join(str(v) for v in arguments.values())}"
-    return " ".join(sig.split()).strip()[:200]
+    return " ".join(sig.split()).strip()[:_DISPLAY_LEN]
 
 
 @dataclass

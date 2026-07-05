@@ -7,9 +7,25 @@ from riftor.agent import antiloop
 
 
 def test_signature_normalizes_whitespace():
+    # Whitespace-only differences still produce the same hash (issue #118).
     a = antiloop.call_signature("bash", {"cmd": "ls   -la"})
     b = antiloop.call_signature("bash", {"cmd": "ls -la"})
-    assert a == b == "bash:ls -la"
+    assert a == b
+
+
+def test_signature_distinct_beyond_truncation():
+    # The old code truncated at 200 chars, so calls differing only past that
+    # point collapsed to the same key and falsely tripped the loop breaker.
+    long_cmd_a = "rm -rf /tmp/" + "a" * 200 + "TAIL_A"
+    long_cmd_b = "rm -rf /tmp/" + "a" * 200 + "TAIL_B"
+    a = antiloop.call_signature("bash", {"cmd": long_cmd_a})
+    b = antiloop.call_signature("bash", {"cmd": long_cmd_b})
+    assert a != b, "calls with different tails must hash differently"
+
+
+def test_display_signature_is_human_readable():
+    sig = antiloop.display_signature("bash", {"cmd": "ls   -la"})
+    assert sig == "bash:ls -la"
 
 
 def test_first_calls_run_without_warning():

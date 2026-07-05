@@ -27,15 +27,22 @@ _litellm = None
 def _get_litellm():
     global _litellm
     if _litellm is None:
-        os.environ.setdefault("LITELLM_LOG", "ERROR")
-        import litellm
-
-        litellm.telemetry = False
-        litellm.drop_params = True
-        litellm.suppress_debug_info = True
-        _register_codex_provider(litellm)
-        _litellm = litellm
+        _litellm = _init_litellm()
     return _litellm
+
+
+def _init_litellm():
+    """Import and configure litellm once. Guarded by the caller's None-check so
+    a concurrent first-call race at worst imports litellm twice (harmless — the
+    codex registration has its own dedup guard)."""
+    os.environ.setdefault("LITELLM_LOG", "ERROR")
+    import litellm
+
+    litellm.telemetry = False
+    litellm.drop_params = True
+    litellm.suppress_debug_info = True
+    _register_codex_provider(litellm)
+    return litellm
 
 
 def _register_codex_provider(litellm) -> None:
@@ -206,6 +213,8 @@ class Provider:
         for attempt in range(self.max_retries):
             try:
                 return await litellm.acompletion(**kwargs)
+            except asyncio.CancelledError:
+                raise  # never retry a cancel — the operator hit Esc
             except Exception as exc:  # noqa: BLE001
                 err = classify_error(exc)
                 last = err

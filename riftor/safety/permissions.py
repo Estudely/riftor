@@ -27,13 +27,25 @@ from textual.widgets import Button, Static
 
 
 def _default_deny() -> list[dict]:
-    """Sensible destructive-command guards, on by default for the bash tool."""
+    """Sensible destructive-command guards, on by default for the bash tool.
+
+    These patterns are defense-in-depth, NOT a sandbox. Shell obfuscation
+    (``$x``, ``base64 | sh``, ``$IFS``, quoting tricks) will always bypass
+    regex — the real guard is ``requires_permission`` prompting the operator
+    before *any* bash call runs. These patterns just catch the obvious cases
+    so a fat-fingered ``rm -rf /`` is blocked before the prompt even appears.
+    """
     return [
-        {"tool": "bash", "pattern": r"\brm\s+-[a-z]*r[a-z]*f|\brm\s+-[a-z]*f[a-z]*r"},
-        {"tool": "bash", "pattern": r"\bdd\s+.*of=/dev/"},
-        {"tool": "bash", "pattern": r"\bmkfs(\.\w+)?\b"},
+        # rm -rf in any flag arrangement: -rf, -fr, -r -f, -f -r, --recursive --force
+        {"tool": "bash", "pattern": r"\brm\s+(?:-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r|-r\b[^\n]*-f\b|-f\b[^\n]*-r\b|--recursive\b[^\n]*--force\b|--force\b[^\n]*--recursive\b)"},
+        # rm -r on root-ish absolute paths even without -f (destroys everything)
+        {"tool": "bash", "pattern": r"\brm\s+[^\n]*-r\w*\b[^\n]*\s/(?:\S|$)"},
+        # find with -delete or -exec rm (alternative destructive tools)
+        {"tool": "bash", "pattern": r"\bfind\s+[^\n]*-(?:delete|exec\s+rm)\b"},
+        {"tool": "bash", "pattern": r"\bdd\s+[^\n]*of=/dev/"},
+        {"tool": "bash", "pattern": r"\b(?:mkfs|mke2fs)(?:\.\w+)?\b"},
         {"tool": "bash", "pattern": r":\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&"},  # fork bomb
-        {"tool": "bash", "pattern": r">\s*/dev/sd[a-z]"},
+        {"tool": "bash", "pattern": r">\s*/dev/(?:sd|nvme|vd)[a-z]"},
     ]
 
 
