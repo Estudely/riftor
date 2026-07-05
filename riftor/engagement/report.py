@@ -96,6 +96,63 @@ def _cvss_label(finding: dict) -> str:
     return f"{score:.1f}"
 
 
+def _host_to_uri(host: str) -> str:
+    """Turn a bare host/IP into a valid SARIF artifactLocation URI (RFC 3986).
+
+    A bare ``10.0.0.5`` or ``example.com`` is not a valid URI reference, which
+    strict SARIF consumers (GitHub Code Scanning, Azure DevOps) reject. If the
+    host already carries a scheme we keep it; otherwise we emit an authority-only
+    URI (``//host``). IPv6 literals are bracketed.
+    """
+    host = host.strip()
+    if not host:
+        return ""
+    if "://" in host:
+        return host
+    # IPv6 literal → bracket it per RFC 3986 §3.2.2
+    if host.count(":") >= 2 and not host.startswith("["):
+        host = f"[{host}]"
+    return f"//{host}"
+
+
+def _fence_block(text: str) -> str:
+    """Render *text* as a fenced code block that untrusted content can't escape.
+
+    Per CommonMark, a fenced block is closed only by a fence of *at least* as
+    many backticks as the opening one. Scan the content for its longest backtick
+    run and open with one more, so an evidence string containing ``` (from a
+    hostile scan banner, issue #119) can't terminate the fence early and inject
+    live markdown/HTML into the report.
+    """
+    longest = 0
+    run = 0
+    for ch in text:
+        if ch == "`":
+            run += 1
+            longest = max(longest, run)
+        else:
+            run = 0
+    fence = "`" * max(3, longest + 1)
+    return f"{fence}\n{text}\n{fence}"
+
+
+def _md_inline(text: str) -> str:
+    """Neutralize markdown control chars in an inline field (issue #119).
+
+    Untrusted scan-derived strings (titles, notes, recommendations) are rendered
+    inline, not fenced, so escape the characters that would otherwise let a
+    hostile value inject links, emphasis, or raw HTML. Backslash-escaping is the
+    CommonMark-sanctioned way to render these literally.
+    """
+    out = []
+    for ch in str(text):
+        if ch in "\\`*_{}[]()#+-.!<>|~":
+            out.append("\\" + ch)
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
 def build_markdown(data: dict) -> str:
     out: list[str] = []
     out.append(f"# {data['title']} — riftor report")
@@ -132,19 +189,19 @@ def build_markdown(data: dict) -> str:
         tag = f"{f.get('severity', 'info').upper()}"
         if cvss:
             tag += f" · CVSS {cvss}"
-        out.append(f"### {idx}. [{tag}] {f['title']}")
+        out.append(f"### {idx}. [{tag}] {_md_inline(f['title'])}")
         if f.get("host"):
-            out.append(f"- **Host:** {f['host']}")
+            out.append(f"- **Host:** {_md_inline(f['host'])}")
         if f.get("tags"):
-            out.append(f"- **Tags:** {f['tags']}")
+            out.append(f"- **Tags:** {_md_inline(f['tags'])}")
         if f.get("cvss"):
-            out.append(f"- **CVSS:** {cvss} (`{f['cvss']}`)")
+            out.append(f"- **CVSS:** {cvss} (`{_md_inline(f['cvss'])}`)")
         if f.get("evidence"):
-            out.append(f"- **Evidence:**\n\n```\n{f['evidence']}\n```")
+            out.append(f"- **Evidence:**\n\n{_fence_block(str(f['evidence']))}")
         if f.get("recommendation"):
-            out.append(f"- **Recommendation:** {f['recommendation']}")
+            out.append(f"- **Recommendation:** {_md_inline(f['recommendation'])}")
         if f.get("notes"):
-            out.append(f"- **Notes:** {f['notes']}")
+            out.append(f"- **Notes:** {_md_inline(f['notes'])}")
         out.append("")
 
     if data["services"]:
@@ -291,19 +348,31 @@ def build_json(data: dict) -> str:
 
 def build_sarif(data: dict) -> str:
     """SARIF v2.1.0 — for GitHub Advanced Security, defect trackers, etc."""
+    # Qualitative severity → a synthetic CVSS-style score, used only when a
+    # finding has no CVSS vector so GitHub's security-severity classification
+    # doesn't collapse a manually-rated "critical" to 0.0/low.
+    _SEV_SCORE = {"critical": 9.5, "high": 7.5, "medium": 5.0, "low": 2.5, "info": 0.0}
     rules: dict[str, dict] = {}
     results: list[dict] = []
     for f in data["findings"]:
         rule_id = (f.get("title") or "finding").strip() or "finding"
-        rules.setdefault(
-            rule_id,
-            {
+        # security-severity: prefer the real CVSS score; else derive from the
+        # qualitative severity. Track the MAX across findings sharing a rule so a
+        # later low-scored finding can't clobber an earlier high one.
+        score = f.get("cvss_score")
+        if score is None:
+            score = _SEV_SCORE.get(f.get("severity", "info"), 0.0)
+        if rule_id in rules:
+            prev = float(rules[rule_id]["properties"]["security-severity"])
+            if score > prev:
+                rules[rule_id]["properties"]["security-severity"] = f"{score:.1f}"
+        else:
+            rules[rule_id] = {
                 "id": rule_id,
                 "name": rule_id,
                 "shortDescription": {"text": rule_id},
-                "properties": {"security-severity": f"{f.get('cvss_score') or 0.0:.1f}"},
-            },
-        )
+                "properties": {"security-severity": f"{score:.1f}"},
+            }
         message = f.get("evidence") or f.get("recommendation") or rule_id
         result = {
             "ruleId": rule_id,
@@ -315,9 +384,13 @@ def build_sarif(data: dict) -> str:
                 "tags": f.get("tags") or "",
             },
         }
-        if f.get("host"):
+        host = f.get("host")
+        if host:
+            # SARIF artifactLocation.uri must be a valid URI reference (RFC 3986).
+            # A bare host/IP isn't one, so encode it as an authority-only URI.
+            uri = _host_to_uri(str(host))
             result["locations"] = [
-                {"physicalLocation": {"artifactLocation": {"uri": str(f["host"])}}}
+                {"physicalLocation": {"artifactLocation": {"uri": uri}}}
             ]
         results.append(result)
 
