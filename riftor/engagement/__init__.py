@@ -171,5 +171,9 @@ class Engagement:
     def findings_count(self) -> int:
         return self.store.count_findings()
 
+    def close(self) -> None:
+        """Close the backing SQLite connection. Safe to call multiple times."""
+        self.store.close()
+
 
 __all__ = ["Engagement", "Scope", "Target", "Store", "VALID_STAGES", "STAGE_LABELS"]

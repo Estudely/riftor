@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 import time
 from pathlib import Path
 
@@ -50,23 +51,45 @@ CREATE TABLE IF NOT EXISTS hypotheses (
 class Store:
     def __init__(self, path: Path) -> None:
         self.path = path
+        self._lock = threading.RLock()
+        self._closed = False
         self._conn = sqlite3.connect(str(path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+        # WAL allows concurrent readers + one writer; busy_timeout makes writers
+        # retry instead of immediately raising SQLITE_BUSY when another connection
+        # holds the lock (e.g. injection.py's separate read connection).
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA busy_timeout=5000")
         self._conn.executescript(_SCHEMA)
         self._migrate()
         self._conn.commit()
 
     def _migrate(self) -> None:
-        for table, column, ctype in _LATE_COLUMNS:
-            cols = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")}
-            if column not in cols:
-                self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ctype}")
-        # activity table is created in the base schema for new DBs; ensure for old ones.
-        self._conn.execute(
-            "CREATE TABLE IF NOT EXISTS activity "
-            "(id INTEGER PRIMARY KEY AUTOINCREMENT, event TEXT, detail TEXT, ts REAL)"
-        )
-        self._conn.executescript(_LATE_TABLES)
+        # Wrap DDL in an explicit transaction so a crash mid-migration doesn't
+        # leave the schema half-migrated. sqlite3 doesn't auto-wrap DDL the way
+        # it does DML, so each ALTER would otherwise be its own auto-commit.
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            for table, column, ctype in _LATE_COLUMNS:
+                cols = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")}
+                if column not in cols:
+                    self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ctype}")
+            # activity table is created in the base schema for new DBs; ensure for old ones.
+            self._conn.execute(
+                "CREATE TABLE IF NOT EXISTS activity "
+                "(id INTEGER PRIMARY KEY AUTOINCREMENT, event TEXT, detail TEXT, ts REAL)"
+            )
+            self._conn.executescript(_LATE_TABLES)
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
+
+    def __enter__(self) -> "Store":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
 
     # -- meta -------------------------------------------------------------------
     def set_meta(self, key: str, value: str) -> None:
@@ -328,4 +351,7 @@ class Store:
         return json.dumps(self.export_dict(), indent=2)
 
     def close(self) -> None:
-        self._conn.close()
+        with self._lock:
+            if not self._closed:
+                self._conn.close()
+                self._closed = True

@@ -138,6 +138,7 @@ async def _run(cfg: Config, workdir: Path, prompt: str, scope_file: str | None, 
                 await toolctx.browser.close()
             except Exception:  # noqa: BLE001
                 pass
+        engagement.close()
     print()  # trailing newline
     return 0
 

@@ -417,6 +417,12 @@ class RiftorApp(App):
                 await mgr.close()
             except Exception:  # noqa: BLE001
                 pass
+        # Close the SQLite engagement DB so WAL checkpoints run and the FD is
+        # released. Without this, the connection leaks on every app exit.
+        try:
+            self.engagement.close()
+        except Exception:  # noqa: BLE001
+            pass
 
     def _toolchain_heads_up(self) -> None:
         """One-line note if recon tools are missing — surfaced up front, not mid-task."""
@@ -1717,11 +1723,15 @@ class RiftorApp(App):
         now = time.monotonic()
         self._rate_times = [t for t in self._rate_times if now - t < 60.0]
         if len(self._rate_times) >= limit:
+            # Sleep until the *oldest* request in the window expires, then evict
+            # it so we never exceed `limit` calls in any 60s sliding window.
             wait = 60.0 - (now - self._rate_times[0])
             if wait > 0:
                 self._note(f"rate limit ({limit}/min) — waiting {wait:.0f}s")
                 await asyncio.sleep(wait)
-        self._rate_times.append(time.monotonic())
+            now = time.monotonic()
+            self._rate_times = [t for t in self._rate_times if now - t < 60.0]
+        self._rate_times.append(now)
 
     # ---- agent loop ------------------------------------------------------------
     @work(exclusive=True)
