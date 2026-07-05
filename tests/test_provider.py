@@ -284,3 +284,77 @@ async def test_tool_call_fragments_without_index_coalesce_by_id(monkeypatch):
     turn = await _run_tool_stream(monkeypatch, chunks)
     assert len(turn.tool_calls) == 1
     assert turn.tool_calls[0].arguments == {"host": "x"}
+
+
+@pytest.mark.asyncio
+async def test_indexless_interleaved_continuation_goes_to_right_call(monkeypatch):
+    """Two indexless calls interleaved: call #0 opens, call #1 opens, then a
+    pure continuation fragment (no id, no index, no name) for call #1. The
+    continuation must land on the most-recently-touched call (#1), and the two
+    calls' arguments must stay separate (issue #116)."""
+    chunks = [
+        _TCChunk([_TC(id="a", name="nmap", arguments='{"host":"x"}')]),
+        _TCChunk([_TC(id="b", name="httpx", arguments='{"ur')]),
+        _TCChunk([_TC(arguments='l":"y"}')]),  # continues httpx (most recent)
+    ]
+    turn = await _run_tool_stream(monkeypatch, chunks)
+    by_name = {c.name: c for c in turn.tool_calls}
+    assert set(by_name) == {"nmap", "httpx"}
+    assert by_name["nmap"].arguments == {"host": "x"}
+    assert by_name["httpx"].arguments == {"url": "y"}
+
+
+@pytest.mark.asyncio
+async def test_two_same_named_indexless_calls_do_not_merge(monkeypatch):
+    """Two distinct calls to the same tool, each id-tagged but index-less, must
+    not merge into one (issue #116)."""
+    chunks = [
+        _TCChunk([_TC(id="a", name="bash", arguments='{"command":"id"}')]),
+        _TCChunk([_TC(id="b", name="bash", arguments='{"command":"whoami"}')]),
+    ]
+    turn = await _run_tool_stream(monkeypatch, chunks)
+    assert len(turn.tool_calls) == 2
+    cmds = sorted(c.arguments["command"] for c in turn.tool_calls)
+    assert cmds == ["id", "whoami"]
+
+
+# --- classify_error status-code precedence (#117) -----------------------------
+
+class _StatusExc(Exception):
+    def __init__(self, message, status_code=None):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+def test_classify_uses_status_code_over_message_digits():
+    """A connection error mentioning port 5000 must NOT be misread as a 500
+    server error (issue #117)."""
+    err = prov.classify_error(Exception("connection refused on port 5000"))
+    assert err.kind == "network"
+    assert err.retryable is True
+
+
+def test_classify_real_500_is_server_error():
+    err = prov.classify_error(_StatusExc("upstream boom", status_code=503))
+    assert err.kind == "server"
+    assert err.retryable is True
+
+
+def test_classify_real_400_is_validation_not_auth():
+    """A 400 whose message happens to contain '401' must classify by the real
+    status code (validation), not the stray digits (auth)."""
+    err = prov.classify_error(_StatusExc("bad request near token 401xyz", status_code=400))
+    assert err.kind == "validation"
+    assert err.retryable is False
+
+
+def test_classify_429_status_is_rate_limit():
+    err = prov.classify_error(_StatusExc("slow down", status_code=429))
+    assert err.kind == "rate_limit"
+    assert err.retryable is True
+
+
+def test_classify_message_fallback_when_no_status():
+    """With no status_code attribute, fall back to a word-boundary match."""
+    err = prov.classify_error(Exception("HTTP 502 Bad Gateway"))
+    assert err.kind == "server"
