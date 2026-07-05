@@ -133,3 +133,42 @@ def test_headless_registers_plugins(monkeypatch, tmp_path):
         tools_pkg.ALL_TOOLS[:] = snap_list
         tools_pkg._BY_NAME.clear()
         tools_pkg._BY_NAME.update(snap_map)
+
+
+# --- session checkpointing (#120) ---------------------------------------------
+
+def test_headless_run_checkpoints_session(monkeypatch, tmp_workdir):
+    """A completed headless run must persist a resumable session marked complete
+    (issue #120). Uses the offline demo mock so no model is called."""
+    from riftor.agent import session as sessions
+    from riftor.headless import _run
+
+    monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "recon complete, no cap")
+    cfg = Config(model="anthropic/claude-sonnet-4-6", api_key="sk-demo")
+
+    import asyncio
+    rc = asyncio.run(_run(cfg, tmp_workdir, "enumerate the target", None))
+    assert rc == 0
+
+    rows = sessions.list_sessions(tmp_workdir)
+    assert len(rows) == 1
+    assert rows[0]["complete"] is True
+    loaded = sessions.load(tmp_workdir, rows[0]["id"])
+    assert loaded is not None
+    # the user prompt and the assistant answer are both persisted
+    assert any(m.get("role") == "user" and "enumerate" in m.get("content", "")
+               for m in loaded["messages"])
+    assert any(m.get("role") == "assistant" for m in loaded["messages"])
+
+
+def test_headless_no_incomplete_left_after_success(monkeypatch, tmp_workdir):
+    """After a clean run there must be no incomplete (crash) checkpoint lingering."""
+    from riftor.agent import session as sessions
+    from riftor.headless import _run
+
+    monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "done")
+    cfg = Config(model="anthropic/claude-sonnet-4-6", api_key="sk-demo")
+
+    import asyncio
+    asyncio.run(_run(cfg, tmp_workdir, "scan", None))
+    assert sessions.find_incomplete(tmp_workdir) == []
