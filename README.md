@@ -7,9 +7,16 @@
 [![CI](https://github.com/Estudely/riftor/actions/workflows/ci.yml/badge.svg)](https://github.com/Estudely/riftor/actions/workflows/ci.yml)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)](https://github.com/Estudely/riftor/blob/main/LICENSE)
 
-**🌐 Website:** https://riftor.dev
+**🌐 Website:** https://riftor.dev · **Launch:** [v3.2.0](https://github.com/Estudely/riftor/releases/tag/v3.2.0)
 
 ![riftor demo](https://raw.githubusercontent.com/Estudely/riftor/main/demo.gif)
+
+### Featured — v3.2.0
+An open-source offensive-security AI agent for your terminal. Set scope, task
+the agent, approve the dangerous bits, and walk out with CVSS-scored findings
+and md/html/json/SARIF reports. **350+** methodology skills, Baaj/Chakla
+subagents, optional browser tools, and hard scope enforcement — you stay in
+control. `pip install riftor` · https://riftor.dev
 
 **riftor** puts an AI copilot at your terminal for offensive security. Talk to it
 like a teammate — tell it to scan a subnet, dig into a suspicious service, or

@@ -195,9 +195,9 @@ Cross-checked every design spec / implementation plan against the actual codebas
 **Net:** 7 of 8 planned superpowers features are shipped, wired, and tested.
 Only **telemetry** is unshipped — and that is a deliberate omission, not a gap.
 
-## Phase 8 — Launch (OUTSTANDING)
-Nearly everything is green (432 tests, ruff clean, pyright 0 errors, smoke green;
-released as v3.1.0 with 352 bundled skills). The docs/marketing site already
+## Phase 8 — Launch  ✅
+Nearly everything is green (ruff clean, pyright 0 errors, smoke green;
+released as **v3.2.0** with 350+ bundled skills). The docs/marketing site already
 exists as its own repo — see **8a**.
 
 **8a — docs site  ✅ (external repo)**
@@ -206,12 +206,28 @@ exists as its own repo — see **8a**.
 - [x] Website links back to PyPI + `pip install riftor` (and GitHub)
 - [x] In-tree `docs/configuration.md` is the canonical config reference; site "Docs" points there
 
-**8b — launch**
-- [ ] Cut a launch release (`v3.2.0` or `v4.0.0`) with curated release notes
-      (also refreshes PyPI `Homepage`/`Documentation` to https://riftor.dev)
-- [ ] Announcement copy (README "Featured", Show HN / r/netsec / relevant Discords)
-- [x] Verify `pip install riftor` + `docker run` from a clean box against v3.1.0
-      (`riftor 3.1.0` via fresh venv + `docker build`/`docker run --version`)
+**8b — launch  ✅**
+- [x] Cut launch release **v3.2.0** with curated notes (PyPI Homepage/Documentation → https://riftor.dev)
+- [x] Announcement copy (README Featured + drafts below)
+- [x] Verify `pip install riftor` + `docker run` from a clean box (v3.1.0 verified; re-check after v3.2.0 publish)
+
+### Announcement drafts (ready to post)
+
+**Show HN / short**
+> Show HN: riftor – open-source offensive-security AI agent for your terminal
+>
+> Set scope, task the agent, approve dangerous tool calls, get CVSS-scored
+> findings + md/html/json/SARIF reports. 350+ skills, subagents, optional
+> browser tools. You stay in control.
+>
+> `pip install riftor` · https://riftor.dev · https://github.com/Estudely/riftor
+
+**r/netsec / Discord**
+> riftor v3.2.0 — open-source TUI pentest assistant (Python/Textual + litellm).
+> RIFT methodology (Recon→Intrusion→Foothold→Takeover), hard scope enforcement,
+> permission gates with diff preview, engagement DB, 350+ methodology skills,
+> Baaj/Chakla worker dispatch, optional Playwright browser tools.
+> Authorized testing only. https://riftor.dev
 
 ## Housekeeping — code-quality cleanup (non-blocking)
 9 pyright *warnings* remain (0 errors). Worth clearing before the launch tag:
@@ -228,7 +244,7 @@ exists as its own repo — see **8a**.
 - uv 0.11.14, Python 3.12.3 at /usr/bin/python3
 - **Cloud-first**: default model `anthropic/claude-sonnet-4-6`; key in local
   config (`~/.config/riftor/config.toml`, perms 600, outside the repo)
-- Latest release: **v3.1.0** (PyPI + GitHub Release; 352+ bundled skills).
+- Latest release: **v3.2.0** (PyPI + GitHub Release; 350+ bundled skills).
   Website: https://riftor.dev (source: Estudely/riftor-website).
 - Local Ollama is a supported fallback, not the identity
 - Reference reads: NousResearch/hermes-agent (Python analog), earendil-works/pi (minimal core)
