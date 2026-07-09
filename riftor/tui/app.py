@@ -153,11 +153,11 @@ class PromptInput(Input):
 _COMMANDS = [
     "/help", "/clear", "/model", "/stage", "/scope", "/findings", "/finding",
     "/edit-finding", "/delete-finding", "/hosts", "/services", "/report",
-    "/sessions", "/resume", "/new", "/theme", "/config", "/tools", "/skills",
+    "/sessions", "/resume", "/new", "/branch", "/rollback", "/theme", "/config", "/tools", "/skills",
     "/permissions", "/lore", "/genz", "/cost", "/retry", "/continue",
     "/compact", "/timeline", "/audit", "/export", "/conversation",
     "/doctor", "/review", "/memory", "/template", "/browser",
-    "/screenshots", "/exit",
+    "/screenshots", "/graph", "/merge", "/exit",
 ]
 
 HELP = """\
@@ -173,12 +173,15 @@ _Conversation_
 _Engagement_
 - `/scope` — show scope · `/scope add 10.0.0.0/24 example.com` · `/scope out <t>`
   · `/scope rm <t>` · `/scope clear` · `/scope on|off|dry` · `/scope import <file>` · `/scope export [file]`
+  · `/scope bounty <file|hackerone:<handle>>` — import bug-bounty program scope
 - `/stage [R|I|F|T]` — show or set the RIFT stage (Recon/Intrusion/Foothold/Takeover)
 - `/findings` — list findings (severity-sorted) · `/finding <id>` — show one
 - `/edit-finding <id> sev=high tags=...` · `/delete-finding <id>`
 - `/hosts` · `/services` — discovered infrastructure
 - `/report [md|html|json|sarif|both|all]` — write a report to `.riftor/reports/`
+- `/graph` — render a kill-chain attack graph (Mermaid) from engagement data
 - `/timeline` — engagement activity log · `/export` — archive the whole engagement
+- `/merge <path>` — merge another engagement.db (collaborative hand-off)
 - `/memory [add <tag> <text>|rm <id>|clear]` — engagement notes, hypotheses, and durable lessons
 - `/template [webapp|api|network|ad]` — apply an engagement playbook · `/template off`
 
@@ -197,6 +200,8 @@ _Settings & sessions_
 - `/browser [headed|headless|close]` — browser mode / teardown · `/screenshots` — view captures
 - `/review` — self-critique findings for false positives before reporting
 - `/sessions` · `/resume <id>` · `/new` — manage saved sessions
+- `/branch [label]` — fork the current session (message history only)
+- `/rollback <n>` — keep only the first *n* messages (truncate history)
 - `/tools` — list available agent tools · `/exit` — quit (`Ctrl+C`)
 
 Type anything else to task the agent. `↑/↓` recall input · `PgUp/PgDn` scroll ·
@@ -211,10 +216,12 @@ _PALETTE_COMMANDS = [
     ("/findings", "Findings", "List findings (severity-sorted)"),
     ("/hosts", "Hosts", "List discovered hosts"),
     ("/services", "Services", "List discovered services"),
+    ("/graph", "Attack graph", "Kill-chain graph from engagement data"),
     ("/report both", "Report", "Write a report (md + html)"),
     ("/report all", "Report (all formats)", "md + html + json + sarif"),
     ("/timeline", "Timeline", "Engagement activity log"),
     ("/export", "Export engagement", "Archive the whole engagement"),
+    ("/merge", "Merge engagement", "Import another engagement.db"),
     ("/conversation", "Export conversation", "Save conversation as markdown"),
     ("/permissions", "Permissions", "Review allow/deny rules"),
     ("/doctor", "Doctor", "Check installed recon tools"),
@@ -312,6 +319,7 @@ class RiftorApp(App):
         self.context = Context(lore=config.lore, genz=config.genz, workdir=self.workdir)
         self.provider = Provider(config)
         self._plugin_errors = tools.register_plugins(config)
+        self._mcp_errors: list = []
         self.tools = tools.all_tools()
         self.tool_schemas = tools.schemas()
         self.engagement = Engagement(self.workdir)
@@ -401,6 +409,9 @@ class RiftorApp(App):
         for err in getattr(self, "_plugin_errors", []):
             self._note(f"plugin '{err.module}' skipped: {err.error.splitlines()[-1]}")
         self._toolchain_heads_up()
+        # MCP discovery is async (stdio handshake); schedule after first paint.
+        if getattr(self.config, "mcp_servers", None):
+            self.run_worker(self._load_mcp(), exclusive=False, exit_on_error=False)
         # If the previous run crashed (incomplete session), prompt for recovery
         # after mount; otherwise resume the latest complete session as normal.
         if sessions.find_incomplete(self.workdir):
@@ -409,6 +420,21 @@ class RiftorApp(App):
             self._note(
                 "rift online · set scope with /scope add <target> before tasking the agent"
             )
+
+    async def _load_mcp(self) -> None:
+        from riftor.mcp import register_mcp
+
+        errors = await register_mcp(self.config)
+        self._mcp_errors = errors
+        self.tools = tools.all_tools()
+        self.tool_schemas = tools.schemas()
+        for err in errors:
+            self._note(f"mcp '{err.server}' skipped: {err.error.splitlines()[-1]}")
+        from riftor.mcp import mcp_status
+
+        connected, _ = mcp_status()
+        if connected:
+            self._note(f"mcp connected: {', '.join(connected)}")
 
     async def on_unmount(self) -> None:
         mgr = self.toolctx.browser
@@ -747,9 +773,13 @@ class RiftorApp(App):
             "/hosts": self._hosts_cmd,
             "/services": self._services_cmd,
             "/report": lambda: self._report_cmd(arg),
+            "/graph": self._graph_cmd,
+            "/merge": lambda: self._merge_cmd(arg),
             "/sessions": self._sessions_cmd,
             "/resume": lambda: self._resume_cmd(arg),
             "/new": self._new_session,
+            "/branch": lambda: self._branch_cmd(arg),
+            "/rollback": lambda: self._rollback_cmd(arg),
             "/theme": lambda: self._theme_cmd(arg),
             "/config": self._open_config,
             "/permissions": lambda: self._permissions_cmd(arg),
@@ -1054,10 +1084,78 @@ class RiftorApp(App):
             self._scope_import(rest[0])
         elif sub == "export":
             self._scope_export(rest[0] if rest else None)
+        elif sub == "bounty" and rest:
+            self._scope_bounty(" ".join(rest))
         else:
             self._note(
-                "usage: /scope [add <t>|out <t>|rm <t>|clear|on|off|dry|import <file>|export [file]]"
+                "usage: /scope [add <t>|out <t>|rm <t>|clear|on|off|dry|"
+                "import <file>|export [file]|bounty <file|hackerone:<handle>>]"
             )
+        self._refresh_status()
+
+    def _scope_bounty(self, arg: str) -> None:
+        """Import scope from a bounty program file or HackerOne handle."""
+        from riftor.engagement.bounty_scope import (
+            apply_bounty_scope,
+            fetch_hackerone,
+            parse_bounty_file,
+        )
+
+        token = (arg or "").strip()
+        if not token:
+            self._note("usage: /scope bounty <file|hackerone:<handle>>")
+            return
+        try:
+            lower = token.lower()
+            if lower.startswith("hackerone:") or lower.startswith("h1:"):
+                handle = token.split(":", 1)[1].strip().lstrip("@")
+                parsed = fetch_hackerone(
+                    handle,
+                    username=self.config.hackerone_username,
+                    token=self.config.hackerone_token,
+                )
+            else:
+                p = Path(token).expanduser()
+                if not p.is_absolute():
+                    p = self.workdir / p
+                parsed = parse_bounty_file(p.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            self._error(f"bounty scope import failed — {exc}")
+            return
+        added_in, added_out = apply_bounty_scope(self.engagement, parsed)
+        msg = f"bounty scope ({parsed.source}): +{added_in} in, +{added_out} out"
+        if parsed.skipped:
+            msg += f" · skipped {len(parsed.skipped)} non-host asset(s)"
+            preview = ", ".join(parsed.skipped[:5])
+            if len(parsed.skipped) > 5:
+                preview += ", …"
+            msg += f" ({preview})"
+        self._note(msg)
+        self._note(
+            "imported scope is not authorization — confirm the program rules before testing"
+        )
+
+    def _merge_cmd(self, arg: str) -> None:
+        from riftor.engagement.merge import merge_engagement_db
+
+        raw = (arg or "").strip()
+        if not raw:
+            self._note("usage: /merge <path-to-engagement.db-or-dir>")
+            return
+        p = Path(raw).expanduser()
+        if not p.is_absolute():
+            p = self.workdir / p
+        if p.is_dir():
+            candidate = p / "engagement.db"
+            if not candidate.exists():
+                candidate = p / ".riftor" / "engagement.db"
+            p = candidate
+        try:
+            stats = merge_engagement_db(self.engagement, p)
+        except Exception as exc:  # noqa: BLE001
+            self._error(f"merge failed — {exc}")
+            return
+        self._note(f"merged: {stats.summary()}")
         self._refresh_status()
 
     def _scope_import(self, path: str) -> None:
@@ -1183,6 +1281,18 @@ class RiftorApp(App):
                 f"| {s.get('service', '')} | {s.get('version', '')} |"
             )
         self._markdown("**services**\n\n" + "\n".join(rows))
+
+    def _graph_cmd(self) -> None:
+        from riftor.engagement.graph import build_graph, to_mermaid, write_graph
+
+        graph = build_graph(self.engagement)
+        if not graph["nodes"]:
+            self._note("no engagement data to graph yet — add hosts, services, or findings")
+            return
+        path = write_graph(self.engagement)
+        mermaid = to_mermaid(graph)
+        self.engagement.store.log_activity("graph", str(path))
+        self._markdown(f"**attack graph** (saved to `{path}`)\n\n```mermaid\n{mermaid}```")
 
     def _report_cmd(self, arg: str) -> None:
         fmt = (arg or "both").strip().lower()
@@ -1615,7 +1725,11 @@ class RiftorApp(App):
         for s in rows:
             marker = "→ " if s["id"] == self.session_id else ""
             flag = "" if s.get("complete", True) else " ⚠"
-            lines.append(f"- {marker}`{s['id']}`{flag} · {s['messages']} msgs · {s['title']}")
+            parent = f" ↳ `{s['parent_id']}`" if s.get("parent_id") else ""
+            label = f" · {s['branch_label']}" if s.get("branch_label") else ""
+            lines.append(
+                f"- {marker}`{s['id']}`{flag}{parent}{label} · {s['messages']} msgs · {s['title']}"
+            )
         self._markdown("**sessions**\n\n" + "\n".join(lines))
 
     def _resume_cmd(self, arg: str) -> None:
@@ -1635,6 +1749,50 @@ class RiftorApp(App):
         self.chat.remove_children()
         self._replay_transcript(self.context.messages)
         self._note(f"resumed session {sid} ({len(data.get('messages', []))} messages)")
+
+    def _branch_cmd(self, arg: str) -> None:
+        label = arg.strip() or None
+        self._save_session()
+        try:
+            new_id = sessions.branch(
+                self.workdir,
+                self.session_id,
+                label=label,
+                model=self.config.model,
+            )
+        except ValueError as exc:
+            self._note(str(exc))
+            return
+        self._resume_cmd(new_id)
+
+    def _rollback_cmd(self, arg: str) -> None:
+        if not arg.strip():
+            self._note("usage: /rollback <n> — keep first n messages")
+            return
+        try:
+            n = int(arg.strip())
+        except ValueError:
+            self._note("usage: /rollback <n> — n must be a non-negative integer")
+            return
+        if n < 0:
+            self._note("rollback: n must be >= 0")
+            return
+        msg_count = len(self.context.messages)
+        if n > msg_count:
+            self._note(f"rollback: only {msg_count} messages in session (requested {n})")
+            return
+        data = sessions.truncate(
+            self.workdir, self.session_id, n, model=self.config.model,
+        )
+        if not data:
+            self._note(f"no such session: {self.session_id}")
+            return
+        self.context.load(data.get("messages", []))
+        self.context.repair()
+        self._clear_flock()
+        self.chat.remove_children()
+        self._replay_transcript(self.context.messages)
+        self._note(f"rolled back to {n} messages")
 
     def _reset_browser_for_session(self) -> None:
         """Close and forget the session's browser on a session switch (/new, /resume)

@@ -145,7 +145,7 @@ class Store:
             (host, port, proto, service, version, note, time.time()),
         )
         self._conn.commit()
-        return int(cur.lastrowid)
+        return int(cur.lastrowid or 0)
 
     def service_exists(self, host: str, port: int | None, proto: str = "tcp") -> bool:
         row = self._conn.execute(

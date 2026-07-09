@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **Version:** 3.2.0 (PyPI + GitHub Release)
 - **Website:** https://riftor.dev (source: https://github.com/Estudely/riftor-website — separate repo)
-- **Roadmap:** `todo.md` (Phase 8 launch is done; housekeeping items remain)
+- **Roadmap:** `todo.md` (Phase 8 launch done; housekeeping + post-launch feature MVPs shipped)
 - **Config reference:** `docs/configuration.md` (canonical; site "Docs" links here)
 
 ## Development commands
@@ -25,7 +25,7 @@ All commands use `uv` (Astral's Python package manager). Install dev dependencie
 | Build | `uv build` |
 | Pre-commit hooks | `make install-hooks` or `uv run pre-commit install` |
 
-Optional extras: `uv sync --extra browser` (Playwright for `browser_*` tools), `--extra browser-ui` (inline screenshots on Python 3.12+), `--extra dev`.
+Optional extras: `uv sync --extra browser` (Playwright for `browser_*` tools), `--extra browser-ui` (inline screenshots on Python 3.12+), `--extra mcp` (stdio MCP client), `--extra dev`.
 
 CI runs lint, type check, unit tests, and smoke on Python 3.11 + 3.12. All tests run **offline** — no API key or model needed.
 
@@ -34,7 +34,7 @@ CI runs lint, type check, unit tests, and smoke on Python 3.11 + 3.12. All tests
 
 ## Architecture
 
-riftor is a Python 3.11+ TUI pentest assistant: a Textual full-screen app backed by litellm, organized around the **RIFT** methodology (Recon → Intrusion → Foothold → Takeover). Current release ships **34** agent tools, **350+** bundled methodology skills, Baaj/Chakla subagents, optional browser automation, plugins, memory/lessons/hypotheses, and hard scope + permission gates.
+riftor is a Python 3.11+ TUI pentest assistant: a Textual full-screen app backed by litellm, organized around the **RIFT** methodology (Recon → Intrusion → Foothold → Takeover). Current release ships **36** agent tools, **350+** bundled methodology skills, Baaj/Chakla subagents, optional browser automation + MCP client, plugins, memory/lessons/hypotheses, bounty-scope import, attack graphs, session branching, and hard scope + permission gates.
 
 ### Entry and dispatch (`riftor/__main__.py`)
 

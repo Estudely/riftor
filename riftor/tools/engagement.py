@@ -134,6 +134,126 @@ class AddScopeTool(Tool):
         return ToolResult(msg)
 
 
+class ImportBountyScopeTool(Tool):
+    name = "import_bounty_scope"
+    requires_permission = True
+    description = (
+        "Import in/out-of-scope targets from a bug-bounty program. Pass either a "
+        "local file (HackerOne structured_scopes JSON or a plain target list) via "
+        "`path`, or a HackerOne program handle via `handle` (needs "
+        "HACKERONE_USERNAME + HACKERONE_TOKEN). Requires operator approval — "
+        "scope import is authorization-sensitive."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Local file with HackerOne JSON or a line-based target list.",
+            },
+            "handle": {
+                "type": "string",
+                "description": "HackerOne program handle (fetches structured_scopes via API).",
+            },
+            "platform": {
+                "type": "string",
+                "enum": ["auto", "hackerone", "generic"],
+                "description": "Parser hint for file imports (default auto).",
+            },
+        },
+    }
+
+    def preview(self, args: dict) -> str:
+        if args.get("handle"):
+            return f"import HackerOne scope for @{args['handle']}"
+        if args.get("path"):
+            return f"import bounty scope from {args['path']}"
+        return "import bounty scope"
+
+    async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        from riftor.engagement.bounty_scope import (
+            apply_bounty_scope,
+            fetch_hackerone,
+            parse_bounty_file,
+        )
+
+        eng = ctx.engagement
+        if eng is None:
+            return ToolResult("error: no active engagement", is_error=True)
+        handle = str(args.get("handle") or "").strip()
+        path = str(args.get("path") or "").strip()
+        platform = str(args.get("platform") or "auto").strip().lower()
+        try:
+            if handle:
+                username = getattr(ctx.config, "hackerone_username", None) if ctx.config else None
+                token = getattr(ctx.config, "hackerone_token", None) if ctx.config else None
+                parsed = fetch_hackerone(handle, username=username, token=token)
+            elif path:
+                p = Path(path).expanduser()
+                if not p.is_absolute():
+                    p = ctx.workdir / p
+                text = p.read_text(encoding="utf-8")
+                parsed = parse_bounty_file(text, platform=platform)
+            else:
+                return ToolResult("error: provide path= or handle=", is_error=True)
+        except Exception as exc:  # noqa: BLE001
+            return ToolResult(f"bounty scope import failed: {exc}", is_error=True)
+
+        added_in, added_out = apply_bounty_scope(eng, parsed)
+        msg = (
+            f"bounty scope ({parsed.source}): +{added_in} in, +{added_out} out"
+        )
+        if parsed.skipped:
+            msg += f" · skipped {len(parsed.skipped)} non-host asset(s)"
+        return ToolResult(msg)
+
+
+class MergeEngagementTool(Tool):
+    name = "merge_engagement"
+    requires_permission = True
+    description = (
+        "Merge another operator's engagement.db into this engagement (skip "
+        "duplicates). Use for collaborative hand-offs — shared workdir copies or "
+        "exported DBs. Does not overwrite local findings."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Path to another engagement.db (or a directory containing one).",
+            },
+        },
+        "required": ["path"],
+    }
+
+    def preview(self, args: dict) -> str:
+        return f"merge engagement from {args.get('path', '?')}"
+
+    async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        from riftor.engagement.merge import merge_engagement_db
+
+        eng = ctx.engagement
+        if eng is None:
+            return ToolResult("error: no active engagement", is_error=True)
+        raw = str(args.get("path") or "").strip()
+        if not raw:
+            return ToolResult("error: path is required", is_error=True)
+        p = Path(raw).expanduser()
+        if not p.is_absolute():
+            p = ctx.workdir / p
+        if p.is_dir():
+            candidate = p / "engagement.db"
+            if not candidate.exists():
+                candidate = p / ".riftor" / "engagement.db"
+            p = candidate
+        try:
+            stats = merge_engagement_db(eng, p)
+        except Exception as exc:  # noqa: BLE001
+            return ToolResult(f"merge failed: {exc}", is_error=True)
+        return ToolResult(f"merged from {stats.source}: {stats.summary()}")
+
+
 class RecordServiceTool(Tool):
     name = "record_service"
     description = "Record a discovered host/port/service in the engagement state."

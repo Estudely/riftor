@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from riftor.tools.base import Tool, ToolContext, ToolResult
 
 if TYPE_CHECKING:
-    from playwright.async_api import Locator, Page
+    from playwright.async_api import BrowserContext, Locator, Page, Playwright
 
 
 class BrowserError(Exception):
@@ -29,9 +29,9 @@ class BrowserManager:
         self._workdir = workdir
         self._headless = headless
         self._persistent = persistent
-        self._pw = None  # async_playwright context manager instance
-        self._context = None  # BrowserContext
-        self._page: "Page | None" = None
+        self._pw: Playwright | None = None
+        self._context: BrowserContext | None = None
+        self._page: Page | None = None
         self._ref_targets: dict[str, dict] = {}
         self.console_log: list[str] = []
         self.network_log: list[str] = []
@@ -40,7 +40,7 @@ class BrowserManager:
     def launched(self) -> bool:
         return self._page is not None
 
-    async def _launch(self) -> tuple[object, "Page"]:
+    async def _launch(self) -> tuple[BrowserContext, Page]:
         """Start Playwright + Chromium. Returns (context, page). Auto-installs
         Chromium binaries on first use; raises BrowserError on failure."""
         try:
@@ -65,15 +65,18 @@ class BrowserManager:
             context, page = await self._do_launch(profile)
         return context, page
 
-    async def _do_launch(self, profile: Path) -> tuple[object, "Page"]:
+    async def _do_launch(self, profile: Path) -> tuple[BrowserContext, Page]:
+        pw = self._pw
+        if pw is None:
+            raise BrowserError("Playwright driver is not started")
         if self._persistent:
             profile.mkdir(parents=True, exist_ok=True)
-            context = await self._pw.chromium.launch_persistent_context(
+            context = await pw.chromium.launch_persistent_context(
                 str(profile), headless=self._headless
             )
             page = context.pages[0] if context.pages else await context.new_page()
         else:
-            browser = await self._pw.chromium.launch(headless=self._headless)
+            browser = await pw.chromium.launch(headless=self._headless)
             context = await browser.new_context()
             page = await context.new_page()
         return context, page

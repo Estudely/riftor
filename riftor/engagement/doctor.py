@@ -121,6 +121,26 @@ def render_markdown(statuses: list[ToolStatus]) -> str:
     lines.append(f"- {bmark} `browser` (Playwright) — {detail}")
     lines.append("")
 
+    try:
+        import importlib.util
+
+        mcp_pkg = importlib.util.find_spec("mcp") is not None
+    except Exception:  # noqa: BLE001
+        mcp_pkg = False
+    from riftor.mcp import mcp_status
+
+    connected, mcp_errors = mcp_status()
+    lines.append("_MCP_")
+    if not mcp_pkg:
+        lines.append("- ✗ `mcp` package — not installed (`pip install 'riftor[mcp]'`)")
+    elif connected:
+        lines.append(f"- ✓ connected: {', '.join(f'`{s}`' for s in connected)}")
+    else:
+        lines.append("- · no MCP servers connected (configure `[[mcp_servers]]`)")
+    for err in mcp_errors:
+        lines.append(f"- ✗ `{err.server}` — {err.error.splitlines()[-1]}")
+    lines.append("")
+
     summary = summarize(statuses)
     lines.append(
         f"**{summary['present']}/{summary['total']} present.** "

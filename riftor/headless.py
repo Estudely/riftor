@@ -16,7 +16,7 @@ from typing import Callable
 from riftor import tools
 from riftor.agent import session as sessions
 from riftor.agent.context import Context
-from riftor.agent.provider import Provider, ProviderError, ToolCall
+from riftor.agent.provider import Provider, ProviderError, ToolCall, Turn
 from riftor.config import Config
 from riftor import config as configmod
 from riftor.engagement import Engagement
@@ -101,6 +101,14 @@ async def _run(cfg: Config, workdir: Path, prompt: str, scope_file: str | None, 
     )
     for err in tools.register_plugins(cfg):
         print(f"riftor: plugin '{err.module}' skipped: {err.error.splitlines()[-1]}", file=sys.stderr)
+    if getattr(cfg, "mcp_servers", None):
+        from riftor.mcp import register_mcp
+
+        for err in await register_mcp(cfg):
+            print(
+                f"riftor: mcp '{err.server}' skipped: {err.error.splitlines()[-1]}",
+                file=sys.stderr,
+            )
     schemas = tools.schemas()
 
     context.add_user(prompt)
@@ -120,7 +128,7 @@ async def _run(cfg: Config, workdir: Path, prompt: str, scope_file: str | None, 
             context.repair()
             _checkpoint(complete=False)  # per-step checkpoint before the model call
             text_parts: list[str] = []
-            turn = None
+            turn: Turn | None = None
             try:
                 async for event, payload in provider.stream_turn(context.messages, schemas):
                     if event == "thinking":
@@ -133,7 +141,7 @@ async def _run(cfg: Config, workdir: Path, prompt: str, scope_file: str | None, 
                         sys.stdout.flush()
                         text_parts.append(str(payload))
                     elif event == "done":
-                        turn = payload  # type: ignore[assignment]  # ("done", Turn)
+                        turn = payload if isinstance(payload, Turn) else None
             except ProviderError as exc:
                 print(f"\nriftor: provider error [{exc.kind}] — {exc}", file=sys.stderr)
                 _checkpoint(complete=False)  # leave a resumable checkpoint on error

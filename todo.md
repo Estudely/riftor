@@ -229,14 +229,30 @@ exists as its own repo — see **8a**.
 > Baaj/Chakla worker dispatch, optional Playwright browser tools.
 > Authorized testing only. https://riftor.dev
 
-## Housekeeping — code-quality cleanup (non-blocking)
-9 pyright *warnings* remain (0 errors). Worth clearing before the launch tag:
-- [ ] `engagement/state.py:148` — `int(int | None)` needs a `None` guard
-- [ ] `headless.py:143-146` — annotate the `Turn` object so attribute access is typed
-- [ ] `tools/browser.py:71,76,244` — guard optional Playwright member access
-- [ ] `tui/theme.py:34` — `str | bool` passed where `bool` is expected
+## Housekeeping — code-quality cleanup  ✅
+- [x] `engagement/state.py:148` — `int(cur.lastrowid or 0)` None guard
+- [x] `headless.py` — annotate `turn: Turn | None`
+- [x] `tools/browser.py` — typed `Playwright` / `BrowserContext` members
+- [x] `tui/theme.py` — coerce palette values; `dark=bool(...)`
 - [x] Telemetry intentionally dropped — recorded in
       `docs/superpowers/specs/2026-06-10-telemetry-design.md`
+- [x] Dependabot #136 (`setup-uv`) + #137 (`litellm`) merged
+
+## Post-launch backlog — MVPs shipped  ✅
+| # | Title | Status |
+|---|-------|--------|
+| [#42](https://github.com/Estudely/riftor/issues/42) | Custom-provider route markers | ✅ `agent/custom_route.py` |
+| [#49](https://github.com/Estudely/riftor/issues/49) | MCP support | ✅ stdio client (`riftor[mcp]`, `[[mcp_servers]]`) |
+| [#50](https://github.com/Estudely/riftor/issues/50) | Collaborative mode | ✅ `/merge` + `merge_engagement` |
+| [#52](https://github.com/Estudely/riftor/issues/52) | Auto-scope from bug bounty platforms | ✅ `/scope bounty` + HackerOne JSON/API |
+| [#53](https://github.com/Estudely/riftor/issues/53) | Attack graph / kill chain visualization | ✅ `/graph` Mermaid MVP |
+| [#59](https://github.com/Estudely/riftor/issues/59) | Session branching / rollback | ✅ `/branch` + `/rollback` (message-only) |
+
+**Follow-ups (not blockers):** live multi-writer collab sync; MCP SSE/HTTP;
+interactive TUI graph canvas; engagement-DB snapshots on rollback; second
+custom provider using `custom_route`.
+
+**Deferred (non-blocking):** real Ollama end-to-end model run (Phase 4b); optional announcement posts (drafts above).
 
 ---
 
@@ -254,29 +270,40 @@ exists as its own repo — see **8a**.
 riftor/
   __main__.py            entry point: `riftor`
   config.py              ~/.config/riftor/config.toml
+  plugins.py             operator plugin discovery
+  mcp.py                 stdio MCP client (optional riftor[mcp])
+  terminology.py         Baaj/Chakla renameable labels
   tui/
-    app.py               Textual App (agent loop, commands, scope enforcement)
+    app.py               Textual App (agent loop, commands, scope, flock UI)
     widgets.py           Banner + [R·I·F·T] status bar (palette-driven)
-    theme.py             4 themes: rift / void / fracture / singularity
-    config_screen.py     /config settings modal
+    theme.py             7 themes: rift / dusk / void / fracture / singularity / dawn / paper
+    config_screen.py     /config settings modal (+ WORKERS)
+    screenshot_gallery.py
     themes/rift.tcss     $variable-driven stylesheet
   agent/
     provider.py          litellm wrapper: stream + stream_turn (tool calls)
+    custom_route.py      litellm registry-collision route markers
     context.py           conversation history (+ repair, dump/load)
-    session.py           JSON session save/load/resume per workdir
+    session.py           JSON session save/load/resume/branch/rollback
+    subagent.py          Chakla worker loop
     prompts/system.md    offensive persona + RIFT methodology + tools
   tools/
     base.py              Tool ABC, ToolResult, ToolContext
     core.py              bash / read / write / edit / grep / glob / webfetch
-    engagement.py        scope_list / record_* / set_stage / import_scan / generate_report
+    engagement.py        scope / findings / bounty / merge / skills / …
+    browser.py           browser_* (optional Playwright)
+    subagent.py          dispatch_chakla
   safety/
     permissions.py       permission state + ConfirmScreen modal (scope warning)
     audit.py             JSONL audit log
   engagement/
     scope.py             IP/CIDR/domain/wildcard matching + host extraction
+    bounty_scope.py      HackerOne / generic bounty scope parsers
+    merge.py             collaborative engagement.db merge
+    graph.py             kill-chain Mermaid graph
     state.py             sqlite store (scope/hosts/services/findings/meta)
     cvss.py              CVSS v3.1 base score + severity bands
-    report.py            markdown + self-contained HTML report
+    report.py            md / html / json / SARIF
     parsers.py           parse nmap/httpx/nuclei output → services/findings
 demo.tape                VHS script → demo.gif (auto-rendered by CI)
 ```

@@ -40,8 +40,14 @@ browser = [
 browser-ui = [
     "textual-image[textual]>=0.13; python_version >= '3.12'",
 ]
+# MCP client (stdio servers → agent tools). Optional — the SDK pulls in httpx
+# and friends that a terminal-only run never needs.
+mcp = [
+    "mcp>=1.0,<2",
+]
 dev = [
     "riftor[browser]",  # so the browser tests/smoke actually exercise Playwright
+    "riftor[mcp]",
     "textual-dev>=1.5",
     "ruff>=0.6",
     "pytest>=8.0",

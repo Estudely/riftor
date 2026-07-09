@@ -32,6 +32,9 @@ falls back to detected defaults (it won't overwrite your file) and launches.
 | `plugins_enabled` | bool | `true` | Master switch for operator plugins. `false` disables all plugin loading. |
 | `plugins_allow` | list | `[]` | If non-empty, only these plugin module names are loaded. |
 | `plugins_deny` | list | `[]` | Plugin module names to skip. Deny wins over allow. |
+| `mcp_enabled` | bool | `true` | Master switch for MCP client connections (`riftor[mcp]`). |
+| `hackerone_username` | string | — | Optional HackerOne API username for `/scope bounty hackerone:<handle>` (prefer env `HACKERONE_USERNAME`). |
+| `hackerone_token` | string | — | Optional HackerOne API token (prefer env `HACKERONE_TOKEN`). |
 | `chakla_model` | string | `anthropic/claude-haiku-4-5-20251001` | The cheap worker model used by dispatched Chakla subagents. |
 | `chakla_max_workers` | int | `5` | Max number of Chakla workers per dispatch batch. |
 | `chakla_timeout_s` | int | `300` | Per-worker wall-clock timeout in seconds. |
@@ -203,6 +206,41 @@ Control loading with the config fields above:
 > operator-owned config directory is the trust boundary. Only install plugins you
 > trust. Plugin tools still flow through the permission and scope engine according
 > to their own `requires_permission` / `danger` / `scope_sensitive` flags.
+
+## MCP servers
+
+Install the optional extra once: `pip install 'riftor[mcp]'` (or
+`uv sync --extra mcp`). Then declare stdio servers as top-level tables:
+
+```toml
+[riftor]
+mcp_enabled = true
+
+[[mcp_servers]]
+name = "filesystem"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+```
+
+At startup riftor connects, lists tools, and registers them as
+`mcp_<server>_<tool>` agent tools (permission-gated by default). A bad server is
+skipped with a warning — never fatal. `/doctor` reports connected servers.
+`mcp_enabled = false` is the kill switch. SSE/HTTP transports are not in this
+MVP — stdio only.
+
+## Bug-bounty scope import
+
+`/scope bounty <file>` accepts a HackerOne `structured_scopes` JSON export or a
+plain target list. `/scope bounty hackerone:<handle>` fetches the program via the
+HackerOne API using `HACKERONE_USERNAME` + `HACKERONE_TOKEN` (or the matching
+config fields). Non-host assets (mobile apps, etc.) are skipped and listed.
+Imported scope is **not** authorization — confirm program rules before testing.
+
+## Collaborative merge
+
+`/merge <path>` (and the `merge_engagement` tool) imports scope/hosts/services/
+findings from another `engagement.db` with skip-on-conflict semantics. Use it for
+operator hand-offs or a shared workdir copy — not a live multi-writer sync server.
 
 ## Providers & models
 

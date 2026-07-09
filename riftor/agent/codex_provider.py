@@ -24,6 +24,7 @@ from importlib import resources
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from riftor.agent import custom_route
 from riftor.codex_auth import _jwt_claims, _jwt_exp, codex_home
 
 if TYPE_CHECKING:
@@ -728,7 +729,8 @@ def _stream_responses(
 # (gpt-5.5, gpt-5.3-codex, ...) to its built-in OpenAI provider, bypassing this
 # custom handler. We prefix the bare name with an opaque marker so litellm cannot
 # match it and routes to us; the handler strips the marker before calling the API.
-_ROUTE_MARKER = "riftorcodex-"
+_ROUTE_MARKER = custom_route.route_marker("codex")
+assert _ROUTE_MARKER == "riftorcodex-"
 
 
 def to_litellm_model(model: str) -> str:
@@ -737,23 +739,15 @@ def to_litellm_model(model: str) -> str:
     `codex/gpt-5.5` -> `codex/riftorcodex-gpt-5.5` (registry-opaque, routes to us).
     Non-codex ids pass through unchanged. Idempotent.
     """
-    prefix = "codex/"
-    if not model.startswith(prefix):
-        return model
-    bare = model[len(prefix):]
-    if bare.startswith(_ROUTE_MARKER):
-        return model
-    return f"{prefix}{_ROUTE_MARKER}{bare}"
+    return custom_route.to_litellm_model(
+        model, provider_key="codex", marker=_ROUTE_MARKER
+    )
 
 
 def _bare_model(model: str) -> str:
     """Strip the `codex/` prefix AND the internal route marker, yielding the real
     model id to send to the Codex backend."""
-    prefix = "codex/"
-    bare = model[len(prefix):] if model.startswith(prefix) else model
-    if bare.startswith(_ROUTE_MARKER):
-        bare = bare[len(_ROUTE_MARKER):]
-    return bare
+    return custom_route.bare_model(model, provider_key="codex", marker=_ROUTE_MARKER)
 
 
 def _chunk_to_streaming(chunk: CodexChunk) -> dict:

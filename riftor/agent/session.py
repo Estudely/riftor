@@ -44,16 +44,25 @@ def save(
     model: str,
     *,
     complete: bool = True,
+    parent_id: str | None = None,
+    branch_label: str | None = None,
 ) -> Path:
     """Persist a session atomically. ``complete=False`` marks a mid-run checkpoint
     so a crash mid-turn can be detected and offered for resume on next launch."""
     path = sessions_dir(workdir) / f"{session_id}.json"
     created = time.time()
+    existing_parent_id: str | None = None
+    existing_branch_label: str | None = None
     if path.exists():
         try:
-            created = json.loads(path.read_text(encoding="utf-8")).get("created", created)
+            prev = json.loads(path.read_text(encoding="utf-8"))
+            created = prev.get("created", created)
+            existing_parent_id = prev.get("parent_id")
+            existing_branch_label = prev.get("branch_label")
         except Exception:  # noqa: BLE001
             pass
+    resolved_parent = parent_id if parent_id is not None else existing_parent_id
+    resolved_label = branch_label if branch_label is not None else existing_branch_label
     payload = {
         "id": session_id,
         "created": created,
@@ -63,6 +72,10 @@ def save(
         "title": _title(messages),
         "messages": messages,
     }
+    if resolved_parent is not None:
+        payload["parent_id"] = resolved_parent
+    if resolved_label is not None:
+        payload["branch_label"] = resolved_label
     # atomic write: unique tmp + replace, so a crash never leaves a half-written
     # file AND two processes writing the same session don't clobber each other's
     # tmp file (issue #112). mkstemp gives a per-writer name in the same dir so
@@ -107,6 +120,8 @@ def list_sessions(workdir: Path) -> list[dict]:
                 "model": data.get("model", ""),
                 "complete": data.get("complete", True),
                 "messages": len(data.get("messages", [])),
+                "parent_id": data.get("parent_id"),
+                "branch_label": data.get("branch_label"),
             }
         )
     out.sort(key=lambda s: s["updated"], reverse=True)
@@ -123,3 +138,52 @@ def latest(workdir: Path) -> dict | None:
     if not sessions:
         return None
     return load(workdir, sessions[0]["id"])
+
+
+def branch(
+    workdir: Path,
+    parent_id: str,
+    *,
+    at_index: int | None = None,
+    label: str | None = None,
+    model: str | None = None,
+) -> str:
+    """Fork a session: copy a message prefix into a new session linked to the parent."""
+    parent = load(workdir, parent_id)
+    if parent is None:
+        raise ValueError(f"no such session: {parent_id}")
+    messages = parent.get("messages", [])
+    if at_index is not None:
+        messages = messages[:at_index]
+    new_session_id = new_id()
+    save(
+        workdir,
+        new_session_id,
+        messages,
+        model or parent.get("model", ""),
+        parent_id=parent_id,
+        branch_label=label,
+    )
+    return new_session_id
+
+
+def truncate(
+    workdir: Path,
+    session_id: str,
+    at_index: int,
+    model: str | None = None,
+) -> dict | None:
+    """Drop messages from ``at_index`` onward; preserve branch metadata."""
+    data = load(workdir, session_id)
+    if data is None:
+        return None
+    messages = data.get("messages", [])[:at_index]
+    save(
+        workdir,
+        session_id,
+        messages,
+        model or data.get("model", ""),
+        parent_id=data.get("parent_id"),
+        branch_label=data.get("branch_label"),
+    )
+    return load(workdir, session_id)
