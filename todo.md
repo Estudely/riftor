@@ -208,8 +208,10 @@ exists as its own repo — see **8a**.
 
 **8b — launch**
 - [ ] Cut a launch release (`v3.2.0` or `v4.0.0`) with curated release notes
+      (also refreshes PyPI `Homepage`/`Documentation` to https://riftor.dev)
 - [ ] Announcement copy (README "Featured", Show HN / r/netsec / relevant Discords)
-- [ ] Verify `pip install riftor` + `docker run` from a clean box against the tag
+- [x] Verify `pip install riftor` + `docker run` from a clean box against v3.1.0
+      (`riftor 3.1.0` via fresh venv + `docker build`/`docker run --version`)
 
 ## Housekeeping — code-quality cleanup (non-blocking)
 9 pyright *warnings* remain (0 errors). Worth clearing before the launch tag:
