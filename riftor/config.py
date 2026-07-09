@@ -88,6 +88,14 @@ class Config(BaseModel):
     plugins_enabled: bool = True
     plugins_allow: list[str] = []
     plugins_deny: list[str] = []
+    # MCP client (optional extra ``riftor[mcp]``). Servers are top-level
+    # ``[[mcp_servers]]`` tables in config.toml (name/command/args/env).
+    mcp_enabled: bool = True
+    mcp_servers: list[dict] = []
+    # Optional HackerOne API creds for ``/scope bounty`` (prefer env vars
+    # HACKERONE_USERNAME + HACKERONE_TOKEN; these are fallbacks written 0600).
+    hackerone_username: str | None = None
+    hackerone_token: str | None = None
     # Tracks whether we've shown the first-run onboarding.
     onboarded: bool = False
 
@@ -185,8 +193,18 @@ class Config(BaseModel):
                     data = tomllib.load(fh)
                 section = dict(data.get("riftor", data))
                 section.pop("providers", None)  # never let a stray key shadow the table
+                # Prefer top-level [[mcp_servers]]; allow nested under [riftor] too.
+                mcp_servers = data.get("mcp_servers")
+                if mcp_servers is None:
+                    mcp_servers = section.pop("mcp_servers", None)
+                else:
+                    section.pop("mcp_servers", None)
                 providers = data.get("providers", {})
-                return cls(**section, providers=providers)
+                return cls(
+                    **section,
+                    providers=providers,
+                    mcp_servers=list(mcp_servers or []),
+                )
             except Exception:  # noqa: BLE001 — a bad config must never crash startup
                 # Fall through to detected defaults rather than failing to launch.
                 return cls.detect_defaults()
@@ -262,6 +280,17 @@ class Config(BaseModel):
             f"plugins_enabled = {str(self.plugins_enabled).lower()}",
             f"plugins_allow = [{', '.join(repr(x) for x in self.plugins_allow)}]",
             f"plugins_deny = [{', '.join(repr(x) for x in self.plugins_deny)}]",
+            f"mcp_enabled = {str(self.mcp_enabled).lower()}",
+            (
+                f'hackerone_username = "{self.hackerone_username}"'
+                if self.hackerone_username
+                else "# hackerone_username = \"your-h1-username\""
+            ),
+            (
+                f'hackerone_token = "{self.hackerone_token}"'
+                if self.hackerone_token
+                else "# hackerone_token = \"your-h1-api-token\""
+            ),
 
             f'chakla_model = "{self.chakla_model}"',
             f"chakla_max_workers = {self.chakla_max_workers}",
@@ -278,6 +307,25 @@ class Config(BaseModel):
                 lines.append(f'api_key = "{creds.api_key}"')
             if creds.api_base:
                 lines.append(f'api_base = "{creds.api_base}"')
+        for server in self.mcp_servers:
+            if not isinstance(server, dict):
+                continue
+            name = server.get("name")
+            command = server.get("command")
+            if not name or not command:
+                continue
+            lines.append("")
+            lines.append("[[mcp_servers]]")
+            lines.append(f'name = "{name}"')
+            lines.append(f'command = "{command}"')
+            args = server.get("args") or []
+            if isinstance(args, list) and args:
+                rendered = ", ".join(repr(str(a)) for a in args)
+                lines.append(f"args = [{rendered}]")
+            env = server.get("env") or {}
+            if isinstance(env, dict) and env:
+                rendered = ", ".join(f'"{k}" = "{v}"' for k, v in env.items())
+                lines.append(f"env = {{ {rendered} }}")
         return "\n".join(lines) + "\n"
 
 

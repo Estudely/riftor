@@ -52,3 +52,40 @@ def test_concurrent_saves_same_id_dont_corrupt(tmp_workdir):
     assert data["messages"][0]["content"] == "msg 19"
     # no tmp leftovers
     assert not list((tmp_workdir / ".riftor" / "sessions").glob("*.tmp"))
+
+
+def test_branch_copies_prefix_and_sets_parent(tmp_workdir):
+    msgs = [
+        {"role": "user", "content": "one"},
+        {"role": "assistant", "content": "two"},
+        {"role": "user", "content": "three"},
+    ]
+    session.save(tmp_workdir, "parent", msgs, "m")
+    child_id = session.branch(tmp_workdir, "parent", at_index=2, label="try-b")
+    child = session.load(tmp_workdir, child_id)
+    assert child is not None
+    assert child["messages"] == msgs[:2]
+    assert child["parent_id"] == "parent"
+    assert child["branch_label"] == "try-b"
+
+
+def test_truncate_shortens_messages(tmp_workdir):
+    msgs = [
+        {"role": "user", "content": "a"},
+        {"role": "assistant", "content": "b"},
+        {"role": "user", "content": "c"},
+    ]
+    session.save(tmp_workdir, "sid", msgs, "m")
+    out = session.truncate(tmp_workdir, "sid", 1)
+    assert out is not None
+    assert out["messages"] == msgs[:1]
+
+
+def test_save_preserves_parent_id_across_updates(tmp_workdir):
+    msgs = [{"role": "user", "content": "start"}]
+    session.save(tmp_workdir, "sid", msgs, "m", parent_id="ancestor")
+    session.save(tmp_workdir, "sid", msgs + [{"role": "assistant", "content": "ok"}], "m")
+    loaded = session.load(tmp_workdir, "sid")
+    assert loaded is not None
+    assert loaded["parent_id"] == "ancestor"
+    assert len(loaded["messages"]) == 2

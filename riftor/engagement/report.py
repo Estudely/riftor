@@ -37,6 +37,11 @@ def report_data(engagement) -> dict:
     for f in findings:
         counts[f.get("severity", "info")] = counts.get(f.get("severity", "info"), 0) + 1
 
+    from riftor.engagement.graph import build_graph, to_mermaid
+
+    graph = build_graph(engagement)
+    attack_graph = to_mermaid(graph) if graph["nodes"] else ""
+
     workdir = engagement.dir.parent
     return {
         "title": store.get_meta("name") or workdir.name or "engagement",
@@ -50,6 +55,7 @@ def report_data(engagement) -> dict:
         "findings": findings,
         "services": store.list_services(),
         "hosts": store.list_hosts(),
+        "attack_graph": attack_graph,
     }
 
 
@@ -179,6 +185,14 @@ def build_markdown(data: dict) -> str:
         out.append(f"| {sev.capitalize()} | {data['counts'].get(sev, 0)} |")
     out.append(f"\n**Total findings:** {len(data['findings'])}")
     out.append("")
+
+    if data.get("attack_graph"):
+        out.append("## Attack graph")
+        out.append("")
+        out.append("```mermaid")
+        out.append(data["attack_graph"].rstrip())
+        out.append("```")
+        out.append("")
 
     out.append("## Findings")
     out.append("")

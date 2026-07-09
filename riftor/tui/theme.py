@@ -17,28 +17,28 @@ _KEYS = (
 )
 
 
-def _theme(name: str, palette: dict[str, str]) -> Theme:
+def _theme(name: str, palette: dict[str, object]) -> Theme:
     return Theme(
         name=name,
-        primary=palette["violet"],
-        secondary=palette["cyan"],
-        accent=palette["cyan"],
-        foreground=palette["fg"],
-        background=palette["bg"],
-        surface=palette["surface"],
-        panel=palette["panel"],
-        success=palette["cyan"],
-        warning=palette["magenta"],
-        error=palette["danger"],
+        primary=str(palette["violet"]),
+        secondary=str(palette["cyan"]),
+        accent=str(palette["cyan"]),
+        foreground=str(palette["fg"]),
+        background=str(palette["bg"]),
+        surface=str(palette["surface"]),
+        panel=str(palette["panel"]),
+        success=str(palette["cyan"]),
+        warning=str(palette["magenta"]),
+        error=str(palette["danger"]),
         # palette-driven so light themes get correct built-in-widget contrast
-        dark=palette.get("dark", True),
-        variables={k: palette[k] for k in _KEYS},
+        dark=bool(palette.get("dark", True)),
+        variables={k: str(palette[k]) for k in _KEYS},
     )
 
 
 # Each palette: bg/fg/surface/panel + the shared accent/_KEYS, plus a "dark" flag
 # that drives Textual's built-in-widget contrast. Ordered dark → light.
-_PALETTES: dict[str, dict] = {
+_PALETTES: dict[str, dict[str, object]] = {
     # Signature: deep indigo background, violet / cyan rift glow. (default)
     "rift": {
         "dark": True,
@@ -110,14 +110,17 @@ def css_variable_defaults() -> dict[str, str]:
 
 def palette(app) -> dict[str, str]:
     """The active theme's palette (with the default theme as a safe fallback)."""
-    pal = dict(_PALETTES[DEFAULT_THEME])
-    pal["fg"] = _PALETTES[DEFAULT_THEME]["fg"]
+    base = _PALETTES[DEFAULT_THEME]
+    pal: dict[str, str] = {k: str(v) for k, v in base.items() if isinstance(v, str)}
     try:
         theme = app.get_theme(app.theme)
     except Exception:  # noqa: BLE001
         theme = None
     if theme is not None:
-        pal.update(theme.variables or {})
-        pal["fg"] = theme.foreground or pal["fg"]
-        pal["violet"] = theme.variables.get("violet", theme.primary) if theme.variables else theme.primary
+        pal.update({k: str(v) for k, v in (theme.variables or {}).items()})
+        pal["fg"] = str(theme.foreground or pal["fg"])
+        if theme.variables:
+            pal["violet"] = str(theme.variables.get("violet", theme.primary))
+        else:
+            pal["violet"] = str(theme.primary)
     return pal
