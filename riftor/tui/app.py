@@ -27,7 +27,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Collapsible, Input, Markdown, RichLog, Static
 
 from riftor import tools
-from riftor.agent import antiloop
+from riftor.agent import antiloop, circuit
 from riftor.agent import session as sessions
 from riftor.agent.context import Context
 from riftor.agent.provider import Provider, ProviderError, ToolCall, Turn, Usage
@@ -165,7 +165,7 @@ HELP = """\
 
 _Conversation_
 - `/help` — show this help · `/clear` — clear conversation (`Ctrl+L`)
-- `/retry` — re-run the last turn · `/continue [N]` — extend the step budget
+- `/retry` — re-run the last turn · `/continue [N]` — raise the session step budget (+ barren ceiling)
 - `/compact` — shrink old tool output to free context
 - `/cost` — token + cost for this session
 - `/conversation` — export the full conversation as markdown
@@ -1556,7 +1556,14 @@ class RiftorApp(App):
         extra = 16
         if arg.strip().isdigit():
             extra = int(arg.strip())
-        self._note(f"continuing — extending the step budget by {extra}")
+        # Persist the bump so later turns (and the next /continue) start from a
+        # higher baseline — otherwise every task still dies at the old max_steps
+        # and the operator has to /continue again and again (issue #104).
+        self.max_steps += extra
+        self.config.max_steps = self.max_steps
+        self._note(
+            f"continuing — step budget now {self.max_steps} (+{extra} this run)"
+        )
         self._agent("Continue from where you left off.", extra_steps=extra)
 
     def _compact_cmd(self) -> None:
@@ -1747,10 +1754,13 @@ class RiftorApp(App):
         self._spinner = PulseSpinner(label, classes="spinner")
         await self._mount(self._spinner)
         self._spinner.start()
-        budget = 10**9 if self.yolo else self.max_steps + extra_steps
+        # /continue already bumped self.max_steps; don't double-count extra_steps
+        # into the budget (extra_steps still raises the barren ceiling below).
+        budget = 10**9 if self.yolo else self.max_steps
         _recent_cmds: list[str] = []
         _barren_rounds = 0
-        _findings_before = self.engagement.findings_count() if self.engagement else 0
+        _progress_before = circuit.progress_score(self.engagement)
+        _barren_ceiling = circuit.barren_limit(extra_steps=extra_steps)
         try:
             for step in range(budget):
                 self._save_session(complete=False)  # crash-safe checkpoint
@@ -1805,18 +1815,15 @@ class RiftorApp(App):
                     await self._run_tool(call)
                 if anti_loop_stop:
                     break
-                # all tools ran normally; check barren rounds
-                current_findings = self.engagement.findings_count() if self.engagement else 0
-                if current_findings > _findings_before:
+                # Progress = hosts + services + findings (recon counts too — #104).
+                current_progress = circuit.progress_score(self.engagement)
+                if current_progress > _progress_before:
                     _barren_rounds = 0
-                    _findings_before = current_findings
+                    _progress_before = current_progress
                 else:
                     _barren_rounds += 1
-                if _barren_rounds >= 8:
-                    self._note(
-                        "⚠ circuit breaker: 8 rounds with no new findings — "
-                        "stopping. /continue to resume or change approach."
-                    )
+                if circuit.should_stop_barren(_barren_rounds, limit=_barren_ceiling):
+                    self._note(circuit.note_for_barren_stop())
                     break
             else:
                 self._note(

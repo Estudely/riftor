@@ -22,7 +22,7 @@ falls back to detected defaults (it won't overwrite your file) and launches.
 | `show_thinking` | bool | `true` | Show the model's reasoning as a dim block above each answer (and on stderr in `--headless`). |
 | `show_tool_output` | bool | `true` | Render tool-result blocks in the chat. When off, the `⛏` call line still shows and hidden output stays reachable via `/show <id>`. |
 | `reasoning_effort` | string | `medium` | Thinking budget requested from the model: `none` `low` `medium` `high`. `none` (or `show_thinking = false`) sends no reasoning request. |
-| `max_steps` | int | `16` | Tool-call steps per task before pausing (extend live with `/continue`). Also caps each Chakla worker's step budget. |
+| `max_steps` | int | `16` | Tool-call steps per task before pausing. `/continue [N]` raises the live session budget (and the barren-round ceiling) so recon isn't cut short every few rounds; the config file is unchanged until you Save in `/config`. Also caps each Chakla worker's step budget. |
 | `max_result_chars` | int | `30000` | Cap on tool output fed back to the model. |
 | `result_preview_lines` | int | `25` | Lines of a tool result shown before `…/show <id>`. |
 | `rate_limit_per_min` | int | `0` | Cap model calls per minute (`0` = unlimited). |
