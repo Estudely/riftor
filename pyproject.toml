@@ -23,6 +23,12 @@ dependencies = [
     "pyyaml>=6.0",
 ]
 
+[project.urls]
+Homepage = "https://riftor.dev"
+Documentation = "https://riftor.dev"
+Repository = "https://github.com/Estudely/riftor"
+Issues = "https://github.com/Estudely/riftor/issues"
+
 [project.optional-dependencies]
 # Browser automation (the browser_* tools). Optional because Playwright pulls in
 # ~hundreds of MB of Chromium binaries that a terminal-only run never needs; the
@@ -42,10 +48,6 @@ dev = [
     "pytest-asyncio>=0.23",
     "pyright>=1.1.380",
 ]
-
-[project.urls]
-Homepage = "https://github.com/Estudely/riftor"
-Repository = "https://github.com/Estudely/riftor"
 
 [project.scripts]
 riftor = "riftor.__main__:main"
