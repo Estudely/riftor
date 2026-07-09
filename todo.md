@@ -11,6 +11,7 @@ spine is the **RIFT** methodology engine.
 
 ## Locked decisions
 - **Name:** `riftor`  (repo: https://github.com/Estudely/riftor)
+- **Website:** https://github.com/Estudely/riftor-website  (standalone repo)
 - **Language:** Python 3.11+
 - **TUI:** Textual (full-screen)
 - **LLM layer:** litellm (own agent loop); cloud-first, local Ollama optional
@@ -99,8 +100,11 @@ The agent tracks the current stage; the TUI shows `[R·I·F·T]` in the status b
 - [x] Docker image (Dockerfile + .dockerignore; build verified -> `riftor 0.0.2`)
 - [x] README badges (PyPI / CI / license) + Docker section
 - [x] Demo GIF — VHS `demo.tape` rendered + auto-committed by CI (`demo.yml`)
-- [ ] Docs site
-- [ ] Launch
+- [x] **Docs site** — SHIPPED as a **separate repo**:
+      https://github.com/Estudely/riftor-website (own website; not built from this
+      repo's `docs/`). This repo keeps `docs/configuration.md` + man page as
+      in-tree reference; the marketing/docs site lives externally.
+- [ ] **Launch** — docs site is live; remaining launch tasks in Phase 8b.
 
 ### Phase 6 — Quality of life  ✅
 Driven by a verified QoL audit of the codebase. Everything below is implemented,
@@ -173,15 +177,57 @@ low-effort parallel tasks (e.g. recon). Naming terminology is config-renameable
 
 ---
 
+## Superpowers feature audit (specs+plans in `docs/superpowers/`)
+Cross-checked every design spec / implementation plan against the actual codebase
+(source files, wired slash commands, and passing tests) on 2026-07-09.
+
+| Feature | Plan date | Status | Evidence |
+|---------|-----------|--------|----------|
+| **genz-mode** | 06-10 | ✅ SHIPPED | `config.genz`; `/genz` toggle + `_genz_cmd` in `tui/app.py`; Banner/StatusBar/Context all take `genz=`; persona strings live ("genz engaged fr 🦅") |
+| **telemetry** | 06-10 | ❌ NOT SHIPPED (intentionally dropped) | No `telemetry.py`/`_telemetry_keys.py`; the only `telemetry` ref is `litellm.telemetry = False` (opt-OUT of litellm's own). No opt-in analytics, no `/telemetry` cmd, no tests. **Decision: keep dropped** — analytics conflicts with an offensive-security tool's threat model. |
+| **shell-cwd** (`!`-shortcut + CWD header) | 06-11 | ✅ SHIPPED | `run_shell()` + `ShellResult` in `tools/core.py`; `!`-command handler, `#shell-pane` `Collapsible`, `#cwd-header` `Static` + `_refresh_cwd_header()` in `tui/app.py` |
+| **memory** | 06-12 | ✅ SHIPPED | `engagement/memory.py`; `/memory` cmd; `test_memory.py` + `test_memory_cmd.py` pass |
+| **templates** | 06-12 | ✅ SHIPPED | `engagement/templates.py`; `/template` cmd; `test_templates.py` + `test_template_cmd.py` pass |
+| **lessons / hypotheses** | 06-12 | ✅ SHIPPED | `engagement/lessons.py`; `/lesson(s)` + `/hypotheses` cmds; `test_lessons_hypotheses.py` passes |
+| **plugin-system** | 06-15 | ✅ SHIPPED | `plugins.py` + `register_plugins()`/`load_plugins()` in `tools/__init__.py`; `test_plugins.py` passes |
+| **wordlist-management** | 06-15 | ✅ SHIPPED | `engagement/wordlists.py`; `WordlistTool` in `tools/engagement.py` (registered in `ALL_TOOLS`); `config.wordlists_dir`; `test_wordlists.py` passes |
+
+**Net:** 7 of 8 planned superpowers features are shipped, wired, and tested.
+Only **telemetry** is unshipped — and that is a deliberate omission, not a gap.
+
+## Phase 8 — Launch (OUTSTANDING)
+Nearly everything is green (432 tests, ruff clean, pyright 0 errors, smoke green;
+released as v3.1.0 with 352 bundled skills). The docs/marketing site already
+exists as its own repo — see **8a**.
+
+**8a — docs site  ✅ (external repo)**
+- [x] Website lives at https://github.com/Estudely/riftor-website (standalone repo)
+- [x] Link the site from this repo's README + PyPI project URLs (`Homepage`/`Documentation` → https://riftor.dev)
+- [x] Website links back to PyPI + `pip install riftor` (and GitHub)
+- [x] In-tree `docs/configuration.md` is the canonical config reference; site "Docs" points there
+
+**8b — launch**
+- [ ] Cut a launch release (`v3.2.0` or `v4.0.0`) with curated release notes
+- [ ] Announcement copy (README "Featured", Show HN / r/netsec / relevant Discords)
+- [ ] Verify `pip install riftor` + `docker run` from a clean box against the tag
+
+## Housekeeping — code-quality cleanup (non-blocking)
+9 pyright *warnings* remain (0 errors). Worth clearing before the launch tag:
+- [ ] `engagement/state.py:148` — `int(int | None)` needs a `None` guard
+- [ ] `headless.py:143-146` — annotate the `Turn` object so attribute access is typed
+- [ ] `tools/browser.py:71,76,244` — guard optional Playwright member access
+- [ ] `tui/theme.py:34` — `str | bool` passed where `bool` is expected
+- [x] Telemetry intentionally dropped — recorded in
+      `docs/superpowers/specs/2026-06-10-telemetry-design.md`
+
+---
+
 ## Environment notes
 - uv 0.11.14, Python 3.12.3 at /usr/bin/python3
 - **Cloud-first**: default model `anthropic/claude-sonnet-4-6`; key in local
   config (`~/.config/riftor/config.toml`, perms 600, outside the repo)
-- Latest release: **0.0.8** (auto-published via trusted publishing + auto GitHub Release).
-  0.0.5 lazy-loaded litellm (fast startup) + tighter demo; 0.0.6 synced the PyPI
-  readme; 0.0.7 adds `/doctor`, the redesigned config/permission modals, and
-  light themes + live theme preview; 0.0.8 patches the `/config` Save·Cancel
-  buttons rendering off-screen on short terminals.
+- Latest release: **v3.1.0** (PyPI + GitHub Release; 352+ bundled skills).
+  Website: https://riftor.dev (source: Estudely/riftor-website).
 - Local Ollama is a supported fallback, not the identity
 - Reference reads: NousResearch/hermes-agent (Python analog), earendil-works/pi (minimal core)
 

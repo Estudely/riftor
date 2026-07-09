@@ -7,6 +7,8 @@
 [![CI](https://github.com/Estudely/riftor/actions/workflows/ci.yml/badge.svg)](https://github.com/Estudely/riftor/actions/workflows/ci.yml)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)](https://github.com/Estudely/riftor/blob/main/LICENSE)
 
+**🌐 Website:** https://riftor.dev
+
 ![riftor demo](https://raw.githubusercontent.com/Estudely/riftor/main/demo.gif)
 
 **riftor** puts an AI copilot at your terminal for offensive security. Talk to it
