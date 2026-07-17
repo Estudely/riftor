@@ -4,6 +4,14 @@ Useful for scripting and CI. The agent streams to stdout. For safety, dangerous
 tools (bash/write/edit) only run if an explicit allow rule exists in
 ``permissions.toml`` — otherwise they are auto-denied (no interactive operator to
 approve). Out-of-scope, scope-sensitive calls are always blocked.
+
+Exit codes:
+  0   finished normally (model stopped without more tool calls)
+  1   provider error
+  2   no prompt given
+  3   missing API credentials
+  4   stopped after ``max_steps`` (truncated; raise the budget or use YOLO)
+  130 interrupted (KeyboardInterrupt)
 """
 
 from __future__ import annotations
@@ -123,6 +131,7 @@ async def _run(cfg: Config, workdir: Path, prompt: str, scope_file: str | None, 
         except Exception:  # noqa: BLE001 — never let checkpointing break the run
             pass
 
+    truncated = False
     try:
         for _ in range(max_steps):
             context.repair()
@@ -153,7 +162,10 @@ async def _run(cfg: Config, workdir: Path, prompt: str, scope_file: str | None, 
                 break
             for call in turn.tool_calls:
                 await _run_tool_headless(call, engagement, permissions, audit, toolctx, context, yolo=yolo)
-        _checkpoint(complete=True)  # ran to completion → mark the session done
+        else:
+            # for-else: loop exhausted without a clean break → step budget hit
+            truncated = True
+        _checkpoint(complete=not truncated)
     finally:
         if toolctx.browser is not None and toolctx.browser.launched:
             try:
@@ -162,6 +174,13 @@ async def _run(cfg: Config, workdir: Path, prompt: str, scope_file: str | None, 
                 pass
         engagement.close()
     print()  # trailing newline
+    if truncated:
+        print(
+            f"riftor: stopped after {max_steps} steps (max_steps); "
+            "raise max_steps in config or pass --i-know-what-i-am-doing-give-me-full-access",
+            file=sys.stderr,
+        )
+        return 4
     return 0
 
 

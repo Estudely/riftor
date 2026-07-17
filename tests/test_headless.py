@@ -172,3 +172,38 @@ def test_headless_no_incomplete_left_after_success(monkeypatch, tmp_workdir):
     import asyncio
     asyncio.run(_run(cfg, tmp_workdir, "scan", None))
     assert sessions.find_incomplete(tmp_workdir) == []
+
+
+def test_headless_step_limit_returns_nonzero(monkeypatch, tmp_workdir, capsys):
+    """Hitting max_steps must exit nonzero with a stderr note (CI-distinguishable)."""
+    import asyncio
+
+    from riftor.agent.provider import Provider, ToolCall, Turn
+    from riftor.headless import _run
+
+    async def _always_tool(*_a, **_k):
+        call = ToolCall(id="c1", name="scope_list", arguments={}, raw_arguments="{}")
+        turn = Turn(
+            text="",
+            tool_calls=[call],
+            assistant_message={
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "c1",
+                        "type": "function",
+                        "function": {"name": "scope_list", "arguments": "{}"},
+                    }
+                ],
+            },
+        )
+        yield ("done", turn)
+
+    monkeypatch.setattr(Provider, "stream_turn", _always_tool)
+    cfg = Config(model="anthropic/claude-sonnet-4-6", api_key="sk-demo", max_steps=2)
+
+    rc = asyncio.run(_run(cfg, tmp_workdir, "keep going forever", None))
+    assert rc == 4
+    err = capsys.readouterr().err
+    assert "max_steps" in err.lower() or "step" in err.lower()

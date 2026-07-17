@@ -8,7 +8,7 @@ _riftor() {
     '--version[print version and exit]' \
     '--config[print the config file path and exit]' \
     '--model[override the model for this run]:model:(anthropic/claude-sonnet-4-6 openai/gpt-4o openrouter/auto ollama_chat/llama3.1)' \
-    '--chakla-model[override the Chakla (worker) model for this run]:model:(anthropic/claude-haiku-4-5-20251001 anthropic/claude-sonnet-4-6 openai/gpt-4o)' \
+    '--chakla-model[override the Chakla (worker) model for this run; empty default reuses main]:model:(anthropic/claude-sonnet-4-6 anthropic/claude-haiku-4-5-20251001 openai/gpt-4o)' \
     '--api-key[override the API key for this run]:key:' \
     '--workdir[engagement working directory]:dir:_files -/' \
     '--scope-file[load scope targets from a file]:file:_files' \

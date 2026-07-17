@@ -13,6 +13,7 @@ _riftor() {
             return 0
             ;;
         --model|--chakla-model)
+            # chakla_model defaults to "" (reuse main); Haiku is a common cheap override
             COMPREPLY=( $(compgen -W "anthropic/claude-sonnet-4-6 anthropic/claude-haiku-4-5-20251001 openai/gpt-4o openrouter/auto ollama_chat/llama3.1" -- "$cur") )
             return 0
             ;;
