@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Product snapshot
 
-- **Version:** 3.5.0 (PyPI + GitHub Release)
+- **Version:** 3.6.0 (PyPI + GitHub Release)
 - **Website:** https://riftor.dev (source: https://github.com/Estudely/riftor-website — separate repo)
 - **Roadmap:** `todo.md` (Phase 8 launch done; housekeeping + post-launch feature MVPs shipped in v3.3.0)
 - **Config reference:** `docs/configuration.md` (canonical; site "Docs" links here)
@@ -100,5 +100,5 @@ Do **not** tag before the bump is on `main`.
 ### Ancillary
 
 - `completions/` ships bash (`riftor.bash`) and zsh (`_riftor`) completions — **update them when you add or rename a CLI flag.**
-- `docs/` holds `configuration.md`, the `riftor.1` man page, and release notes (e.g. `RELEASE_NOTES_v3.5.0.md`); `todo.md` is the roadmap.
+- `docs/` holds `configuration.md`, the `riftor.1` man page, and release notes (e.g. `RELEASE_NOTES_v3.6.0.md`); `todo.md` is the roadmap.
 - Website is **not** built from this repo — edit https://github.com/Estudely/riftor-website for https://riftor.dev.
