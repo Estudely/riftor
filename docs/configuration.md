@@ -382,6 +382,41 @@ Manage rules live with `/permissions allow <tool> [pattern]` and
 an approval prompt. In headless mode (`--prompt`), approval-gated tools only run
 if a standing `allow` rule exists.
 
+### Headless / CI allowlist
+
+`--prompt` / `--headless` has no operator to click Approve. Dangerous tools
+(`bash`, `write`, `edit`, `add_scope`, …) are **auto-denied** unless
+`~/.config/riftor/permissions.toml` already allows them. Out-of-scope
+scope-sensitive calls are always hard-blocked (no override).
+
+Minimal snippet for scripted recon (adjust patterns to your engagement):
+
+```toml
+# ~/.config/riftor/permissions.toml
+[permissions]
+allow = [
+  { tool = "bash", pattern = '^(nmap|httpx|dig|curl)\\b' },
+  { tool = "read" },
+  { tool = "grep" },
+  { tool = "glob" },
+  { tool = "webfetch" },
+  # optional — only if the agent should widen scope unattended:
+  # { tool = "add_scope" },
+]
+deny = [
+  { tool = "bash", pattern = 'rm\\s+-rf|mkfs|dd\\s+.*of=/dev/' },
+]
+```
+
+Then:
+
+```bash
+riftor --prompt "enumerate in-scope hosts with nmap" --workdir ./eng
+# or:  make demo-headless   # offline canned reply, no API key
+```
+
+Denial text in the tool result points at this file when an allow rule is missing.
+
 The agent can **request** adding in-scope targets itself via the `add_scope` tool
 (e.g. a subdomain it discovered on an in-scope host). Like other privileged tools
 it is **approval-gated**: you confirm it in the prompt, and in headless mode it is

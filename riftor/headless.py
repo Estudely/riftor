@@ -17,6 +17,7 @@ Exit codes:
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from pathlib import Path
 from typing import Callable
@@ -76,7 +77,7 @@ def run_headless(
         if not prompt:
             print("riftor --headless: no prompt (use --prompt or pipe stdin)", file=sys.stderr)
             return 2
-    if not cfg.has_credentials():
+    if not cfg.has_credentials() and not os.environ.get("RIFTOR_DEMO_RESPONSE"):
         env = cfg.provider_env() or "ANTHROPIC_API_KEY"
         print(f"riftor: no API key for {cfg.model}; set {env}", file=sys.stderr)
         return 3
@@ -220,7 +221,8 @@ async def _run_tool_headless(
         context.add_tool_result(
             call.id,
             "[denied: headless] This tool needs approval and no allow rule exists. "
-            "Add one to permissions.toml to enable it in headless mode.",
+            "Add one to ~/.config/riftor/permissions.toml "
+            "(see docs/configuration.md — Headless / CI allowlist).",
         )
         audit.record(tool.name, preview, allowed=False)
         return
