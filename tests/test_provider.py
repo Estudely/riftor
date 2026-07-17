@@ -32,11 +32,13 @@ def test_kwargs_no_mock_by_default(monkeypatch):
     assert kw["stream"] is True
 
 
-def test_kwargs_injects_mock_when_env_set(monkeypatch):
+def test_kwargs_does_not_inject_mock_when_env_set(monkeypatch):
+    """Demo is handled by a litellm-free short-circuit, not mock_response.
+    Passing mock_response still hits litellm's tools→MCP→fastapi import in 1.92+."""
     monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "canned reply")
     p = Provider_for_test()
     kw = p._kwargs([{"role": "user", "content": "hi"}])
-    assert kw["mock_response"] == "canned reply"
+    assert "mock_response" not in kw
 
 
 @pytest.mark.asyncio
@@ -52,6 +54,43 @@ async def test_mock_response_streams_offline(monkeypatch):
             turn = payload
     assert "".join(text) == "The rift opens."
     assert turn is not None and turn.text == "The rift opens."
+
+
+@pytest.mark.asyncio
+async def test_demo_response_skips_litellm_even_with_tools(monkeypatch):
+    """RIFTOR_DEMO_RESPONSE must short-circuit before litellm — litellm 1.92+
+    imports fastapi when tools are present (MCP/proxy path), which would break
+    offline CI that doesn't install the proxy extra."""
+    monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "offline ok")
+    called = {"n": 0}
+
+    async def _boom(self, **kwargs):
+        called["n"] += 1
+        raise AssertionError("demo path must not call litellm")
+
+    monkeypatch.setattr(prov.Provider, "_acompletion", _boom)
+    p = Provider_for_test()
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "scope_list",
+                "description": "d",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+    ]
+    text, turn = [], None
+    async for event, payload in p.stream_turn(
+        [{"role": "user", "content": "go"}], tools=tools
+    ):
+        if event == "text":
+            text.append(str(payload))
+        elif event == "done":
+            turn = payload
+    assert called["n"] == 0
+    assert "".join(text) == "offline ok"
+    assert turn is not None and turn.text == "offline ok" and turn.tool_calls == []
 
 
 def Provider_for_test() -> "prov.Provider":

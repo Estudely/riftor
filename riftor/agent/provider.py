@@ -246,13 +246,18 @@ class Provider:
         # models that don't support it (drop_params=True). "none" => don't request.
         if self.config.show_thinking and self.config.reasoning_effort != "none":
             kwargs["reasoning_effort"] = self.config.reasoning_effort
-        # Offline demo hook: return canned streamed text instead of calling a model.
-        # Only active when the env var is set (used by demo.tape / CI), so normal
-        # runs are unaffected.
-        demo = os.environ.get("RIFTOR_DEMO_RESPONSE")
-        if demo:
-            kwargs["mock_response"] = demo
         return kwargs
+
+    @staticmethod
+    def _demo_response() -> str | None:
+        """Offline canned reply when ``RIFTOR_DEMO_RESPONSE`` is set.
+
+        Handled as a litellm-free short-circuit (see ``stream`` / ``stream_turn``)
+        rather than litellm's ``mock_response``: litellm 1.92+ imports its proxy
+        stack (and thus fastapi) whenever tools are present, which would break
+        offline CI/smoke that never installs the proxy extra.
+        """
+        return os.environ.get("RIFTOR_DEMO_RESPONSE") or None
 
     async def _acompletion(self, **kwargs):
         """litellm.acompletion with classified retry/backoff for transient errors."""
@@ -275,6 +280,10 @@ class Provider:
 
     async def stream(self, messages: list[dict]) -> AsyncIterator[str]:
         """Yield content deltas from the model as they arrive (no tools)."""
+        demo = self._demo_response()
+        if demo is not None:
+            yield demo
+            return
         response = await self._acompletion(**self._kwargs(messages))
         async for chunk in response:  # type: ignore[union-attr]  # litellm stream is async-iterable
             try:
@@ -292,6 +301,18 @@ class Provider:
         ``"thinking"`` carries the model's reasoning (litellm ``reasoning_content``)
         and is display-only — it is never folded into the returned ``Turn``.
         """
+        demo = self._demo_response()
+        if demo is not None:
+            yield ("text", demo)
+            yield (
+                "done",
+                Turn(
+                    text=demo,
+                    tool_calls=[],
+                    assistant_message={"role": "assistant", "content": demo},
+                ),
+            )
+            return
         response = await self._acompletion(**self._kwargs(messages, tools))
         text_parts: list[str] = []
         # Keyed by the provider's tool-call ``index`` when present. Insertion order
