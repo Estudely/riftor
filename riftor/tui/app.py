@@ -155,9 +155,9 @@ _COMMANDS = [
     "/edit-finding", "/delete-finding", "/hosts", "/services", "/report",
     "/sessions", "/resume", "/new", "/branch", "/rollback", "/theme", "/config", "/tools", "/skills",
     "/permissions", "/lore", "/genz", "/cost", "/retry", "/continue",
-    "/compact", "/timeline", "/audit", "/export", "/conversation",
-    "/doctor", "/review", "/memory", "/template", "/browser",
-    "/screenshots", "/graph", "/merge", "/exit",
+    "/compact", "/copy", "/show", "/timeline", "/audit", "/export", "/conversation",
+    "/doctor", "/review", "/hypotheses", "/lesson", "/lessons", "/memory", "/template",
+    "/browser", "/screenshots", "/graph", "/merge", "/clearlog", "/exit", "/quit",
 ]
 
 HELP = """\
@@ -167,6 +167,8 @@ _Conversation_
 - `/help` — show this help · `/clear` — clear conversation (`Ctrl+L`)
 - `/retry` — re-run the last turn · `/continue [N]` — raise the session step budget (+ barren ceiling)
 - `/compact` — shrink old tool output to free context
+- `/copy` — copy the last agent/tool output to the clipboard
+- `/show <id>` — reveal a truncated tool result by id
 - `/cost` — token + cost for this session
 - `/conversation` — export the full conversation as markdown
 
@@ -182,7 +184,9 @@ _Engagement_
 - `/graph` — render a kill-chain attack graph (Mermaid) from engagement data
 - `/timeline` — engagement activity log · `/export` — archive the whole engagement
 - `/merge <path>` — merge another engagement.db (collaborative hand-off)
-- `/memory [add <tag> <text>|rm <id>|clear]` — engagement notes, hypotheses, and durable lessons
+- `/memory [add <tag> <text>|rm <id>|clear]` — durable engagement notes
+- `/hypotheses` — list open/confirmed/refuted attack hypotheses
+- `/lesson <text>` — save a durable cross-session lesson · `/lessons` — list them
 - `/template [webapp|api|network|ad]` — apply an engagement playbook · `/template off`
 
 _Skills_
@@ -195,14 +199,14 @@ _Settings & sessions_
 - `/model [name]` — show or switch the model · `/theme [name]` (rift/dusk/void/fracture/singularity/dawn/paper)
 - `/config` — settings panel · `/permissions` — review allow/deny rules
 - `/lore` — toggle the rift persona · `/genz` — toggle Gen Z / Chakla Baaj mode 🦅
-- `/audit` — recent tool-call audit log
+- `/audit` — recent tool-call audit log · `/clearlog` — clear the shell output pane
 - `/doctor` — check which external recon tools (nmap/httpx/…) are installed
 - `/browser [headed|headless|close]` — browser mode / teardown · `/screenshots` — view captures
 - `/review` — self-critique findings for false positives before reporting
 - `/sessions` · `/resume <id>` · `/new` — manage saved sessions
 - `/branch [label]` — fork the current session (message history only)
 - `/rollback <n>` — keep only the first *n* messages (truncate history)
-- `/tools` — list available agent tools · `/exit` — quit (`Ctrl+C`)
+- `/tools` — list available agent tools · `/exit` · `/quit` — quit (`Ctrl+C`)
 
 Type anything else to task the agent. `↑/↓` recall input · `PgUp/PgDn` scroll ·
 `Esc` cancels a running response. Drag to select text, `Ctrl+Y` copies it.
@@ -228,13 +232,21 @@ _PALETTE_COMMANDS = [
     ("/audit", "Audit log", "Recent tool-call audit entries"),
     ("/cost", "Cost", "Token + cost for this session"),
     ("/compact", "Compact context", "Shrink old tool output"),
+    ("/copy", "Copy last output", "Copy last agent/tool output to clipboard"),
+    ("/show", "Show tool result", "Reveal a truncated tool result by id"),
     ("/retry", "Retry", "Re-run the last turn"),
+    ("/hypotheses", "Hypotheses", "List attack hypotheses"),
+    ("/lessons", "Lessons", "List durable cross-session lessons"),
+    ("/lesson", "Add lesson", "Save a durable lesson"),
+    ("/clearlog", "Clear shell log", "Clear the shell output pane"),
     ("/config", "Config", "Open the settings panel"),
     ("/new", "New session", "Start a fresh conversation"),
     ("/clear", "Clear", "Clear the conversation"),
     ("/screenshots", "Screenshots", "Browse, view, and delete screenshots"),
     ("/memory", "Memory", "Durable notes for this engagement"),
     ("/template", "Template", "Apply an engagement playbook"),
+    ("/branch", "Branch session", "Fork the current session history"),
+    ("/rollback", "Rollback", "Truncate session to the first n messages"),
 ]
 
 
@@ -751,12 +763,9 @@ class RiftorApp(App):
             chat.scroll_end()
             self._autoscroll = True
 
-    def _command(self, text: str) -> None:
-        parts = text.split(maxsplit=1)
-        cmd = parts[0].lower()
-        arg = parts[1].strip() if len(parts) > 1 else ""
-
-        handlers = {
+    def _command_handlers(self, arg: str) -> dict:
+        """Slash-command dispatch table. Keys must stay ⊆ ``_COMMANDS``."""
+        return {
             "/help": lambda: self._markdown(HELP),
             "/tools": self._tools_cmd,
             "/skills": lambda: self._skills_cmd(arg),
@@ -804,11 +813,17 @@ class RiftorApp(App):
             "/template": lambda: self._template_cmd(arg),
             "/clearlog": self._clearlog_cmd,
         }
+
+    def _command(self, text: str) -> None:
+        parts = text.split(maxsplit=1)
+        cmd = parts[0].lower()
+        arg = parts[1].strip() if len(parts) > 1 else ""
+
         if cmd in ("/exit", "/quit"):
             self._save_session()
             self.exit()
             return
-        handler = handlers.get(cmd)
+        handler = self._command_handlers(arg).get(cmd)
         if handler is not None:
             handler()
             return
@@ -1748,7 +1763,11 @@ class RiftorApp(App):
         self._clear_flock()
         self.chat.remove_children()
         self._replay_transcript(self.context.messages)
-        self._note(f"resumed session {sid} ({len(data.get('messages', []))} messages)")
+        n = len(data.get("messages", []))
+        note = f"resumed session {sid} ({n} messages)"
+        if not data.get("complete", True):
+            note += "  ⚠ previous run ended mid-task — /retry to resume or /continue"
+        self._note(note)
 
     def _branch_cmd(self, arg: str) -> None:
         label = arg.strip() or None

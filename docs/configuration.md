@@ -19,23 +19,25 @@ falls back to detected defaults (it won't overwrite your file) and launches.
 | `max_tokens` | int | `2048` | Max tokens per model response. |
 | `theme` | string | `rift` | Dark: `rift` `dusk` `void` `fracture` `singularity` · Light: `dawn` `paper`. Changing it in `/config` previews live. |
 | `lore` | bool | `true` | The subtle rift persona; off = strictly professional voice. |
+| `genz` | bool | `false` | Gen Z / Chakla Baaj persona overlay (also toggled with `/genz`). |
 | `show_thinking` | bool | `true` | Show the model's reasoning as a dim block above each answer (and on stderr in `--headless`). |
 | `show_tool_output` | bool | `true` | Render tool-result blocks in the chat. When off, the `⛏` call line still shows and hidden output stays reachable via `/show <id>`. |
 | `reasoning_effort` | string | `medium` | Thinking budget requested from the model: `none` `low` `medium` `high`. `none` (or `show_thinking = false`) sends no reasoning request. |
-| `max_steps` | int | `16` | Tool-call steps per task before pausing. `/continue [N]` raises the live session budget (and the barren-round ceiling) so recon isn't cut short every few rounds; the config file is unchanged until you Save in `/config`. Also caps each Chakla worker's step budget. |
+| `max_steps` | int | `16` | Tool-call steps per task before pausing. `/continue [N]` raises the live session budget (and the barren-round ceiling) so recon isn't cut short every few rounds; the config file is unchanged until you Save in `/config`. Also caps each Chakla worker's step budget. In `--headless` / `--prompt`, exceeding this exits with code `4`. |
 | `max_result_chars` | int | `30000` | Cap on tool output fed back to the model. |
 | `result_preview_lines` | int | `25` | Lines of a tool result shown before `…/show <id>`. |
 | `rate_limit_per_min` | int | `0` | Cap model calls per minute (`0` = unlimited). |
 | `browser_headless` | bool | `true` | Run the Playwright browser headless (good for servers/SSH). Set `false` to launch it visibly. |
 | `browser_persistent_profile` | bool | `false` | Reuse a profile at `.riftor/browser-profile/` (persists cookies/sessions). Default is incognito — a fresh context per launch. |
 | `wordlists_dir` | string | — | Extra directory the `wordlist` tool searches, in addition to the known SecLists/system locations. |
+| `skills_dir` | string | — | Extra directory of operator skill markdown (in addition to the bundled skills and `~/.config/riftor/skills/`). |
 | `plugins_enabled` | bool | `true` | Master switch for operator plugins. `false` disables all plugin loading. |
 | `plugins_allow` | list | `[]` | If non-empty, only these plugin module names are loaded. |
 | `plugins_deny` | list | `[]` | Plugin module names to skip. Deny wins over allow. |
 | `mcp_enabled` | bool | `true` | Master switch for MCP client connections (`riftor[mcp]`). |
 | `hackerone_username` | string | — | Optional HackerOne API username for `/scope bounty hackerone:<handle>` (prefer env `HACKERONE_USERNAME`). |
 | `hackerone_token` | string | — | Optional HackerOne API token (prefer env `HACKERONE_TOKEN`). |
-| `chakla_model` | string | `anthropic/claude-haiku-4-5-20251001` | The cheap worker model used by dispatched Chakla subagents. |
+| `chakla_model` | string | `""` (reuse main) | Chakla worker model. Empty string means reuse the main `model`. Override with a cheap id (e.g. Haiku) when you want workers on a different model. |
 | `chakla_max_workers` | int | `5` | Max number of Chakla workers per dispatch batch. |
 | `chakla_timeout_s` | int | `300` | Per-worker wall-clock timeout in seconds. |
 | `label_main` | string | `Baaj` | Display name for the orchestrator agent. |
@@ -95,9 +97,10 @@ Key properties of the worker fleet:
 - **Concurrency is bounded.** `chakla_max_workers` caps parallel workers;
   each worker's step budget is `max_steps` (shared with the main agent);
   `chakla_timeout_s` sets the wall-clock ceiling. Tune these to stay within rate limits.
-- **Worker model defaults to Haiku.** `chakla_model` defaults to
-  `anthropic/claude-haiku-4-5-20251001` — a cheap, fast model well-suited to
-  bounded recon tasks. Override it with `--chakla-model` at the CLI or by editing
+- **Worker model defaults to the main model.** `chakla_model` defaults to an
+  empty string, which means workers reuse `model`. Set it to a cheaper id
+  (e.g. `anthropic/claude-haiku-4-5-20251001`) when you want workers on a
+  different model. Override with `--chakla-model` at the CLI or by editing
   the config file.
 
 ### Live worker visibility
@@ -120,6 +123,19 @@ invocation and are not persisted to config.toml):
 | `--chakla-model MODEL` | `chakla_model` | Override the Chakla worker model. |
 | `--api-key KEY` | `api_key` | Override the API key. |
 | `--browser-headed` | `browser_headless` | Run the browser visibly for this run only (does not persist). |
+
+### Headless exit codes
+
+`--prompt` / `--headless` exit codes (for CI scripting):
+
+| Code | Meaning |
+|---|---|
+| `0` | Finished normally (model stopped without more tool calls). |
+| `1` | Provider error. |
+| `2` | No prompt given. |
+| `3` | Missing API credentials for the selected model. |
+| `4` | Stopped after `max_steps` (truncated run — raise the budget or use YOLO). |
+| `130` | Interrupted (`KeyboardInterrupt`). |
 
 ## Browser
 

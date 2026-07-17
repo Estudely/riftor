@@ -47,6 +47,26 @@ Type \fB/help\fR inside riftor for the full list, including \fB/scope\fR,
 \fB/retry\fR, \fB/continue\fR, \fB/compact\fR, \fB/timeline\fR, \fB/browser\fR and \fB/export\fR.
 \fB/browser\fR shows browser status; \fB/browser headed\fR / \fB/browser headless\fR
 switch the mode (persisted) and \fB/browser close\fR tears it down.
+.SH EXIT STATUS
+Headless (\fB\-\-prompt\fR / \fB\-\-headless\fR) exit codes:
+.TP
+.B 0
+Finished normally.
+.TP
+.B 1
+Provider error.
+.TP
+.B 2
+No prompt given.
+.TP
+.B 3
+Missing API credentials.
+.TP
+.B 4
+Stopped after \fBmax_steps\fR (truncated run).
+.TP
+.B 130
+Interrupted.
 .SH FILES
 .TP
 .I ~/.config/riftor/config.toml
@@ -64,7 +84,7 @@ Selected keys from \fB~/.config/riftor/config.toml\fR (\fB[riftor]\fR table):
 Main-agent litellm model id (default: \fIanthropic/claude-sonnet-4-6\fR).
 .TP
 .B chakla_model
-Chakla worker model id (default: \fIanthropic/claude-haiku-4-5-20251001\fR).
+Chakla worker model id. Empty (default) reuses the main \fBmodel\fR.
 .TP
 .B chakla_max_workers
 Maximum number of Chakla workers per dispatch batch (default: \fI5\fR).

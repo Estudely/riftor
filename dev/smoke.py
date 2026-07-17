@@ -410,6 +410,51 @@ async def main() -> None:
         assert "operator likes quiet scans" in sp
         assert "WEB APPLICATION" in sp
 
+        # Slash-command registry drift guard: every dispatch key ⊆ _COMMANDS
+        from riftor.tui.app import _COMMANDS
+        handler_keys = set(app._command_handlers("").keys()) | {"/exit", "/quit"}
+        missing = handler_keys - set(_COMMANDS)
+        assert not missing, f"handlers missing from _COMMANDS: {sorted(missing)}"
+
+        # Post-v3.3 session/engagement commands: don't crash and do useful work
+        inp.value = "seed for branch"
+        await pilot.press("enter")
+        await pilot.pause()
+        app.action_cancel()
+        before_sid = app.session_id
+        assert len(app.context.dump()) >= 1, "expected seeded message in history"
+        inp.value = "/branch smoke-fork"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.session_id != before_sid, "branch should mint a new session id"
+        # dump() is the persisted history (no synthetic system msg); 0 clears it
+        inp.value = "/rollback 0"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert len(app.context.dump()) == 0
+
+        app.engagement.add_service(host="10.0.0.5", port=443, service="https")
+        inp.value = "/graph"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert (Path(workdir) / ".riftor" / "reports" / "graph.mmd").exists(), \
+            "/graph should write .riftor/reports/graph.mmd"
+
+        inp.value = "/hypotheses"
+        await pilot.press("enter")
+        await pilot.pause()
+        inp.value = "/lesson WHEN smoke → assert lightly"
+        await pilot.press("enter")
+        await pilot.pause()
+        inp.value = "/lessons"
+        await pilot.press("enter")
+        await pilot.pause()
+        # /copy with stored output should not crash
+        app._last_output = "smoke-copy-payload"
+        inp.value = "/copy"
+        await pilot.press("enter")
+        await pilot.pause()
+
     print("SMOKE OK")
 
 
