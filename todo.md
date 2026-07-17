@@ -260,7 +260,7 @@ custom provider using `custom_route`.
 - uv 0.11.14, Python 3.12.3 at /usr/bin/python3
 - **Cloud-first**: default model `anthropic/claude-sonnet-4-6`; key in local
   config (`~/.config/riftor/config.toml`, perms 600, outside the repo)
-- Latest release: **v3.5.0** (PyPI + GitHub Release; 350+ bundled skills).
+- Latest release: **v3.6.0** (PyPI + GitHub Release; 350+ bundled skills).
   Website: https://riftor.dev (source: Estudely/riftor-website).
 - Local Ollama is a supported fallback, not the identity
 - Reference reads: NousResearch/hermes-agent (Python analog), earendil-works/pi (minimal core)
