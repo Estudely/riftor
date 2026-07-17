@@ -54,6 +54,7 @@ async def test_requires_permission_tool_auto_denied_without_allow_rule(gate):
     context = await _run(call, gate)
     msg = _last_tool_result(context)
     assert "denied: headless" in msg
+    assert "permissions.toml" in msg
     # and the file was NOT written
     assert not (toolctx.workdir / "x.txt").exists()
 
@@ -207,3 +208,20 @@ def test_headless_step_limit_returns_nonzero(monkeypatch, tmp_workdir, capsys):
     assert rc == 4
     err = capsys.readouterr().err
     assert "max_steps" in err.lower() or "step" in err.lower()
+
+
+def test_run_headless_demo_skips_api_key(monkeypatch, tmp_workdir, capsys):
+    """RIFTOR_DEMO_RESPONSE must allow --prompt without credentials (make demo-headless)."""
+    import os
+
+    from riftor.headless import run_headless
+
+    monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "hi from demo")
+    for key in list(os.environ):
+        if key.endswith("_API_KEY") or key in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
+            monkeypatch.delenv(key, raising=False)
+    cfg = Config(model="anthropic/claude-sonnet-4-6")
+    assert not cfg.has_credentials()
+    rc = run_headless(cfg, tmp_workdir, prompt="say hi")
+    assert rc == 0
+    assert "hi from demo" in capsys.readouterr().out

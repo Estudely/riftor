@@ -203,9 +203,10 @@ _Settings & sessions_
 - `/doctor` — check which external recon tools (nmap/httpx/…) are installed
 - `/browser [headed|headless|close]` — browser mode / teardown · `/screenshots` — view captures
 - `/review` — self-critique findings for false positives before reporting
-- `/sessions` · `/resume <id>` · `/new` — manage saved sessions
+- `/sessions` · `/sessions rm <id|old [days]>` · `/resume <id>` · `/new` — manage saved sessions
+  (id may be a unique prefix/suffix of `YYYYMMDD-HHMMSS-xxxx`)
 - `/branch [label]` — fork the current session (message history only)
-- `/rollback <n>` — keep only the first *n* messages (truncate history)
+- `/rollback <n>` — keep only the first *n* messages · `/rollback last [k]` — drop the last *k* user turns (default 1)
 - `/tools` — list available agent tools · `/exit` · `/quit` — quit (`Ctrl+C`)
 
 Type anything else to task the agent. `↑/↓` recall input · `PgUp/PgDn` scroll ·
@@ -246,7 +247,7 @@ _PALETTE_COMMANDS = [
     ("/memory", "Memory", "Durable notes for this engagement"),
     ("/template", "Template", "Apply an engagement playbook"),
     ("/branch", "Branch session", "Fork the current session history"),
-    ("/rollback", "Rollback", "Truncate session to the first n messages"),
+    ("/rollback", "Rollback", "Truncate history (/rollback n | last [k])"),
 ]
 
 
@@ -269,6 +270,13 @@ class RiftorCommands(CommandProvider):
 
 class _RecoveryModal(ModalScreen[bool]):
     """Offered when an incomplete (crashed) session is found on startup."""
+
+    DEFAULT_CSS = """
+    _RecoveryModal {
+        align: center middle;
+        background: $background 75%;
+    }
+    """
 
     BINDINGS = [
         ("escape", "dismiss(False)", "Start fresh"),
@@ -302,6 +310,46 @@ class _RecoveryModal(ModalScreen[bool]):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(event.button.id == "resume")
+
+
+class _CompactOfferModal(ModalScreen[bool]):
+    """One-shot offer to /compact after a context-window ProviderError."""
+
+    DEFAULT_CSS = """
+    _CompactOfferModal {
+        align: center middle;
+        background: $background 75%;
+    }
+    """
+
+    BINDINGS = [
+        ("escape", "dismiss(False)", "Skip"),
+        ("c", "dismiss(True)", "Compact"),
+        ("y", "dismiss(True)", "Compact"),
+    ]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="confirm-box"):
+            yield Static(
+                Text("⚠  Context Window Exceeded", style="bold #fbbf24"),
+                id="confirm-title",
+            )
+            yield Static(
+                Text(
+                    "The model rejected the turn — conversation is too large.\n"
+                    "Run /compact now to shrink old tool output, then retry?"
+                ),
+                id="confirm-detail",
+            )
+            with Horizontal(id="confirm-buttons"):
+                yield Button("Compact (c)", id="compact", variant="success")
+                yield Button("Skip (esc)", id="skip", variant="default")
+
+    def on_mount(self) -> None:
+        self.query_one("#compact", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(event.button.id == "compact")
 
 
 class RiftorApp(App):
@@ -784,7 +832,7 @@ class RiftorApp(App):
             "/report": lambda: self._report_cmd(arg),
             "/graph": self._graph_cmd,
             "/merge": lambda: self._merge_cmd(arg),
-            "/sessions": self._sessions_cmd,
+            "/sessions": lambda: self._sessions_cmd(arg),
             "/resume": lambda: self._resume_cmd(arg),
             "/new": self._new_session,
             "/branch": lambda: self._branch_cmd(arg),
@@ -1731,7 +1779,11 @@ class RiftorApp(App):
         except Exception:  # noqa: BLE001 — persistence must never crash the app
             pass
 
-    def _sessions_cmd(self) -> None:
+    def _sessions_cmd(self, arg: str = "") -> None:
+        parts = arg.split(maxsplit=2)
+        if parts and parts[0].lower() in ("rm", "delete", "prune"):
+            self._sessions_rm_cmd(parts[1:])
+            return
         rows = sessions.list_sessions(self.workdir)
         if not rows:
             self._note("no saved sessions")
@@ -1745,12 +1797,58 @@ class RiftorApp(App):
             lines.append(
                 f"- {marker}`{s['id']}`{flag}{parent}{label} · {s['messages']} msgs · {s['title']}"
             )
-        self._markdown("**sessions**\n\n" + "\n".join(lines))
+        self._markdown(
+            "**sessions**\n\n"
+            + "\n".join(lines)
+            + "\n\n`/sessions rm <id|old [days]>` · `/resume <prefix>`"
+        )
+
+    def _sessions_rm_cmd(self, args: list[str]) -> None:
+        if not args:
+            self._note("usage: /sessions rm <id|old [days]> — see /sessions")
+            return
+        target = args[0].strip()
+        if target.lower() == "old":
+            days = 7.0
+            if len(args) > 1:
+                try:
+                    days = float(args[1])
+                except ValueError:
+                    self._note("usage: /sessions rm old [days] — days must be a number")
+                    return
+                if days <= 0:
+                    self._note("prune: days must be > 0")
+                    return
+            removed = sessions.prune_old(
+                self.workdir, max_age_days=days, keep_ids={self.session_id},
+            )
+            if not removed:
+                self._note(f"no sessions older than {days:g} day(s) to prune")
+                return
+            self._note(f"pruned {len(removed)} session(s) older than {days:g} day(s)")
+            return
+        try:
+            sid = sessions.resolve_id(self.workdir, target)
+        except ValueError as exc:
+            self._note(str(exc))
+            return
+        if sid == self.session_id:
+            self._note("cannot delete the active session — /new first, or pick another id")
+            return
+        if sessions.delete(self.workdir, sid):
+            self._note(f"deleted session {sid}")
+        else:
+            self._note(f"no such session: {sid}")
 
     def _resume_cmd(self, arg: str) -> None:
         sid = arg.strip()
         if not sid:
-            self._note("usage: /resume <id> — see /sessions")
+            self._note("usage: /resume <id> — unique prefix/suffix ok; see /sessions")
+            return
+        try:
+            sid = sessions.resolve_id(self.workdir, sid)
+        except ValueError as exc:
+            self._note(str(exc))
             return
         data = sessions.load(self.workdir, sid)
         if not data:
@@ -1785,18 +1883,43 @@ class RiftorApp(App):
         self._resume_cmd(new_id)
 
     def _rollback_cmd(self, arg: str) -> None:
-        if not arg.strip():
-            self._note("usage: /rollback <n> — keep first n messages")
+        raw = arg.strip()
+        if not raw:
+            self._note(
+                "usage: /rollback <n> — keep first n messages · "
+                "/rollback last [k] — drop last k user turns (default 1)"
+            )
             return
-        try:
-            n = int(arg.strip())
-        except ValueError:
-            self._note("usage: /rollback <n> — n must be a non-negative integer")
-            return
-        if n < 0:
-            self._note("rollback: n must be >= 0")
-            return
-        msg_count = len(self.context.messages)
+        persisted = self.context.dump()
+        parts = raw.split()
+        if parts[0].lower() == "last":
+            k = 1
+            if len(parts) > 1:
+                try:
+                    k = int(parts[1])
+                except ValueError:
+                    self._note("usage: /rollback last [k] — k must be a positive integer")
+                    return
+            if k < 1:
+                self._note("rollback last: k must be >= 1")
+                return
+            n = sessions.index_before_last_user_turns(persisted, k)
+            label = f"last {k} user turn(s)"
+        else:
+            try:
+                n = int(raw)
+            except ValueError:
+                self._note(
+                    "usage: /rollback <n> | /rollback last [k] — n/k must be integers"
+                )
+                return
+            if n < 0:
+                self._note("rollback: n must be >= 0")
+                return
+            label = f"{n} messages"
+        # Validate against persisted history (dump), not context.messages which
+        # prepends the synthetic system prompt.
+        msg_count = len(persisted)
         if n > msg_count:
             self._note(f"rollback: only {msg_count} messages in session (requested {n})")
             return
@@ -1811,7 +1934,8 @@ class RiftorApp(App):
         self._clear_flock()
         self.chat.remove_children()
         self._replay_transcript(self.context.messages)
-        self._note(f"rolled back to {n} messages")
+        kept = len(data.get("messages", []))
+        self._note(f"rolled back to {kept} messages ({label})")
 
     def _reset_browser_for_session(self) -> None:
         """Close and forget the session's browser on a session switch (/new, /resume)
@@ -1852,14 +1976,25 @@ class RiftorApp(App):
         self._note(f"new session {self.session_id}")
 
     def _replay_transcript(self, messages: list[dict]) -> None:
-        """Re-render a saved conversation (compact) so the screen reflects history."""
+        """Re-render a saved conversation (compact) so the screen reflects history.
+
+        User turns are numbered ``[1]``, ``[2]``, … so ``/rollback last`` is
+        easier to aim without counting raw message indices.
+        """
         p = self._pal()
+        user_turn = 0
         for msg in messages:
             role = msg.get("role")
+            if role == "system":
+                continue
             if role == "user":
                 content = msg.get("content")
                 if isinstance(content, str) and content.strip():
-                    self.chat.mount(Static(Text(content), classes="user"))
+                    user_turn += 1
+                    prefix = f"[{user_turn}] "
+                    self.chat.mount(
+                        Static(Text(prefix + content), classes="user")
+                    )
             elif role == "assistant":
                 content = msg.get("content")
                 if isinstance(content, str) and content.strip():
@@ -2008,6 +2143,8 @@ class RiftorApp(App):
                 )
         except ProviderError as exc:
             self._error(f"rift collapsed [{exc.kind}] — {exc}")
+            if exc.kind == "context":
+                await self._offer_compact_after_overflow()
         except Exception as exc:  # noqa: BLE001
             self._error(f"rift collapsed — {exc}")
         finally:
@@ -2016,6 +2153,18 @@ class RiftorApp(App):
             self.status.set_busy(False)
             self.chat.scroll_end(animate=False)
             self._save_session(complete=True)
+
+    async def _offer_compact_after_overflow(self) -> None:
+        """One-shot modal: compact old tool results after a context-window error."""
+        do_compact = await self.push_screen_wait(_CompactOfferModal())
+        if not do_compact:
+            self._note("skipped compact — /compact or /clear when ready, then /retry")
+            return
+        changed = self.context.compact()
+        self._refresh_usage()
+        self._note(
+            f"compacted {changed} old tool result(s) — /retry to continue"
+        )
 
     async def _assistant_turn(self) -> Turn:
         self.context.repair()

@@ -427,7 +427,17 @@ async def main() -> None:
         await pilot.press("enter")
         await pilot.pause()
         assert app.session_id != before_sid, "branch should mint a new session id"
-        # dump() is the persisted history (no synthetic system msg); 0 clears it
+        # dump() is the persisted history (no synthetic system msg). Seed another
+        # user turn, then /rollback last drops that turn (not raw message count).
+        inp.value = "second turn for rollback"
+        await pilot.press("enter")
+        await pilot.pause()
+        app.action_cancel()
+        assert len(app.context.dump()) >= 2
+        inp.value = "/rollback last"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert len(app.context.dump()) == 1, "rollback last should drop the last user turn"
         inp.value = "/rollback 0"
         await pilot.press("enter")
         await pilot.pause()

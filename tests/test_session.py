@@ -89,3 +89,72 @@ def test_save_preserves_parent_id_across_updates(tmp_workdir):
     assert loaded is not None
     assert loaded["parent_id"] == "ancestor"
     assert len(loaded["messages"]) == 2
+
+
+def test_resolve_id_exact_and_unique_prefix(tmp_workdir):
+    session.save(tmp_workdir, "20260717-120000-abcd", [{"role": "user", "content": "a"}], "m")
+    session.save(tmp_workdir, "20260717-130000-ef01", [{"role": "user", "content": "b"}], "m")
+    assert session.resolve_id(tmp_workdir, "20260717-120000-abcd") == "20260717-120000-abcd"
+    assert session.resolve_id(tmp_workdir, "20260717-12") == "20260717-120000-abcd"
+    assert session.resolve_id(tmp_workdir, "ef01") == "20260717-130000-ef01"
+
+
+def test_resolve_id_ambiguous_prefix_raises(tmp_workdir):
+    session.save(tmp_workdir, "20260717-120000-aaaa", [{"role": "user", "content": "a"}], "m")
+    session.save(tmp_workdir, "20260717-120000-bbbb", [{"role": "user", "content": "b"}], "m")
+    try:
+        session.resolve_id(tmp_workdir, "20260717-12")
+        raise AssertionError("expected ValueError for ambiguous prefix")
+    except ValueError as exc:
+        assert "ambiguous" in str(exc).lower()
+
+
+def test_resolve_id_missing_raises(tmp_workdir):
+    try:
+        session.resolve_id(tmp_workdir, "nope")
+        raise AssertionError("expected ValueError for missing id")
+    except ValueError as exc:
+        assert "no such" in str(exc).lower() or "not found" in str(exc).lower()
+
+
+def test_delete_removes_session_file(tmp_workdir):
+    session.save(tmp_workdir, "20260717-120000-abcd", [{"role": "user", "content": "a"}], "m")
+    assert session.delete(tmp_workdir, "20260717-120000-abcd") is True
+    assert session.load(tmp_workdir, "20260717-120000-abcd") is None
+    assert session.delete(tmp_workdir, "20260717-120000-abcd") is False
+
+
+def test_prune_old_deletes_aged_sessions(tmp_workdir, monkeypatch):
+    import time
+
+    now = 1_700_000_000.0
+    monkeypatch.setattr(time, "time", lambda: now)
+    session.save(tmp_workdir, "fresh-aaaa", [{"role": "user", "content": "new"}], "m")
+    old_path = tmp_workdir / ".riftor" / "sessions" / "stale-bbbb.json"
+    session.save(tmp_workdir, "stale-bbbb", [{"role": "user", "content": "old"}], "m")
+    # Backdate the stale session's updated stamp
+    import json
+    data = json.loads(old_path.read_text(encoding="utf-8"))
+    data["updated"] = now - (10 * 86400)
+    old_path.write_text(json.dumps(data), encoding="utf-8")
+
+    removed = session.prune_old(tmp_workdir, max_age_days=7, keep_ids={"fresh-aaaa"})
+    assert removed == ["stale-bbbb"]
+    assert session.load(tmp_workdir, "stale-bbbb") is None
+    assert session.load(tmp_workdir, "fresh-aaaa") is not None
+
+
+def test_index_before_last_user_turns():
+    msgs = [
+        {"role": "user", "content": "one"},
+        {"role": "assistant", "content": "a1"},
+        {"role": "user", "content": "two"},
+        {"role": "assistant", "content": "a2"},
+        {"role": "user", "content": "three"},
+        {"role": "assistant", "content": "a3"},
+    ]
+    assert session.index_before_last_user_turns(msgs, 1) == 4
+    assert session.index_before_last_user_turns(msgs, 2) == 2
+    assert session.index_before_last_user_turns(msgs, 3) == 0
+    assert session.index_before_last_user_turns(msgs, 99) == 0
+    assert session.index_before_last_user_turns([], 1) == 0

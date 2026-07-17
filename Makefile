@@ -1,5 +1,5 @@
 # riftor — common dev tasks. Requires uv (https://docs.astral.sh/uv/).
-.PHONY: help dev run lint typecheck test smoke check build clean install-hooks
+.PHONY: help dev run lint typecheck test smoke check build clean install-hooks demo-headless
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -22,6 +22,9 @@ test: ## Run the pytest suite
 
 smoke: ## Run the headless TUI smoke suite
 	uv run python dev/smoke.py
+
+demo-headless: ## Offline --prompt smoke (no API key; uses RIFTOR_DEMO_RESPONSE)
+	RIFTOR_DEMO_RESPONSE='demo ok' uv run riftor --prompt 'say hi'
 
 check: lint typecheck test smoke ## Run every CI gate locally
 

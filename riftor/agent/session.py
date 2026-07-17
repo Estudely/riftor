@@ -187,3 +187,82 @@ def truncate(
         branch_label=data.get("branch_label"),
     )
     return load(workdir, session_id)
+
+
+def resolve_id(workdir: Path, query: str) -> str:
+    """Resolve a session id by exact match, unique prefix, or unique suffix.
+
+    Raises ``ValueError`` when nothing matches or the query is ambiguous.
+    """
+    q = query.strip()
+    if not q:
+        raise ValueError("empty session id")
+    ids = [s["id"] for s in list_sessions(workdir)]
+    if q in ids:
+        return q
+    prefix_hits = [i for i in ids if i.startswith(q)]
+    if len(prefix_hits) == 1:
+        return prefix_hits[0]
+    if len(prefix_hits) > 1:
+        preview = ", ".join(f"`{i}`" for i in prefix_hits[:5])
+        more = f" (+{len(prefix_hits) - 5} more)" if len(prefix_hits) > 5 else ""
+        raise ValueError(f"ambiguous session id '{q}': {preview}{more}")
+    suffix_hits = [i for i in ids if i.endswith(q)]
+    if len(suffix_hits) == 1:
+        return suffix_hits[0]
+    if len(suffix_hits) > 1:
+        preview = ", ".join(f"`{i}`" for i in suffix_hits[:5])
+        more = f" (+{len(suffix_hits) - 5} more)" if len(suffix_hits) > 5 else ""
+        raise ValueError(f"ambiguous session id '{q}': {preview}{more}")
+    raise ValueError(f"no such session: {q}")
+
+
+def delete(workdir: Path, session_id: str) -> bool:
+    """Delete a session file. Returns True if a file was removed."""
+    path = sessions_dir(workdir) / f"{session_id}.json"
+    if not path.exists():
+        return False
+    path.unlink()
+    return True
+
+
+def prune_old(
+    workdir: Path,
+    *,
+    max_age_days: float = 7.0,
+    keep_ids: set[str] | None = None,
+) -> list[str]:
+    """Delete sessions whose ``updated`` stamp is older than ``max_age_days``.
+
+    ``keep_ids`` are never deleted (e.g. the live session). Returns deleted ids
+    newest-first among those removed.
+    """
+    keep = keep_ids or set()
+    cutoff = time.time() - (max_age_days * 86400.0)
+    removed: list[str] = []
+    for row in list_sessions(workdir):
+        sid = row["id"]
+        if sid in keep:
+            continue
+        if float(row.get("updated") or 0) >= cutoff:
+            continue
+        if delete(workdir, sid):
+            removed.append(sid)
+    return removed
+
+
+def index_before_last_user_turns(messages: list[dict], k: int) -> int:
+    """Return the truncate index that drops the last ``k`` user turns.
+
+    A "user turn" is a message with ``role == "user"``. Truncating at the
+    returned index keeps everything before that turn (and drops the turn plus
+    any following assistant/tool messages). ``k <= 0`` keeps the full list.
+    """
+    if k <= 0:
+        return len(messages)
+    user_idxs = [i for i, m in enumerate(messages) if m.get("role") == "user"]
+    if not user_idxs:
+        return 0
+    if k >= len(user_idxs):
+        return 0
+    return user_idxs[-k]

@@ -24,6 +24,7 @@ def test_classify_server_retryable():
 def test_classify_context():
     err = classify_error(Exception("maximum context length is 200000 tokens"))
     assert err.kind == "context" and not err.retryable
+    assert "/compact" in str(err)
 
 
 def test_usage_add():
