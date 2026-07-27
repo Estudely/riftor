@@ -16,6 +16,11 @@ from riftor.tui.app import RiftorApp
 from riftor.tui.onboarding import OnboardingScreen, _model_options
 
 
+def _press(screen: OnboardingScreen, button_id: str) -> None:
+    btn = screen.query_one(button_id, Button)
+    screen.on_button_pressed(Button.Pressed(btn))
+
+
 def _patch_paths(tmp: Path) -> None:
     cfgmod.CONFIG_DIR = tmp
     cfgmod.CONFIG_PATH = tmp / "config.toml"
@@ -89,7 +94,7 @@ async def test_app_launches_onboarding_and_completes_deepseek_flow():
         cfg = Config(onboarded=False)
         app = RiftorApp(cfg, workdir=workdir)
         async with app.run_test(size=(100, 30)) as pilot:
-            await pilot.pause(0.35)  # on_mount timer → OnboardingScreen
+            await pilot.pause(0.5)  # on_mount timer → OnboardingScreen
             assert isinstance(app.screen, OnboardingScreen)
             screen = app.screen
 
@@ -97,8 +102,8 @@ async def test_app_launches_onboarding_and_completes_deepseek_flow():
             prov.value = "deepseek"
             screen.on_select_changed(Mock(select=prov, value="deepseek"))
             screen.query_one("#ob-key", Input).value = "sk-test"
-            screen.on_button_pressed(Mock(button=screen.query_one("#ob-next", Button)))
-            await pilot.pause()
+            _press(screen, "#ob-next")
+            await pilot.pause(0.1)
 
             assert screen.query_one("#onboard-step-0").has_class("hidden")
             assert not screen.query_one("#onboard-step-1").has_class("hidden")
@@ -106,12 +111,12 @@ async def test_app_launches_onboarding_and_completes_deepseek_flow():
             values = [v for _, v in model_sel._options if v != Select.NULL]  # noqa: SLF001
             assert values == PROVIDER_DEFAULTS["deepseek"]
             model_sel.value = "deepseek-v4-pro"
-            screen.on_button_pressed(Mock(button=screen.query_one("#ob-next", Button)))
-            await pilot.pause()
+            _press(screen, "#ob-next")
+            await pilot.pause(0.1)
 
             screen.query_one("#ob-scope", Input).value = "example.com"
-            screen.on_button_pressed(Mock(button=screen.query_one("#ob-next", Button)))
-            await pilot.pause(0.2)
+            _press(screen, "#ob-next")
+            await pilot.pause(0.5)  # async worker applies dismiss result
 
             assert cfg.onboarded is True
             assert cfg.model == "deepseek/deepseek-v4-pro"
