@@ -34,7 +34,7 @@ def new_id() -> str:
     # Second-resolution timestamp + a short random suffix so two sessions started
     # in the same clock second (e.g. /new then immediately tasking, or two
     # windows) don't collide onto the same file (issue #112).
-    return time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:4]
+    return time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8]
 
 
 def save(
