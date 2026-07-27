@@ -59,8 +59,6 @@ class Config(BaseModel):
     temperature: float = 0.3
     max_tokens: int = 2048
     theme: str = "rift"
-    lore: bool = True
-    genz: bool = False
     # Display: reasoning + tool-output visibility (runtime, via /config).
     show_thinking: bool = True
     show_tool_output: bool = True
@@ -101,16 +99,11 @@ class Config(BaseModel):
 
     # Per-provider credentials, keyed by provider key (see riftor.providers.PROVIDERS).
     providers: dict[str, ProviderCreds] = {}
-    # Subagents (Baaj orchestrator → Chakla workers). The labels are renameable
-    # terminology surfaced in the UI.
-    # chakla_model is the worker model. Empty => reuse the main model (cfg.model),
-    # which is always credentialed. Set it explicitly (via /config WORKERS) for a
-    # cheaper/different worker — its provider's creds must be configured.
-    chakla_model: str = ""
-    chakla_max_workers: int = 5
-    chakla_timeout_s: int = 300
-    label_main: str = "Baaj"
-    label_worker: str = "Chakla"
+    # Worker subagents (parallel task dispatch).
+    # worker_model is the default worker LLM. Empty => reuse the main model.
+    worker_model: str = ""
+    worker_max_parallel: int = 5
+    worker_timeout_s: int = 300
 
     @field_validator("model")
     @classmethod
@@ -192,8 +185,17 @@ class Config(BaseModel):
                 with CONFIG_PATH.open("rb") as fh:
                     data = tomllib.load(fh)
                 section = dict(data.get("riftor", data))
-                section.pop("providers", None)  # never let a stray key shadow the table
-                # Prefer top-level [[mcp_servers]]; allow nested under [riftor] too.
+                section.pop("providers", None)
+                # Migrate v3 chakla_* / lore / genz keys
+                if "chakla_model" in section and "worker_model" not in section:
+                    section["worker_model"] = section.pop("chakla_model")
+                if "chakla_max_workers" in section and "worker_max_parallel" not in section:
+                    section["worker_max_parallel"] = section.pop("chakla_max_workers")
+                if "chakla_timeout_s" in section and "worker_timeout_s" not in section:
+                    section["worker_timeout_s"] = section.pop("chakla_timeout_s")
+                for old in ("chakla_model", "chakla_max_workers", "chakla_timeout_s",
+                            "label_main", "label_worker", "lore", "genz"):
+                    section.pop(old, None)
                 mcp_servers = data.get("mcp_servers")
                 if mcp_servers is None:
                     mcp_servers = section.pop("mcp_servers", None)
@@ -205,8 +207,7 @@ class Config(BaseModel):
                     providers=providers,
                     mcp_servers=list(mcp_servers or []),
                 )
-            except Exception:  # noqa: BLE001 — a bad config must never crash startup
-                # Fall through to detected defaults rather than failing to launch.
+            except Exception:  # noqa: BLE001
                 return cls.detect_defaults()
         cfg = cls.detect_defaults()
         cfg.save()
@@ -261,8 +262,6 @@ class Config(BaseModel):
             f"temperature = {self.temperature}",
             f"max_tokens = {self.max_tokens}",
             f'theme = "{self.theme}"',
-            f"lore = {str(self.lore).lower()}",
-            f"genz = {str(self.genz).lower()}",
             f"show_thinking = {str(self.show_thinking).lower()}",
             f"show_tool_output = {str(self.show_tool_output).lower()}",
             f'reasoning_effort = "{self.reasoning_effort}"',
@@ -292,11 +291,9 @@ class Config(BaseModel):
                 else "# hackerone_token = \"your-h1-api-token\""
             ),
 
-            f'chakla_model = "{self.chakla_model}"',
-            f"chakla_max_workers = {self.chakla_max_workers}",
-            f"chakla_timeout_s = {self.chakla_timeout_s}",
-            f'label_main = "{self.label_main}"',
-            f'label_worker = "{self.label_worker}"',
+            f'worker_model = "{self.worker_model}"',
+            f"worker_max_parallel = {self.worker_max_parallel}",
+            f"worker_timeout_s = {self.worker_timeout_s}",
         ]
         for key, creds in self.providers.items():
             if not (creds.api_key or creds.api_base):

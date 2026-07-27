@@ -28,6 +28,24 @@ Screen {
     scrollbar-color-hover: $violet;
 }
 
+#sidebar {
+    width: 28;
+    min-width: 28;
+    max-width: 36;
+    padding: 0 1;
+    background: $surface;
+    border-right: solid $border;
+    height: 1fr;
+}
+
+#main-row {
+    height: 1fr;
+}
+
+#main-row #chat {
+    width: 1fr;
+}
+
 .user {
     background: $user-bg;
     color: $user-fg;

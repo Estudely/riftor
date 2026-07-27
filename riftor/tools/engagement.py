@@ -1,4 +1,4 @@
-"""Engagement tools: the agent drives RIFT stage + records findings/services."""
+"""Engagement tools: methodology checklist, scope, findings, and reports."""
 
 from __future__ import annotations
 
@@ -27,25 +27,58 @@ def _parse_confidence(value: object) -> int | None:
         return None
 
 
-class SetStageTool(Tool):
-    name = "set_stage"
+class ListMethodologyTool(Tool):
+    name = "list_methodology"
     description = (
-        "Set the RIFT engagement stage as you progress: R=Recon, I=Intrusion, "
-        "F=Foothold, T=Takeover. Call this when you move between stages."
+        "List the OWASP/PTES methodology checklist for this engagement — "
+        "what has been tested and what remains."
+    )
+    parameters = {"type": "object", "properties": {}}
+
+    async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        eng = ctx.engagement
+        if eng is None:
+            return ToolResult("error: no active engagement", is_error=True)
+        items = eng.list_methodology()
+        done, total = eng.methodology_progress()
+        lines = [f"methodology: {done}/{total} complete"]
+        cat: str | None = None
+        for item in items:
+            if item.category != cat:
+                cat = item.category
+                lines.append(f"\n[{cat}]")
+            mark = "x" if item.checked else " "
+            note = f" ({item.notes})" if item.notes else ""
+            lines.append(f"  [{mark}] {item.name}{note}")
+        return ToolResult("\n".join(lines))
+
+
+class CheckMethodologyTool(Tool):
+    name = "check_methodology"
+    description = (
+        "Mark a methodology checklist item as complete. Pass the item name "
+        "(substring match) and optional notes."
     )
     parameters = {
         "type": "object",
-        "properties": {"stage": {"type": "string", "enum": ["R", "I", "F", "T"]}},
-        "required": ["stage"],
+        "properties": {
+            "name": {"type": "string", "description": "Checklist item name or keyword."},
+            "notes": {"type": "string", "description": "Optional note about what was done."},
+        },
+        "required": ["name"],
     }
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         eng = ctx.engagement
         if eng is None:
             return ToolResult("error: no active engagement", is_error=True)
-        if eng.set_stage(str(args.get("stage", ""))):
-            return ToolResult(f"stage set to {eng.stage}")
-        return ToolResult("error: stage must be one of R/I/F/T", is_error=True)
+        name = str(args.get("name", "")).strip()
+        if not name:
+            return ToolResult("error: name required", is_error=True)
+        if eng.check_methodology(name, notes=str(args.get("notes") or "")):
+            done, total = eng.methodology_progress()
+            return ToolResult(f"checked: {name} ({done}/{total} complete)")
+        return ToolResult(f"error: no unchecked item matching '{name}'", is_error=True)
 
 
 class ScopeListTool(Tool):

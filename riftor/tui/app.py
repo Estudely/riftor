@@ -3,8 +3,8 @@
 An offensive-security agent. The model calls tools (bash/read/write/edit/grep/
 glob/webfetch + engagement tools); dangerous tools prompt for permission (with a
 diff preview for write/edit); scope-sensitive tools are blocked against
-out-of-scope targets (with an explicit per-call override); RIFT stage, scope and
-findings live in the engagement state and show in the status bar.
+out-of-scope targets (with an explicit per-call override); scope, methodology
+checklist, and findings live in the engagement state and show in the status bar.
 """
 
 from __future__ import annotations
@@ -40,7 +40,9 @@ from riftor.tools import ToolContext, ToolResult
 from riftor.tui.config_screen import ConfigScreen
 from riftor.tui.screenshot_gallery import ScreenshotGalleryScreen
 from riftor.tui.theme import THEMES, css_variable_defaults, palette
-from riftor.tui.widgets import STAGE_NAMES, GENZ_STAGE_NAMES, GENZ_STAGE_LETTERS, Banner, CommandDropdown, FlockPane, PulseSpinner, StatusBar
+from riftor.tui.onboarding import OnboardingScreen
+from riftor.tui.sidebar import EngagementSidebar
+from riftor.tui.widgets import Banner, CommandDropdown, FlockPane, PulseSpinner, StatusBar
 
 # Optional inline image rendering. textual-image needs Python >= 3.12 and a
 # graphics-capable terminal (Kitty/Sixel); import at module top per its detection
@@ -151,12 +153,13 @@ class PromptInput(Input):
 
 # Commands offered for fuzzy "did you mean" suggestions.
 _COMMANDS = [
-    "/help", "/clear", "/model", "/stage", "/scope", "/findings", "/finding",
+    "/help", "/clear", "/model", "/scope", "/findings", "/finding",
     "/edit-finding", "/delete-finding", "/hosts", "/services", "/report",
     "/sessions", "/resume", "/new", "/branch", "/rollback", "/theme", "/config", "/tools", "/skills",
-    "/permissions", "/lore", "/genz", "/cost", "/retry", "/continue",
+    "/permissions", "/cost", "/retry", "/continue",
     "/compact", "/copy", "/show", "/timeline", "/audit", "/export", "/conversation",
     "/doctor", "/review", "/hypotheses", "/lesson", "/lessons", "/memory", "/template",
+    "/methodology", "/workers",
     "/browser", "/screenshots", "/graph", "/merge", "/clearlog", "/exit", "/quit",
 ]
 
@@ -176,12 +179,13 @@ _Engagement_
 - `/scope` — show scope · `/scope add 10.0.0.0/24 example.com` · `/scope out <t>`
   · `/scope rm <t>` · `/scope clear` · `/scope on|off|dry` · `/scope import <file>` · `/scope export [file]`
   · `/scope bounty <file|hackerone:<handle>>` — import bug-bounty program scope
-- `/stage [R|I|F|T]` — show or set the RIFT stage (Recon/Intrusion/Foothold/Takeover)
+- `/methodology` — view OWASP/PTES checklist progress · `/methodology check <item>`
+- `/workers` — list built-in and custom worker agents
 - `/findings` — list findings (severity-sorted) · `/finding <id>` — show one
 - `/edit-finding <id> sev=high tags=...` · `/delete-finding <id>`
 - `/hosts` · `/services` — discovered infrastructure
 - `/report [md|html|json|sarif|both|all]` — write a report to `.riftor/reports/`
-- `/graph` — render a kill-chain attack graph (Mermaid) from engagement data
+- `/graph` — render an attack graph (Mermaid) from engagement data
 - `/timeline` — engagement activity log · `/export` — archive the whole engagement
 - `/merge <path>` — merge another engagement.db (collaborative hand-off)
 - `/memory [add <tag> <text>|rm <id>|clear]` — durable engagement notes
@@ -198,7 +202,6 @@ _Skills_
 _Settings & sessions_
 - `/model [name]` — show or switch the model · `/theme [name]` (rift/dusk/void/fracture/singularity/dawn/paper)
 - `/config` — settings panel · `/permissions` — review allow/deny rules
-- `/lore` — toggle the rift persona · `/genz` — toggle Gen Z / Chakla Baaj mode 🦅
 - `/audit` — recent tool-call audit log · `/clearlog` — clear the shell output pane
 - `/doctor` — check which external recon tools (nmap/httpx/…) are installed
 - `/browser [headed|headless|close]` — browser mode / teardown · `/screenshots` — view captures
@@ -376,7 +379,7 @@ class RiftorApp(App):
         self.config = config
         self.workdir = workdir or Path.cwd()
         self.yolo = yolo
-        self.context = Context(lore=config.lore, genz=config.genz, workdir=self.workdir)
+        self.context = Context(workdir=self.workdir)
         self.provider = Provider(config)
         self._plugin_errors = tools.register_plugins(config)
         self._mcp_errors: list = []
@@ -395,7 +398,7 @@ class RiftorApp(App):
         self._last_output: str = ""
         self._last_user_text: str | None = None
         self.usage = Usage()
-        self.chakla_usage = Usage()
+        self.worker_usage = Usage()
         self._flock: tuple[Static, FlockPane] | None = None  # (header, table) while a dispatch is live
         self._spinner: PulseSpinner | None = None  # chat-area spinner while agent is running
         self.toolctx = ToolContext(
@@ -406,23 +409,25 @@ class RiftorApp(App):
             permissions=self.permissions,
             audit=self.audit,
             yolo=self.yolo,
-            progress=self._on_chakla_progress,
+            progress=self._on_worker_progress,
         )
         self._rate_times: list[float] = []
         self._autoscroll = True
         self._browser_hint_shown = False
 
     def compose(self) -> ComposeResult:
-        yield Banner(genz=self.config.genz, id="banner")
+        yield Banner(id="banner")
         yield Static(id="cwd-header")
-        yield VerticalScroll(id="chat")
+        with Horizontal(id="main-row"):
+            yield EngagementSidebar(id="sidebar")
+            yield VerticalScroll(id="chat")
         yield Collapsible(
             RichLog(id="shell-log", highlight=True, markup=False),
             id="shell-pane",
             title="Shell output",
             collapsed=True,
         )
-        yield StatusBar(self.config.model, lore=self.config.lore, yolo=self.yolo, genz=self.config.genz)
+        yield StatusBar(self.config.model, yolo=self.yolo)
         yield CommandDropdown(_COMMANDS, id="cmd-dropdown")
         yield PromptInput(placeholder="task riftor — or /help", id="prompt")
 
@@ -461,7 +466,11 @@ class RiftorApp(App):
         self._apply_theme(self.config.theme)
         self._refresh_cwd_header()
         self.query_one("#prompt", PromptInput).focus()
-        self.status.set_stage(self.engagement.stage)
+        try:
+            sidebar = self.query_one("#sidebar", EngagementSidebar)
+            sidebar.bind_engagement(self.engagement)
+        except Exception:  # noqa: BLE001
+            pass
         self._refresh_status()
         warning = self.config.model_warning()
         if warning:
@@ -478,8 +487,41 @@ class RiftorApp(App):
             self.set_timer(0.1, self._offer_recovery)
         elif not self._resume_latest():
             self._note(
-                "rift online · set scope with /scope add <target> before tasking the agent"
+                "riftor online · set scope with /scope add <target> before tasking the agent"
             )
+        if not self.config.onboarded:
+            self.set_timer(0.2, self._offer_onboarding)
+
+    def _offer_onboarding(self) -> None:
+        self.run_worker(self._run_onboarding(), exclusive=False, exit_on_error=False)
+
+    @work(group="onboarding")
+    async def _run_onboarding(self) -> None:
+        result = await self.push_screen_wait(OnboardingScreen(self.config))
+        if not isinstance(result, dict):
+            return
+        from riftor.config import ProviderCreds
+
+        self.config.onboarded = True
+        if result.get("model"):
+            self.config.model = result["model"]
+        provider = result.get("provider")
+        if provider and result.get("api_key"):
+            entry = self.config.providers.get(provider) or ProviderCreds()
+            entry.api_key = result["api_key"]
+            self.config.providers[provider] = entry
+        scope = result.get("scope", "")
+        if scope:
+            for line in scope.replace(",", "\n").splitlines():
+                t = line.strip()
+                if t:
+                    self.engagement.add_scope(t, "in")
+        self.provider = Provider(self.config)
+        self.status.set_model(self.config.model)
+        self.config.save()
+        self._refresh_status()
+        self._refresh_sidebar()
+        self._note("onboarding complete — you're ready to test")
 
     async def _load_mcp(self) -> None:
         from riftor.mcp import register_mcp
@@ -548,12 +590,20 @@ class RiftorApp(App):
             pass
 
     def _refresh_status(self) -> None:
-        self.status.set_stage(self.engagement.stage)
+        done, total = self.engagement.methodology_progress()
+        self.status.set_methodology(done, total)
         self.status.set_scope(
             self.engagement.scope_count(), self.engagement.enforce, self.engagement.dry_run
         )
         self.status.set_findings(self.engagement.findings_count())
         self.status.set_yolo(self.yolo)
+        self._refresh_sidebar()
+
+    def _refresh_sidebar(self) -> None:
+        try:
+            self.query_one("#sidebar", EngagementSidebar).refresh_sidebar()
+        except Exception:  # noqa: BLE001
+            pass
 
     def _context_window(self) -> int:
         for prefix, window in _CONTEXT_WINDOWS.items():
@@ -563,11 +613,11 @@ class RiftorApp(App):
 
     def _refresh_usage(self) -> None:
         self.status.set_usage(self.usage.total_tokens, self.usage.cost)
-        self.status.set_chakla_usage(self.chakla_usage.total_tokens, self.chakla_usage.cost)
+        self.status.set_worker_usage(self.worker_usage.total_tokens, self.worker_usage.cost)
         pct = int(self.context.estimated_tokens() / self._context_window() * 100)
         self.status.set_context(min(pct, 999))
 
-    def _on_chakla_progress(self, event: dict) -> None:
+    def _on_worker_progress(self, event: dict) -> None:
         """Render a live worker progress event. Runs on the UI task (the agent
         loop is @work(exclusive=True), async) so widget mutation is direct."""
         if self._flock is None:
@@ -582,7 +632,7 @@ class RiftorApp(App):
         if event.get("state") in ("done", "timeout", "error"):
             usage = event.get("usage")
             if usage is not None:
-                self.chakla_usage.add(usage)
+                self.worker_usage.add(usage)
                 self._refresh_usage()
         header.update(Text(self._flock_header_text(table), style=self._pal()["violet"]))
 
@@ -592,7 +642,7 @@ class RiftorApp(App):
         indices = table.worker_indices
         done = sum(1 for i in indices if table.worker_state(i) in ("done", "timeout", "error"))
         run = sum(1 for i in indices if table.worker_state(i) in ("running", "detail"))
-        return f"🦅 dispatch · {len(indices)} 🐦 · {done} done · {run} running"
+        return f"⚙ dispatch · {len(indices)} workers · {done} done · {run} running"
 
     def _clear_flock(self) -> None:
         if self._flock is None:
@@ -818,10 +868,9 @@ class RiftorApp(App):
             "/tools": self._tools_cmd,
             "/skills": lambda: self._skills_cmd(arg),
             "/clear": self.action_clear,
-            "/lore": self._lore_cmd,
-            "/genz": self._genz_cmd,
             "/model": lambda: self._model_cmd(arg),
-            "/stage": lambda: self._set_stage(arg),
+            "/methodology": lambda: self._methodology_cmd(arg),
+            "/workers": self._workers_cmd,
             "/scope": lambda: self._scope_cmd(arg),
             "/findings": self._show_findings,
             "/finding": lambda: self._show_finding(arg),
@@ -934,27 +983,41 @@ class RiftorApp(App):
         except Exception as e:
             self._note(f"skills error: {e}")
 
-    def _lore_cmd(self) -> None:
-        self.config.lore = not self.config.lore
-        self.context.lore = self.config.lore
-        self.status.set_lore(self.config.lore)
-        if self.config.genz:
-            self._note(f"lore {'engaged no cap' if self.config.lore else 'disengaged, say less'}")
-        else:
-            self._note(f"lore {'engaged' if self.config.lore else 'disengaged'}")
+    def _methodology_cmd(self, arg: str) -> None:
+        parts = arg.split(maxsplit=1)
+        sub = parts[0].lower() if parts else ""
+        rest = parts[1] if len(parts) > 1 else ""
+        if sub == "check" and rest:
+            if self.engagement.check_methodology(rest):
+                done, total = self.engagement.methodology_progress()
+                self._note(f"checked: {rest} ({done}/{total})")
+                self._refresh_status()
+            else:
+                self._note(f"no unchecked item matching '{rest}'")
+            return
+        done, total = self.engagement.methodology_progress()
+        lines = [f"## Methodology {done}/{total} complete"]
+        cat: str | None = None
+        for item in self.engagement.list_methodology():
+            if item.category != cat:
+                cat = item.category
+                lines.append(f"\n### {cat}")
+            mark = "x" if item.checked else " "
+            note = f" — {item.notes}" if item.notes else ""
+            lines.append(f"- [{mark}] {item.name}{note}")
+        self._markdown("\n".join(lines))
 
-    def _genz_cmd(self) -> None:
-        self.config.genz = not self.config.genz
-        self.context.genz = self.config.genz
-        self.status.set_genz(self.config.genz)
-        try:
-            self.query_one(Banner).set_genz(self.config.genz)
-        except Exception:
-            pass
-        if self.config.genz:
-            self._note("genz engaged fr 🦅")
-        else:
-            self._note("genz disengaged, back to normie mode")
+    def _workers_cmd(self) -> None:
+        from riftor.workers.registry import list_workers
+
+        lines = ["## Workers", ""]
+        for w in list_workers():
+            tools_s = ", ".join(w.tools)
+            lines.append(f"- **{w.name}** — {w.description or '(no description)'}")
+            lines.append(f"  tools: {tools_s}")
+        lines.append("")
+        lines.append("Custom workers: `~/.config/riftor/workers/<name>.md`")
+        self._markdown("\n".join(lines))
 
     def _model_cmd(self, arg: str) -> None:
         if arg:
@@ -994,17 +1057,13 @@ class RiftorApp(App):
         self.config.max_tokens = result["max_tokens"]
         self.config.max_steps = result.get("max_steps", self.config.max_steps)
         self.max_steps = self.config.max_steps
-        self.config.lore = result["lore"]
-        self.config.genz = result.get("genz", self.config.genz)
+        self.config.worker_model = result.get("worker_model", self.config.worker_model)
         self.config.show_thinking = result.get("show_thinking", self.config.show_thinking)
         self.config.show_tool_output = result.get("show_tool_output", self.config.show_tool_output)
         self.config.browser_headless = result.get("browser_headless", self.config.browser_headless)
         self.config.browser_persistent_profile = result.get(
             "browser_persistent_profile", self.config.browser_persistent_profile)
         self.config.reasoning_effort = result.get("reasoning_effort", self.config.reasoning_effort)
-        self.config.chakla_model = result.get("chakla_model", self.config.chakla_model)
-        self.config.label_main = result.get("label_main", self.config.label_main)
-        self.config.label_worker = result.get("label_worker", self.config.label_worker)
 
         provider = result.get("provider")
         if provider:
@@ -1022,7 +1081,7 @@ class RiftorApp(App):
         # provider's own default base. Reuse the shared key only if one was
         # entered this session and the worker provider has no key yet.
         from riftor.providers import PROVIDERS as _PROVIDERS  # local: keep import-time light
-        w_provider = result.get("chakla_provider")
+        w_provider = result.get("worker_provider")
         if w_provider and w_provider != provider:
             w_entry = self.config.providers.get(w_provider) or ProviderCreds()
             if not w_entry.api_key and result.get("api_key"):
@@ -1033,14 +1092,6 @@ class RiftorApp(App):
                 self.config.providers[w_provider] = w_entry
 
         self.provider = Provider(self.config)
-        self.context.lore = self.config.lore
-        self.status.set_lore(self.config.lore)
-        self.status.set_genz(self.config.genz)
-        self.context.genz = self.config.genz
-        try:
-            self.query_one(Banner).set_genz(self.config.genz)
-        except Exception:
-            pass
         self.status.set_model(self.config.model)
         self.config.theme = result["theme"]
         self._apply_theme(result["theme"])
@@ -1064,50 +1115,10 @@ class RiftorApp(App):
         else:
             self._note("usage: /permissions [allow <tool> [pattern] | deny <tool> [pattern]]")
 
-    def _set_stage(self, arg: str) -> None:
-        if not arg:
-            cur = self.engagement.stage
-            if self.config.genz:
-                names = GENZ_STAGE_NAMES
-                letters = GENZ_STAGE_LETTERS
-                stages = " · ".join(f"{letters[k]} {v}" for k, v in names.items())
-                self._note(f"stage: {letters[cur]} ({names[cur]})   ·   {stages}")
-            else:
-                stages = " · ".join(f"{k} {v}" for k, v in STAGE_NAMES.items())
-                self._note(f"stage: {cur} ({STAGE_NAMES[cur]})   ·   {stages}")
-            return
-        name_to_letter = {v.lower(): k for k, v in STAGE_NAMES.items()}
-        token = arg.strip()
-        letter = token.upper() if token.upper() in STAGE_NAMES else name_to_letter.get(token.lower())
-        if letter:
-            self.engagement.set_stage(letter)
-            self._refresh_status()
-            self._stage_divider(letter)
-        else:
-            self._note(f"unknown stage: {arg} — use R/I/F/T or recon/intrusion/foothold/takeover")
-
-    def _stage_divider(self, letter: str) -> None:
-        """A scannable, color-coded divider marking a RIFT stage transition."""
-        p = self._pal()
-        colors = {"R": p["cyan"], "I": p["magenta"], "F": p["violet"], "T": p["danger"]}
-        color = colors.get(letter, p["cyan"])
-        line = Text()
-        line.append("──◢ ", style=color)
-        if self.config.genz:
-            label = GENZ_STAGE_LETTERS.get(letter, letter)
-            name = GENZ_STAGE_NAMES.get(letter, STAGE_NAMES.get(letter, letter))
-        else:
-            label = letter
-            name = STAGE_NAMES.get(letter, letter)
-        line.append(f"{label} · {name}", style=f"bold {color}")
-        line.append(" ◣" + "─" * 30, style=color)
-        self.chat.mount(Static(line, classes="note"))
-        self._scroll_if_following()
-
     def _scope_cmd(self, arg: str) -> None:
         parts = arg.split()
         if not parts:
-            none_label = "no glaze yet fr" if self.config.genz else "(none)"
+            none_label = "(none)"
             ins = ", ".join(t.raw for t in self.engagement.scope.in_scope) or none_label
             outs = self.engagement.scope.out_of_scope
             mode = "dry-run" if self.engagement.dry_run else ("on" if self.engagement.enforce else "off")
@@ -1557,13 +1568,12 @@ class RiftorApp(App):
         if tmpl is None:
             self._note(f"unknown template: {key} — try /template for the list")
             return
-        self.engagement.set_stage(tmpl.stage)
         self.engagement.set_template(key)
         self._refresh_status()
-        tools = ", ".join(tmpl.tools)
+        tools_s = ", ".join(tmpl.tools)
         self._markdown(
-            f"**template applied: {tmpl.label}**  ·  stage → {tmpl.stage}\n\n"
-            f"suggested tools: {tools}\n\n{tmpl.methodology}"
+            f"**template applied: {tmpl.label}**\n\n"
+            f"suggested tools: {tools_s}\n\n{tmpl.methodology}"
         )
 
     def _doctor_cmd(self) -> None:
@@ -1612,7 +1622,8 @@ class RiftorApp(App):
             manifest = {
                 "tool": "riftor",
                 "exported": stamp,
-                "stage": self.engagement.stage,
+                "methodology_done": self.engagement.methodology_progress()[0],
+                "methodology_total": self.engagement.methodology_progress()[1],
                 "findings": self.engagement.findings_count(),
                 "model": self.config.model,
             }
@@ -1969,7 +1980,7 @@ class RiftorApp(App):
         self.session_id = sessions.new_id()
         self.context.clear()
         self.usage = Usage()
-        self.chakla_usage = Usage()  # reset the 🐦 worker gauge with the session
+        self.worker_usage = Usage()
         self._refresh_usage()
         self._clear_flock()
         self.chat.remove_children()
@@ -2011,7 +2022,7 @@ class RiftorApp(App):
     def action_clear(self) -> None:
         self.context.clear()
         self.usage = Usage()
-        self.chakla_usage = Usage()  # reset the 🐦 worker gauge with the session
+        self.worker_usage = Usage()
         self._refresh_usage()
         self._clear_flock()
         self.chat.remove_children()
@@ -2062,7 +2073,7 @@ class RiftorApp(App):
             self._last_user_text = user_text
         self.status.set_busy(True)
         # chat-area pulse spinner
-        label = "Baaj is cooking…" if self.config.genz else "opening rift…"
+        label = "running…"
         self._spinner = PulseSpinner(label, classes="spinner")
         await self._mount(self._spinner)
         self._spinner.start()
@@ -2305,7 +2316,7 @@ class RiftorApp(App):
             result = await tool.execute(call.arguments, self.toolctx)
         except Exception as exc:  # noqa: BLE001
             result = ToolResult(f"error: {exc}", is_error=True)
-        if call.name == "dispatch_chakla":
+        if call.name == "dispatch_worker":
             self._clear_flock()
         result = result.truncated(self.config.max_result_chars)
         duration = time.monotonic() - start
@@ -2318,6 +2329,8 @@ class RiftorApp(App):
             duration=duration,
             result_len=len(result.content),
         )
+        if not result.is_error:
+            self.engagement.auto_tick_methodology(call.name, preview)
         await self._show_tool_result(result.content, is_error=result.is_error)
         if call.name == "browser_screenshot" and not result.is_error:
             import re

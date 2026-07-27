@@ -47,7 +47,7 @@ class ToolContext:
     audit: "AuditLog | None" = None
     yolo: bool = False
     #: Optional UI/progress channel for tools that report incremental progress
-    #: (DispatchChaklaTool / run_chakla). The callback takes one event dict and
+    #: (DispatchWorkerTool / run_worker). The callback takes one event dict and
     #: returns None. None in headless tests and ordinary tools — a no-op.
     #: INVARIANT: invoked on the caller's event loop. In the TUI the agent loop
     #: is @work(exclusive=True) (async, NOT thread=True), so the callback runs on

@@ -27,7 +27,7 @@ async def test_memory_add_then_persists(monkeypatch):
     with tempfile.TemporaryDirectory() as d:
         workdir = Path(d)
         _patch_paths(workdir)
-        app = RiftorApp(Config(), workdir=workdir)
+        app = RiftorApp(Config(onboarded=True), workdir=workdir)
         async with app.run_test() as pilot:
             app.query_one("#prompt", Input).value = "/memory add target hates noise"
             await pilot.press("enter")
@@ -43,7 +43,7 @@ async def test_memory_add_with_tag(monkeypatch):
     with tempfile.TemporaryDirectory() as d:
         workdir = Path(d)
         _patch_paths(workdir)
-        app = RiftorApp(Config(), workdir=workdir)
+        app = RiftorApp(Config(onboarded=True), workdir=workdir)
         async with app.run_test() as pilot:
             app.query_one("#prompt", Input).value = "/memory add [creds] admin:admin on 10.0.0.1"
             await pilot.press("enter")
@@ -60,7 +60,7 @@ async def test_memory_rm(monkeypatch):
         workdir = Path(d)
         _patch_paths(workdir)
         entry = MemoryStore(workdir).add("delete me", source="operator")
-        app = RiftorApp(Config(), workdir=workdir)
+        app = RiftorApp(Config(onboarded=True), workdir=workdir)
         async with app.run_test() as pilot:
             app.query_one("#prompt", Input).value = f"/memory rm {entry.id}"
             await pilot.press("enter")
@@ -76,7 +76,7 @@ async def test_memory_clear(monkeypatch):
         _patch_paths(workdir)
         MemoryStore(workdir).add("a", source="operator")
         MemoryStore(workdir).add("b", source="operator")
-        app = RiftorApp(Config(), workdir=workdir)
+        app = RiftorApp(Config(onboarded=True), workdir=workdir)
         async with app.run_test() as pilot:
             app.query_one("#prompt", Input).value = "/memory clear"
             await pilot.press("enter")
@@ -90,7 +90,7 @@ async def test_memory_add_empty_after_tag_not_persisted(monkeypatch):
     with tempfile.TemporaryDirectory() as d:
         workdir = Path(d)
         _patch_paths(workdir)
-        app = RiftorApp(Config(), workdir=workdir)
+        app = RiftorApp(Config(onboarded=True), workdir=workdir)
         async with app.run_test() as pilot:
             app.query_one("#prompt", Input).value = "/memory add [a]   "
             await pilot.press("enter")
@@ -105,7 +105,7 @@ async def test_memory_bare_lists_without_crash(monkeypatch):
         workdir = Path(d)
         _patch_paths(workdir)
         MemoryStore(workdir).add("a note", source="operator")
-        app = RiftorApp(Config(), workdir=workdir)
+        app = RiftorApp(Config(onboarded=True), workdir=workdir)
         async with app.run_test() as pilot:
             app.query_one("#prompt", Input).value = "/memory"
             await pilot.press("enter")

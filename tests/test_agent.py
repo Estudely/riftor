@@ -35,7 +35,7 @@ def test_usage_add():
 
 
 def test_context_token_estimate_and_compact():
-    ctx = Context(lore=False)
+    ctx = Context()
     ctx.add_user("scan it")
     ctx.add_message({"role": "assistant", "content": None, "tool_calls": [
         {"id": "a", "type": "function", "function": {"name": "bash", "arguments": "{}"}},
@@ -49,7 +49,7 @@ def test_context_token_estimate_and_compact():
 
 
 def test_pop_last_user_turn():
-    ctx = Context(lore=False)
+    ctx = Context()
     ctx.add_user("first")
     ctx.add_assistant("reply")
     ctx.add_user("second")

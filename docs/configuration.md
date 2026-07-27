@@ -18,12 +18,10 @@ falls back to detected defaults (it won't overwrite your file) and launches.
 | `temperature` | float | `0.3` | Sampling temperature, `0.0`–`2.0`. Lower = more deterministic. |
 | `max_tokens` | int | `2048` | Max tokens per model response. |
 | `theme` | string | `rift` | Dark: `rift` `dusk` `void` `fracture` `singularity` · Light: `dawn` `paper`. Changing it in `/config` previews live. |
-| `lore` | bool | `true` | The subtle rift persona; off = strictly professional voice. |
-| `genz` | bool | `false` | Gen Z / Chakla Baaj persona overlay (also toggled with `/genz`). |
 | `show_thinking` | bool | `true` | Show the model's reasoning as a dim block above each answer (and on stderr in `--headless`). |
 | `show_tool_output` | bool | `true` | Render tool-result blocks in the chat. When off, the `⛏` call line still shows and hidden output stays reachable via `/show <id>`. |
 | `reasoning_effort` | string | `medium` | Thinking budget requested from the model: `none` `low` `medium` `high`. `none` (or `show_thinking = false`) sends no reasoning request. |
-| `max_steps` | int | `16` | Tool-call steps per task before pausing. `/continue [N]` raises the live session budget (and the barren-round ceiling) so recon isn't cut short every few rounds; the config file is unchanged until you Save in `/config`. Also caps each Chakla worker's step budget. In `--headless` / `--prompt`, exceeding this exits with code `4`. |
+| `max_steps` | int | `16` | Tool-call steps per task before pausing. `/continue [N]` raises the live session budget (and the barren-round ceiling) so recon isn't cut short every few rounds; the config file is unchanged until you Save in `/config`. Also caps each worker's step budget. In `--headless` / `--prompt`, exceeding this exits with code `4`. |
 | `max_result_chars` | int | `30000` | Cap on tool output fed back to the model. |
 | `result_preview_lines` | int | `25` | Lines of a tool result shown before `…/show <id>`. |
 | `rate_limit_per_min` | int | `0` | Cap model calls per minute (`0` = unlimited). |
@@ -37,11 +35,9 @@ falls back to detected defaults (it won't overwrite your file) and launches.
 | `mcp_enabled` | bool | `true` | Master switch for MCP client connections (`riftor[mcp]`). |
 | `hackerone_username` | string | — | Optional HackerOne API username for `/scope bounty hackerone:<handle>` (prefer env `HACKERONE_USERNAME`). |
 | `hackerone_token` | string | — | Optional HackerOne API token (prefer env `HACKERONE_TOKEN`). |
-| `chakla_model` | string | `""` (reuse main) | Chakla worker model. Empty string means reuse the main `model`. Override with a cheap id (e.g. Haiku) when you want workers on a different model. |
-| `chakla_max_workers` | int | `5` | Max number of Chakla workers per dispatch batch. |
-| `chakla_timeout_s` | int | `300` | Per-worker wall-clock timeout in seconds. |
-| `label_main` | string | `Baaj` | Display name for the orchestrator agent. |
-| `label_worker` | string | `Chakla` | Display name for the worker subagents. |
+| `worker_model` | string | `""` (reuse main) | Worker subagent model. Empty string means reuse the main `model`. Override with a cheap id (e.g. Haiku) when you want workers on a different model. |
+| `worker_max_parallel` | int | `5` | Max number of workers per `dispatch_worker` batch. |
+| `worker_timeout_s` | int | `300` | Per-worker wall-clock timeout in seconds. |
 
 ### Example
 ```toml
@@ -50,7 +46,6 @@ model = "anthropic/claude-sonnet-4-6"
 temperature = 0.3
 max_tokens = 2048
 theme = "rift"
-lore = true
 show_thinking = true
 show_tool_output = true
 reasoning_effort = "medium"
@@ -79,12 +74,39 @@ match. It returns absolute paths to plug straight into a `bash` command. If no
 wordlists are found, install [SecLists](https://github.com/danielmiessler/SecLists)
 or set `wordlists_dir`.
 
-### Subagents (Baaj / Chakla)
+### Methodology checklist
 
-The main agent (Baaj) can dispatch a batch of lightweight Chakla workers via the
-`dispatch_chakla` tool to run independent tasks (e.g. parallel recon) on a cheaper
+riftor tracks OWASP/PTES-style testing progress per engagement instead of a fixed
+kill-chain stage. Items are seeded on first use and persist in `.riftor/engagement.db`.
+
+- **`/methodology`** — show checklist progress grouped by category (Reconnaissance,
+  Authentication, Authorization, …).
+- **`/methodology check <item>`** — manually tick an item (substring match on name).
+- **Agent tools** — `list_methodology` and `check_methodology` for the model.
+- **Auto-tick** — relevant tool runs tick matching items (e.g. `nmap` → Port scanning,
+  `nuclei` → Vulnerability Identification). The status bar shows `done/total`.
+
+Engagement templates (`/template webapp|api|network|ad`) can include a methodology
+block that guides the agent for that playbook.
+
+### Workers
+
+The lead agent can dispatch a batch of lightweight workers via the
+`dispatch_worker` tool to run independent tasks (e.g. parallel recon) on a cheaper
 model. When the agent proposes a dispatch, the TUI shows an approval prompt that
-lists the tasks and grants the workers the tools they need (default: `bash`).
+lists the tasks and grants the workers the tools they need.
+
+Built-in worker roles (bundled under `riftor/workers/`):
+
+| Role | Purpose |
+|---|---|
+| `recon` | Bulk passive/active checks — DNS, headers, ports, dirs |
+| `scout` | Fast OSINT / passive recon |
+| `tester` | Endpoint testing — auth bypass, injection, BAC/IDOR |
+| `analyst` | Triage, chains, PoCs, CVSS, reports |
+| `exploiter` | Confirmed-vuln validation, PoC execution, impact proof |
+
+List roles at runtime with `/workers`.
 
 Key properties of the worker fleet:
 
@@ -94,21 +116,39 @@ Key properties of the worker fleet:
 - **Findings land in the shared engagement database.** Worker tool calls to
   `record_service`, `record_finding`, etc. write to the same `.riftor/engagement.db`
   as the main agent.
-- **Concurrency is bounded.** `chakla_max_workers` caps parallel workers;
+- **Concurrency is bounded.** `worker_max_parallel` caps parallel workers;
   each worker's step budget is `max_steps` (shared with the main agent);
-  `chakla_timeout_s` sets the wall-clock ceiling. Tune these to stay within rate limits.
-- **Worker model defaults to the main model.** `chakla_model` defaults to an
+  `worker_timeout_s` sets the wall-clock ceiling. Tune these to stay within rate limits.
+- **Worker model defaults to the main model.** `worker_model` defaults to an
   empty string, which means workers reuse `model`. Set it to a cheaper id
   (e.g. `anthropic/claude-haiku-4-5-20251001`) when you want workers on a
-  different model. Override with `--chakla-model` at the CLI or by editing
-  the config file.
+  different model. Override with `--worker-model` at the CLI or in `/config`.
+
+#### Custom workers
+
+Drop markdown specs in `~/.config/riftor/workers/<name>.md` (or
+`$XDG_CONFIG_HOME/riftor/workers/`). Each file uses YAML front matter plus a
+system prompt body:
+
+```markdown
+---
+name: my-scanner
+description: Custom passive recon worker
+model: ""                    # optional; empty => worker_model or main model
+tools: [bash, webfetch]      # tools granted on dispatch approval
+---
+You are a recon worker. Run only the checks in the task string...
+```
+
+User-defined workers override bundled roles on name collision (user dir is loaded
+second). Restart is not required — specs are read at dispatch time.
 
 ### Live worker visibility
 
-While a `dispatch_chakla` batch runs, the TUI shows a live "flock" table — one
+While a `dispatch_worker` batch runs, the TUI shows a live worker table — one
 row per worker (queued → running → done/timeout/error) with the worker's current
 activity and token count. The table is removed when the dispatch finishes; the
-aggregated text summary remains. Worker token/cost accrues in the status-bar 🐦
+aggregated text summary remains. Worker token/cost accrues in the status-bar
 segment as each worker completes. In headless mode, one progress line per finished
 worker is printed to stderr (the agent's answer stays on stdout).
 
@@ -120,7 +160,7 @@ invocation and are not persisted to config.toml):
 | Flag | Mirrors field | Notes |
 |---|---|---|
 | `--model MODEL` | `model` | Override the main-agent model. |
-| `--chakla-model MODEL` | `chakla_model` | Override the Chakla worker model. |
+| `--worker-model MODEL` | `worker_model` | Override the worker subagent model. |
 | `--api-key KEY` | `api_key` | Override the API key. |
 | `--browser-headed` | `browser_headless` | Run the browser visibly for this run only (does not persist). |
 

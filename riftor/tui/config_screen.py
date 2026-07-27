@@ -60,13 +60,12 @@ class ConfigScreen(ModalScreen[dict | None]):
         self._original_theme = config.theme
         self._provider = provider_key_for_model(config.model)
         self._provider_initialized = False
-        # Worker (Chakla) picker mirrors the main one. Empty chakla_model =>
-        # reuse main model, so seed the worker provider from the main model then.
+        # Worker picker mirrors the main one. Empty worker_model => reuse main model.
         self._worker_provider = provider_key_for_model(
-            self.config.chakla_model or self.config.model)
+            self.config.worker_model or self.config.model)
         self._worker_provider_initialized = False
         self._full_models: list[tuple[str, str]] = []
-        self._full_chakla_models: list[tuple[str, str]] = []
+        self._full_worker_models: list[tuple[str, str]] = []
 
     def compose(self) -> ComposeResult:
         theme = self.config.theme if self.config.theme in THEMES else "rift"
@@ -90,7 +89,7 @@ class ConfigScreen(ModalScreen[dict | None]):
         # --- worker (Chakla) picker display values, mirroring the main model ---
         wkey = self._worker_provider
         wmeta = PROVIDERS[wkey]
-        wsrc = self.config.chakla_model or self.config.model
+        wsrc = self.config.worker_model or self.config.model
         wbare = (wsrc[len(wmeta.prefix):]
                  if wmeta.prefix and wkey != "openrouter"
                  and wsrc.startswith(wmeta.prefix)
@@ -98,9 +97,8 @@ class ConfigScreen(ModalScreen[dict | None]):
         w_model_opts = _model_options(wkey)
         if wbare and wbare not in [v for _, v in w_model_opts]:
             w_model_opts = [(wbare, wbare), *w_model_opts]
-        self._full_chakla_models = w_model_opts
-        # Empty chakla_model => "reuse main" => show nothing selected.
-        w_model_val = wbare if self.config.chakla_model and wbare else Select.NULL
+        self._full_worker_models = w_model_opts
+        w_model_val = wbare if self.config.worker_model and wbare else Select.NULL
         with Vertical(id="config-box"):
             yield Label("riftor · config", id="config-title")
             with Horizontal(id="config-main"):
@@ -153,28 +151,20 @@ class ConfigScreen(ModalScreen[dict | None]):
                         yield Label("Workers", classes="config-section")
                         yield _row("Provider", Select(
                             [(m.label, k) for k, m in PROVIDERS.items()],
-                            value=wkey, allow_blank=False, id="cfg-chakla-provider"))
+                            value=wkey, allow_blank=False, id="cfg-worker-provider"))
                         yield _row("Search", Input(
-                            placeholder="filter models…", id="cfg-chakla-model-filter"))
+                            placeholder="filter models…", id="cfg-worker-model-filter"))
                         yield _row("Model", Select(
                             w_model_opts, value=w_model_val, allow_blank=True,
-                            id="cfg-chakla-model-select"))
+                            id="cfg-worker-model-select"))
                         yield _row("Custom id", Input(
                             value="", placeholder="blank = reuse main model",
-                            id="cfg-chakla-custom"))
-                        yield _row("Main label", Input(
-                            value=self.config.label_main, placeholder="e.g. Baaj",
-                            id="cfg-label-main"))
-                        yield _row("Worker label", Input(
-                            value=self.config.label_worker, placeholder="e.g. Chakla",
-                            id="cfg-label-worker"))
+                            id="cfg-worker-custom"))
 
                     with Vertical(id="section-appearance", classes="config-section-panel hidden"):
                         yield Label("Appearance", classes="config-section")
                         yield _row("Theme", Select([(n, n) for n in THEMES], value=theme,
                                                    allow_blank=False, id="cfg-theme"))
-                        yield _row("Lore", Switch(value=self.config.lore, id="cfg-lore"))
-                        yield _row("Genz", Switch(value=self.config.genz, id="cfg-genz"))
 
                     with Vertical(id="section-display", classes="config-section-panel hidden"):
                         yield Label("Display", classes="config-section")
@@ -258,14 +248,10 @@ class ConfigScreen(ModalScreen[dict | None]):
                 self._set_model_options(_model_options(event.value))
             else:
                 self._provider_initialized = True
-        elif event.select.id == "cfg-chakla-provider" and isinstance(event.value, str):
+        elif event.select.id == "cfg-worker-provider" and isinstance(event.value, str):
             self._worker_provider = event.value
-            # NOTE: do NOT touch #cfg-base/#cfg-key here — those belong to the MAIN
-            # provider. Switching the worker provider must not mutate the main
-            # provider's fields. The worker's base/key are resolved at save time
-            # in _open_config from the worker provider's stored creds / default base.
             if self._worker_provider_initialized:
-                self._set_chakla_model_options(_model_options(event.value))
+                self._set_worker_model_options(_model_options(event.value))
             else:
                 self._worker_provider_initialized = True
 
@@ -274,17 +260,17 @@ class ConfigScreen(ModalScreen[dict | None]):
         filt = self.query_one("#cfg-model-filter", Input).value
         self._apply_model_filter(filt, self._full_models, "#cfg-model-select")
 
-    def _set_chakla_model_options(self, options: list[tuple[str, str]]) -> None:
-        self._full_chakla_models = options or [("(type a custom id below)", "")]
-        filt = self.query_one("#cfg-chakla-model-filter", Input).value
-        self._apply_model_filter(filt, self._full_chakla_models, "#cfg-chakla-model-select")
+    def _set_worker_model_options(self, options: list[tuple[str, str]]) -> None:
+        self._full_worker_models = options or [("(type a custom id below)", "")]
+        filt = self.query_one("#cfg-worker-model-filter", Input).value
+        self._apply_model_filter(filt, self._full_worker_models, "#cfg-worker-model-select")
 
     def on_input_changed(self, event: Input.Changed) -> None:
         """Filter the model list on each keystroke."""
         if event.input.id == "cfg-model-filter":
             self._apply_model_filter(event.value, self._full_models, "#cfg-model-select")
-        elif event.input.id == "cfg-chakla-model-filter":
-            self._apply_model_filter(event.value, self._full_chakla_models, "#cfg-chakla-model-select")
+        elif event.input.id == "cfg-worker-model-filter":
+            self._apply_model_filter(event.value, self._full_worker_models, "#cfg-worker-model-select")
 
     def _apply_model_filter(
         self, query: str, full: list[tuple[str, str]], select_id: str
@@ -366,11 +352,10 @@ class ConfigScreen(ModalScreen[dict | None]):
 
         # --- worker (Chakla) model ---
         w_provider = self._worker_provider
-        w_custom = self.query_one("#cfg-chakla-custom", Input).value.strip()
-        w_sel = self.query_one("#cfg-chakla-model-select", Select).value
+        w_custom = self.query_one("#cfg-worker-custom", Input).value.strip()
+        w_sel = self.query_one("#cfg-worker-model-select", Select).value
         w_chosen = w_custom or (w_sel if isinstance(w_sel, str) and w_sel else "")
-        # Blank => "" => reuse main model at dispatch time.
-        chakla_model = apply_prefix(w_provider, w_chosen) if w_chosen else ""
+        worker_model = apply_prefix(w_provider, w_chosen) if w_chosen else ""
 
         result: dict = {
             "model": model,
@@ -380,19 +365,13 @@ class ConfigScreen(ModalScreen[dict | None]):
             "max_tokens": max_tokens,
             "max_steps": max_steps,
             "theme": self.query_one("#cfg-theme", Select).value,
-            "lore": self.query_one("#cfg-lore", Switch).value,
-            "genz": self.query_one("#cfg-genz", Switch).value,
             "show_thinking": self.query_one("#cfg-show-thinking", Switch).value,
             "show_tool_output": self.query_one("#cfg-show-tool-output", Switch).value,
             "browser_headless": self.query_one("#cfg-browser-headless", Switch).value,
             "browser_persistent_profile": self.query_one("#cfg-browser-persistent", Switch).value,
             "reasoning_effort": self.query_one("#cfg-reasoning-effort", Select).value,
-            "chakla_model": chakla_model,
-            "chakla_provider": w_provider if w_chosen else None,
-            "label_main": self.query_one("#cfg-label-main", Input).value.strip()
-                or self.config.label_main,
-            "label_worker": self.query_one("#cfg-label-worker", Input).value.strip()
-                or self.config.label_worker,
+            "worker_model": worker_model,
+            "worker_provider": w_provider if w_chosen else None,
         }
         key = self.query_one("#cfg-key", Input).value.strip()
         if key:

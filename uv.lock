@@ -2085,7 +2085,7 @@ wheels = [
 
 [[package]]
 name = "riftor"
-version = "3.6.0"
+version = "4.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "litellm" },
@@ -2116,7 +2116,7 @@ mcp = [
 
 [package.metadata]
 requires-dist = [
-    { name = "litellm", specifier = ">=1.55" },
+    { name = "litellm", specifier = ">=1.93" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.0,<2" },
     { name = "playwright", marker = "extra == 'browser'", specifier = ">=1.44" },
     { name = "pydantic", specifier = ">=2.6" },

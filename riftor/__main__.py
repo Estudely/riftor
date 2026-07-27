@@ -24,8 +24,12 @@ def main() -> None:
     )
     parser.add_argument("--model", help="override the model for this run")
     parser.add_argument(
-        "--chakla-model", dest="chakla_model",
-        help="override the Chakla (worker) model for this run",
+        "--worker-model", dest="worker_model",
+        help="Override the worker subagent model (default: reuse main model).",
+    )
+    parser.add_argument(
+        "--chakla-model", dest="worker_model",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument("--api-key", dest="api_key", help="override the API key for this run")
     parser.add_argument("--workdir", help="engagement working directory (default: cwd)")
@@ -65,8 +69,8 @@ def main() -> None:
     cfg = Config.load()
     if args.model:
         cfg.model = args.model
-    if args.chakla_model:
-        cfg.chakla_model = args.chakla_model
+    if args.worker_model:
+        cfg.worker_model = args.worker_model
     if args.api_key:
         cfg.api_key = args.api_key
     if args.browser_headed:

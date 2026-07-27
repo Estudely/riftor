@@ -26,7 +26,7 @@ def test_handler_keys_subset_of_commands():
     with tempfile.TemporaryDirectory() as d:
         workdir = Path(d)
         _patch_paths(workdir)
-        app = RiftorApp(Config(), workdir=workdir)
+        app = RiftorApp(Config(onboarded=True), workdir=workdir)
         handler_keys = set(app._command_handlers("").keys()) | {"/exit", "/quit"}
         missing = handler_keys - set(_COMMANDS)
         assert not missing, f"handlers missing from _COMMANDS: {sorted(missing)}"

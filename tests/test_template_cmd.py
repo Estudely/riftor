@@ -21,19 +21,17 @@ def _patch_paths(tmp: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_template_apply_sets_stage_and_active(monkeypatch):
+async def test_template_apply_sets_active(monkeypatch):
     monkeypatch.setattr(cfgmod, "CONFIG_DIR", Path(tempfile.mkdtemp()))
     with tempfile.TemporaryDirectory() as d:
         workdir = Path(d)
         _patch_paths(workdir)
-        app = RiftorApp(Config(), workdir=workdir)
-        app.engagement.set_stage("T")  # so the == "R" assertion proves the reset
+        app = RiftorApp(Config(onboarded=True), workdir=workdir)
         async with app.run_test() as pilot:
             app.query_one("#prompt", Input).value = "/template webapp"
             await pilot.press("enter")
             await pilot.pause()
             assert app.engagement.active_template() == "webapp"
-            assert app.engagement.stage == "R"
 
 
 @pytest.mark.asyncio
@@ -42,7 +40,7 @@ async def test_template_off_clears(monkeypatch):
     with tempfile.TemporaryDirectory() as d:
         workdir = Path(d)
         _patch_paths(workdir)
-        app = RiftorApp(Config(), workdir=workdir)
+        app = RiftorApp(Config(onboarded=True), workdir=workdir)
         app.engagement.set_template("api")
         async with app.run_test() as pilot:
             app.query_one("#prompt", Input).value = "/template off"
@@ -57,7 +55,7 @@ async def test_template_unknown_does_not_crash(monkeypatch):
     with tempfile.TemporaryDirectory() as d:
         workdir = Path(d)
         _patch_paths(workdir)
-        app = RiftorApp(Config(), workdir=workdir)
+        app = RiftorApp(Config(onboarded=True), workdir=workdir)
         async with app.run_test() as pilot:
             app.query_one("#prompt", Input).value = "/template nonsense"
             await pilot.press("enter")

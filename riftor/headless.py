@@ -88,7 +88,7 @@ def run_headless(
 
 
 async def _run(cfg: Config, workdir: Path, prompt: str, scope_file: str | None, yolo: bool = False) -> int:
-    context = Context(lore=cfg.lore, workdir=workdir)
+    context = Context(workdir=workdir)
     provider = Provider(cfg)
     engagement = Engagement(workdir)
     if scope_file:
@@ -233,4 +233,6 @@ async def _run_tool_headless(
         result = ToolResult(f"error: {exc}", is_error=True)
     result = result.truncated(toolctx.max_result_chars)
     audit.record(tool.name, preview, allowed=True, is_error=result.is_error)
+    if not result.is_error:
+        engagement.auto_tick_methodology(call.name, preview)
     context.add_tool_result(call.id, result.content)

@@ -45,6 +45,14 @@ CREATE TABLE IF NOT EXISTS hypotheses (
     created REAL,
     updated REAL
 );
+CREATE TABLE IF NOT EXISTS methodology (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    category TEXT NOT NULL,
+    name TEXT NOT NULL,
+    checked INTEGER DEFAULT 0,
+    notes TEXT DEFAULT '',
+    UNIQUE(category, name)
+);
 """
 
 
@@ -318,6 +326,85 @@ class Store:
         return int(self._conn.execute(
             "SELECT COUNT(*) AS c FROM hypotheses WHERE status=?", (status,)
         ).fetchone()["c"])
+
+    # -- methodology checklist --------------------------------------------------
+    def seed_methodology_if_empty(self) -> None:
+        from riftor.engagement.methodology import default_methodology
+
+        row = self._conn.execute("SELECT COUNT(*) AS c FROM methodology").fetchone()
+        if int(row["c"]) > 0:
+            return
+        for item in default_methodology():
+            self._conn.execute(
+                "INSERT INTO methodology(category, name, checked, notes) VALUES(?, ?, 0, '')",
+                (item.category, item.name),
+            )
+        self._conn.commit()
+
+    def list_methodology(self) -> list[dict]:
+        return [
+            dict(r)
+            for r in self._conn.execute(
+                "SELECT id, category, name, checked, notes FROM methodology "
+                "ORDER BY id"
+            )
+        ]
+
+    def methodology_progress(self) -> tuple[int, int]:
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS total, SUM(checked) AS done FROM methodology"
+        ).fetchone()
+        total = int(row["total"] or 0)
+        done = int(row["done"] or 0)
+        return done, total
+
+    def check_methodology(self, name: str, *, notes: str = "", checked: bool = True) -> bool:
+        """Mark a methodology item by name (substring match). Returns True if updated."""
+        name = (name or "").strip()
+        if not name:
+            return False
+        rows = self._conn.execute(
+            "SELECT id, name, notes FROM methodology WHERE checked=0"
+        ).fetchall()
+        target_id = None
+        low = name.lower()
+        for row in rows:
+            if low in (row["name"] or "").lower():
+                target_id = int(row["id"])
+                break
+        if target_id is None:
+            return False
+        note_val = notes.strip() if notes else None
+        if note_val:
+            self._conn.execute(
+                "UPDATE methodology SET checked=?, notes=? WHERE id=?",
+                (1 if checked else 0, note_val, target_id),
+            )
+        else:
+            self._conn.execute(
+                "UPDATE methodology SET checked=? WHERE id=?",
+                (1 if checked else 0, target_id),
+            )
+        self._conn.commit()
+        if checked:
+            self.log_activity("methodology_check", name)
+        return True
+
+    def auto_tick_methodology(self, item_name: str) -> bool:
+        """Tick a methodology item by exact name if not already checked."""
+        if not item_name:
+            return False
+        row = self._conn.execute(
+            "SELECT id FROM methodology WHERE name=? AND checked=0 LIMIT 1",
+            (item_name,),
+        ).fetchone()
+        if not row:
+            # substring fallback
+            return self.check_methodology(item_name)
+        self._conn.execute("UPDATE methodology SET checked=1 WHERE id=?", (int(row["id"]),))
+        self._conn.commit()
+        self.log_activity("methodology_auto", item_name)
+        return True
 
     # -- activity log -----------------------------------------------------------
     def log_activity(self, event: str, detail: str = "") -> None:

@@ -1,13 +1,11 @@
-"""Kill-chain / attack graph from engagement state → Mermaid flowchart."""
+"""Attack graph from engagement state → Mermaid flowchart."""
 
 from __future__ import annotations
 
 import re
 from pathlib import Path
 
-from riftor.engagement import STAGE_LABELS, VALID_STAGES
-
-_STAGE_ORDER = {s: i for i, s in enumerate(VALID_STAGES)}
+_SEV_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 
 
 def _sanitize_id(raw: str) -> str:
@@ -24,18 +22,18 @@ def _short(text: str, limit: int = 40) -> str:
 
 
 def build_graph(engagement) -> dict:
-    """Build nodes/edges from hosts, services, findings, and RIFT stage ordering."""
+    """Build nodes/edges from hosts, services, and findings by severity."""
     store = engagement.store
     nodes: list[dict] = []
     edges: list[dict] = []
     seen: set[str] = set()
 
-    def add_node(node_id: str, label: str, kind: str, stage: str | None = None) -> str:
+    def add_node(node_id: str, label: str, kind: str, severity: str | None = None) -> str:
         sid = _sanitize_id(node_id)
         if sid not in seen:
             entry: dict = {"id": sid, "label": _short(label), "kind": kind}
-            if stage:
-                entry["stage"] = stage
+            if severity:
+                entry["severity"] = severity
             nodes.append(entry)
             seen.add(sid)
         return sid
@@ -56,33 +54,22 @@ def build_graph(engagement) -> dict:
         sid = add_node(f"svc_{s['id']}", label, "service")
         edges.append({"src": hid, "dst": sid, "kind": "hosts"})
 
-    for f in store.list_findings():
+    findings = sorted(
+        store.list_findings(),
+        key=lambda f: (_SEV_ORDER.get(f.get("severity", "info"), 9), f["id"]),
+    )
+    for f in findings:
+        sev = (f.get("severity") or "info").lower()
         fid = add_node(
             f"find_{f['id']}",
-            f"{f.get('title', 'finding')} ({f.get('severity', 'info')})",
+            f"{f.get('title', 'finding')} ({sev})",
             "finding",
-            stage=(f.get("stage") or "").strip().upper()[:1] or None,
+            severity=sev,
         )
         host = (f.get("host") or "").strip()
         if host:
             hid = add_node(f"host_{host}", host, "host")
             edges.append({"src": hid, "dst": fid, "kind": "on_host"})
-
-    stages_with_findings: list[str] = []
-    for f in store.list_findings():
-        stage = (f.get("stage") or "").strip().upper()[:1]
-        if stage in VALID_STAGES and stage not in stages_with_findings:
-            stages_with_findings.append(stage)
-    stages_with_findings.sort(key=lambda s: _STAGE_ORDER[s])
-
-    stage_ids: list[str] = []
-    for stage in stages_with_findings:
-        name = STAGE_LABELS.get(stage, stage)
-        sid = add_node(f"stage_{stage}", f"{stage} {name}", "stage", stage=stage)
-        stage_ids.append(sid)
-
-    for i in range(len(stage_ids) - 1):
-        edges.append({"src": stage_ids[i], "dst": stage_ids[i + 1], "kind": "stage_order"})
 
     return {"nodes": nodes, "edges": edges}
 
@@ -97,10 +84,7 @@ def to_mermaid(graph: dict) -> str:
     for edge in graph.get("edges", []):
         src = _sanitize_id(edge["src"])
         dst = _sanitize_id(edge["dst"])
-        if edge.get("kind") == "stage_order":
-            lines.append(f"  {src} -.-> {dst}")
-        else:
-            lines.append(f"  {src} --> {dst}")
+        lines.append(f"  {src} --> {dst}")
     return "\n".join(lines) + "\n"
 
 

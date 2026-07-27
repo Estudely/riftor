@@ -31,10 +31,11 @@ from riftor.tools.engagement import (
     RememberTool,
     ResolveHypothesisTool,
     ScopeListTool,
-    SetStageTool,
+    ListMethodologyTool,
+    CheckMethodologyTool,
     WordlistTool,
 )
-from riftor.tools.subagent import DispatchChaklaTool
+from riftor.tools.subagent import DispatchWorkerTool
 from riftor.tools.browser import (
     BrowserClickTool,
     BrowserConsoleMessagesTool,
@@ -62,7 +63,8 @@ ALL_TOOLS: list[Tool] = [
     BrowserScreenshotTool(),
     BrowserConsoleMessagesTool(),
     BrowserNetworkRequestsTool(),
-    SetStageTool(),
+    ListMethodologyTool(),
+    CheckMethodologyTool(),
     ImportScanTool(),
     RecordServiceTool(),
     RecordFindingTool(),
@@ -70,7 +72,7 @@ ALL_TOOLS: list[Tool] = [
     DeleteFindingTool(),
     GenerateReportTool(),
     LoadSkillTool(),
-    DispatchChaklaTool(),
+    DispatchWorkerTool(),
     RecordHypothesisTool(),
     ResolveHypothesisTool(),
     ListHypothesesTool(),

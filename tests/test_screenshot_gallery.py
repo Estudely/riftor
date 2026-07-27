@@ -41,7 +41,7 @@ async def test_gallery_empty_renders_note(monkeypatch):
     monkeypatch.setattr(cfgmod, "CONFIG_DIR", Path(tempfile.mkdtemp()))
     with tempfile.TemporaryDirectory() as d:
         _patch_paths(Path(d))
-        cfg = Config()
+        cfg = Config(onboarded=True)
         app = RiftorApp(cfg, workdir=Path(d))
         async with app.run_test() as pilot:
             app.query_one("#prompt").value = "/screenshots"
@@ -63,7 +63,7 @@ async def test_gallery_renders_entries(monkeypatch):
         workdir = Path(d)
         _patch_paths(workdir)
         _make_screenshots(workdir, count=3)
-        cfg = Config()
+        cfg = Config(onboarded=True)
         app = RiftorApp(cfg, workdir=workdir)
         async with app.run_test() as pilot:
             app.query_one("#prompt").value = "/screenshots"
@@ -88,7 +88,7 @@ async def test_gallery_select_shows_preview(monkeypatch):
         workdir = Path(d)
         _patch_paths(workdir)
         _make_screenshots(workdir, count=2)
-        cfg = Config()
+        cfg = Config(onboarded=True)
         app = RiftorApp(cfg, workdir=workdir)
         async with app.run_test() as pilot:
             app.query_one("#prompt").value = "/screenshots"
@@ -109,7 +109,7 @@ async def test_gallery_delete_requires_double_press(monkeypatch):
         workdir = Path(d)
         _patch_paths(workdir)
         _make_screenshots(workdir, count=2)
-        cfg = Config()
+        cfg = Config(onboarded=True)
         app = RiftorApp(cfg, workdir=workdir)
         async with app.run_test() as pilot:
             app.query_one("#prompt").value = "/screenshots"
@@ -136,7 +136,7 @@ async def test_gallery_delete_removes_entry(monkeypatch):
         workdir = Path(d)
         _patch_paths(workdir)
         _make_screenshots(workdir, count=2)
-        cfg = Config()
+        cfg = Config(onboarded=True)
         app = RiftorApp(cfg, workdir=workdir)
         async with app.run_test() as pilot:
             app.query_one("#prompt").value = "/screenshots"
@@ -163,7 +163,7 @@ async def test_gallery_delete_last_screenshot_dismisses(monkeypatch):
         workdir = Path(d)
         _patch_paths(workdir)
         _make_screenshots(workdir, count=1)
-        cfg = Config()
+        cfg = Config(onboarded=True)
         app = RiftorApp(cfg, workdir=workdir)
         async with app.run_test() as pilot:
             app.query_one("#prompt").value = "/screenshots"
@@ -183,7 +183,7 @@ async def test_gallery_delete_button(monkeypatch):
         workdir = Path(d)
         _patch_paths(workdir)
         _make_screenshots(workdir, count=2)
-        cfg = Config()
+        cfg = Config(onboarded=True)
         app = RiftorApp(cfg, workdir=workdir)
         async with app.run_test() as pilot:
             app.query_one("#prompt").value = "/screenshots"
@@ -209,7 +209,7 @@ async def test_gallery_close_button(monkeypatch):
         workdir = Path(d)
         _patch_paths(workdir)
         _make_screenshots(workdir, count=1)
-        cfg = Config()
+        cfg = Config(onboarded=True)
         app = RiftorApp(cfg, workdir=workdir)
         async with app.run_test() as pilot:
             app.query_one("#prompt").value = "/screenshots"

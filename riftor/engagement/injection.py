@@ -55,4 +55,31 @@ def engagement_injection(workdir: Path | None) -> str:
     except Exception:  # noqa: BLE001
         pass
 
+    # --- methodology checklist progress ---
+    try:
+        db_path = workdir / ".riftor" / "engagement.db"
+        if db_path.exists():
+            from riftor.engagement.methodology import MethodologyItem, format_methodology_block
+
+            conn = sqlite3.connect(str(db_path))
+            conn.execute("PRAGMA busy_timeout=5000")
+            try:
+                rows = conn.execute(
+                    "SELECT category, name, checked, notes FROM methodology ORDER BY id"
+                ).fetchall()
+            finally:
+                conn.close()
+            if rows:
+                items = [
+                    MethodologyItem(
+                        category=r[0], name=r[1], checked=bool(r[2]), notes=r[3] or ""
+                    )
+                    for r in rows
+                ]
+                block = format_methodology_block(items)
+                if block:
+                    parts.append(block)
+    except Exception:  # noqa: BLE001
+        pass
+
     return "\n\n".join(parts)

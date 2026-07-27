@@ -25,7 +25,7 @@ def _patch_paths(tmp: Path) -> None:
 async def test_config_modal_renders_all_fields():
     with tempfile.TemporaryDirectory() as d:
         _patch_paths(Path(d))
-        cfg = Config(model="ollama_chat/x", api_base="http://localhost:11434")
+        cfg = Config(onboarded=True, model="ollama_chat/x", api_base="http://localhost:11434")
         app = RiftorApp(cfg, workdir=Path(d))
         async with app.run_test() as pilot:
             app.query_one("#prompt", Input).value = "/config"
@@ -39,12 +39,10 @@ async def test_config_modal_renders_all_fields():
                 ("#cfg-model-select", Select),
                 ("#cfg-model", Input), ("#cfg-base", Input), ("#cfg-key", Input),
                 ("#cfg-temp", Input), ("#cfg-maxtok", Input), ("#cfg-maxsteps", Input),
-                ("#cfg-chakla-provider", Select), ("#cfg-chakla-model-filter", Input),
-                ("#cfg-chakla-model-select", Select),
-                ("#cfg-chakla-custom", Input),
-                ("#cfg-label-main", Input), ("#cfg-label-worker", Input),
-                ("#cfg-theme", Select), ("#cfg-lore", Switch),
-                ("#cfg-genz", Switch),
+                ("#cfg-worker-provider", Select), ("#cfg-worker-model-filter", Input),
+                ("#cfg-worker-model-select", Select),
+                ("#cfg-worker-custom", Input),
+                ("#cfg-theme", Select),
                 ("#cfg-show-thinking", Switch), ("#cfg-show-tool-output", Switch),
                 ("#cfg-browser-headless", Switch), ("#cfg-browser-persistent", Switch),
                 ("#cfg-reasoning-effort", Select),
@@ -52,14 +50,9 @@ async def test_config_modal_renders_all_fields():
                 assert screen.query_one(fid, kind) is not None, fid
             # five grouped section headers (MODEL / GENERATION / WORKERS / APPEARANCE / DISPLAY)
             assert len(list(screen.query(".config-section"))) == 5
-            # aligned label column: one .field-label per field row. WORKERS now has
-            # 3 picker rows + 2 label rows (was 1 plain input + 2 labels) => +2.
-            # +3 field rows for the DISPLAY section => 15 + 3 = 18, plus the
-            # GENERATION "Tool call steps" row => 19, plus the MODEL "Codex login"
-            # status row => 20, plus 2 DISPLAY browser switches => 22,
-            # plus 2 model search/filter rows (MODEL + WORKERS) => 24,
-            # plus the genz switch in APPEARANCE => 25.
-            assert len(list(screen.query(".field-label"))) == 25
+            # aligned label column: one .field-label per field row.
+            # MODEL 8 + GENERATION 4 + WORKERS 4 + APPEARANCE 1 + DISPLAY 4 = 21
+            assert len(list(screen.query(".field-label"))) == 21
             await pilot.press("escape")
             await pilot.pause()
 
@@ -70,7 +63,7 @@ async def test_save_cancel_buttons_visible_on_short_terminals(height):
     # regression: the footer used to render below the viewport on short terminals
     with tempfile.TemporaryDirectory() as d:
         _patch_paths(Path(d))
-        cfg = Config(model="ollama_chat/x", api_base="http://localhost:11434")
+        cfg = Config(onboarded=True, model="ollama_chat/x", api_base="http://localhost:11434")
         app = RiftorApp(cfg, workdir=Path(d))
         async with app.run_test(size=(90, height)) as pilot:
             app.query_one("#prompt", Input).value = "/config"
@@ -88,7 +81,7 @@ async def test_save_cancel_buttons_visible_on_short_terminals(height):
 async def test_theme_previews_live_and_reverts_on_cancel():
     with tempfile.TemporaryDirectory() as d:
         _patch_paths(Path(d))
-        cfg = Config(model="ollama_chat/x", api_base="http://localhost:11434", theme="rift")
+        cfg = Config(onboarded=True, model="ollama_chat/x", api_base="http://localhost:11434", theme="rift")
         app = RiftorApp(cfg, workdir=Path(d))
         async with app.run_test() as pilot:
             assert app.theme == "rift"
@@ -109,7 +102,7 @@ async def test_theme_previews_live_and_reverts_on_cancel():
 async def test_config_modal_saves_changes():
     with tempfile.TemporaryDirectory() as d:
         _patch_paths(Path(d))
-        cfg = Config(model="ollama_chat/x", api_base="http://localhost:11434")
+        cfg = Config(onboarded=True, model="ollama_chat/x", api_base="http://localhost:11434")
         app = RiftorApp(cfg, workdir=Path(d))
         async with app.run_test() as pilot:
             app.query_one("#prompt", Input).value = "/config"
@@ -131,7 +124,7 @@ async def test_config_modal_saves_changes():
 async def test_display_settings_save():
     with tempfile.TemporaryDirectory() as d:
         _patch_paths(Path(d))
-        cfg = Config(model="ollama_chat/x", api_base="http://localhost:11434")
+        cfg = Config(onboarded=True, model="ollama_chat/x", api_base="http://localhost:11434")
         app = RiftorApp(cfg, workdir=Path(d))
         async with app.run_test() as pilot:
             app.query_one("#prompt", Input).value = "/config"
@@ -153,7 +146,7 @@ async def test_provider_pick_prefills_base_and_models():
     from textual.widgets import Select
     with tempfile.TemporaryDirectory() as d:
         _patch_paths(Path(d))
-        cfg = Config(model="anthropic/claude-opus-4-8")
+        cfg = Config(onboarded=True, model="anthropic/claude-opus-4-8")
         app = RiftorApp(cfg, workdir=Path(d))
         async with app.run_test() as pilot:
             app.query_one("#prompt", Input).value = "/config"
@@ -179,7 +172,7 @@ async def test_save_assembles_prefixed_model_and_writes_key():
     from textual.widgets import Select
     with tempfile.TemporaryDirectory() as d:
         _patch_paths(Path(d))
-        cfg = Config(model="anthropic/claude-opus-4-8")
+        cfg = Config(onboarded=True, model="anthropic/claude-opus-4-8")
         app = RiftorApp(cfg, workdir=Path(d))
         async with app.run_test() as pilot:
             app.query_one("#prompt", Input).value = "/config"
@@ -201,7 +194,7 @@ async def test_config_opens_with_non_curated_model():
     with tempfile.TemporaryDirectory() as d:
         _patch_paths(Path(d))
         # a model id NOT in PROVIDER_DEFAULTS — must not crash on open
-        cfg = Config(model="anthropic/claude-some-old-model-2024")
+        cfg = Config(onboarded=True, model="anthropic/claude-some-old-model-2024")
         app = RiftorApp(cfg, workdir=Path(d))
         async with app.run_test() as pilot:
             app.query_one("#prompt", Input).value = "/config"
@@ -222,7 +215,7 @@ async def test_fetch_button_repopulates_models(monkeypatch):
     monkeypatch.setattr(cs, "fetch_models", lambda *a, **k: fake)
     with tempfile.TemporaryDirectory() as d:
         _patch_paths(Path(d))
-        cfg = Config(model="openai/gpt-5.5")
+        cfg = Config(onboarded=True, model="openai/gpt-5.5")
         app = RiftorApp(cfg, workdir=Path(d))
         async with app.run_test() as pilot:
             app.query_one("#prompt", Input).value = "/config"
@@ -246,7 +239,7 @@ async def test_worker_provider_switch_does_not_clobber_main_base():
     from riftor.providers import PROVIDERS
     with tempfile.TemporaryDirectory() as d:
         _patch_paths(Path(d))
-        cfg = Config(model="openai/gpt-5.5")
+        cfg = Config(onboarded=True, model="openai/gpt-5.5")
         app = RiftorApp(cfg, workdir=Path(d))
         async with app.run_test() as pilot:
             app.query_one("#prompt", Input).value = "/config"
@@ -260,9 +253,9 @@ async def test_worker_provider_switch_does_not_clobber_main_base():
             screen.query_one("#cfg-key", Input).value = "sk-openai"
             # switch the WORKER provider to a DIFFERENT provider (deepseek) and
             # pick a worker model, so a distinct worker provider is actually saved
-            screen.query_one("#cfg-chakla-provider", Select).value = "deepseek"
+            screen.query_one("#cfg-worker-provider", Select).value = "deepseek"
             await pilot.pause()
-            screen.query_one("#cfg-chakla-custom", Input).value = "deepseek-chat"
+            screen.query_one("#cfg-worker-custom", Input).value = "deepseek-chat"
             # save WITHOUT re-touching the base field
             screen.query_one("#save").press()
             await pilot.pause()
@@ -287,7 +280,7 @@ async def test_codex_provider_hides_key_base_fetch_shows_login(monkeypatch):
         lambda: CodexAuthStatus(logged_in=True, expires_in_s=600, detail="logged in (10m left)"))
     with tempfile.TemporaryDirectory() as d:
         _patch_paths(Path(d))
-        cfg = Config(model="anthropic/claude-opus-4-8")
+        cfg = Config(onboarded=True, model="anthropic/claude-opus-4-8")
         app = RiftorApp(cfg, workdir=Path(d))
         async with app.run_test() as pilot:
             app.query_one("#prompt", Input).value = "/config"
@@ -351,7 +344,7 @@ async def test_codex_status_text_marks_logged_out(monkeypatch):
     from riftor.codex_auth import CodexAuthStatus
     with tempfile.TemporaryDirectory() as d:
         _patch_paths(Path(d))
-        cfg = Config(model="anthropic/claude-opus-4-8")
+        cfg = Config(onboarded=True, model="anthropic/claude-opus-4-8")
         screen = ConfigScreen(cfg)
         monkeypatch.setattr(
             cs, "auth_status",
@@ -369,7 +362,7 @@ async def test_codex_status_text_marks_logged_out(monkeypatch):
 async def test_openrouter_model_no_duplicate_option_on_open():
     with tempfile.TemporaryDirectory() as d:
         _patch_paths(Path(d))
-        cfg = Config(model="openrouter/auto")
+        cfg = Config(onboarded=True, model="openrouter/auto")
         app = RiftorApp(cfg, workdir=Path(d))
         async with app.run_test() as pilot:
             app.query_one("#prompt", Input).value = "/config"
