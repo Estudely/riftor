@@ -488,3 +488,97 @@ ScreenshotGalleryScreen {
     border: none;
     margin: 0 0 0 2;
 }
+
+/* — onboarding modal — */
+#onboard-box {
+    layout: vertical;
+    width: 72;
+    max-width: 92%;
+    height: auto;
+    max-height: 100%;
+    padding: 0;
+    background: $panel;
+    border: round $violet;
+}
+#onboard-title {
+    width: 1fr;
+    height: 3;
+    padding: 1 2 0 2;
+    background: $surface;
+    border-bottom: solid $border;
+    color: $foreground;
+    text-style: bold;
+}
+#onboard-subtitle {
+    width: 1fr;
+    height: 1;
+    padding: 0 2;
+    color: $muted;
+    background: $surface;
+    border-bottom: solid $border;
+}
+#onboard-body {
+    height: auto;
+    padding: 1 2;
+    overflow-y: auto;
+}
+.onboard-step {
+    height: auto;
+}
+.onboard-step.hidden {
+    display: none;
+}
+.onboard-step > Label {
+    width: 1fr;
+    color: $muted;
+    margin: 0 0 0 0;
+}
+.onboard-step > Select,
+.onboard-step > Input {
+    width: 1fr;
+    height: 3;
+    margin-bottom: 1;
+}
+.onboard-fetch-row {
+    height: 3;
+    align: left middle;
+    margin-bottom: 1;
+}
+.onboard-fetch-row Button {
+    height: 1;
+    min-height: 1;
+    min-width: 16;
+    border: none;
+    background: $surface;
+    color: $cyan;
+    margin-right: 2;
+}
+#ob-fetch-status {
+    width: 1fr;
+    color: $muted;
+    height: 1;
+}
+#onboard-buttons {
+    height: 3;
+    align: right middle;
+    background: $surface;
+    border-top: solid $border;
+    padding: 0 2;
+}
+#onboard-buttons Button {
+    height: 1;
+    min-height: 1;
+    min-width: 10;
+    border: none;
+    margin: 0 0 0 2;
+}
+#onboard-buttons #ob-next {
+    background: $violet;
+    color: $background;
+    text-style: bold;
+}
+#onboard-buttons #ob-back,
+#onboard-buttons #ob-skip {
+    background: $surface;
+    color: $muted;
+}
