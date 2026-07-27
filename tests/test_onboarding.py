@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
-from textual.widgets import Button, Input, Select
+from textual.widgets import Button, Input, Select, Static
 
 import riftor.config as cfgmod
 from riftor.config import Config
@@ -19,6 +19,26 @@ from riftor.tui.onboarding import OnboardingScreen, _model_options
 def _press(screen: OnboardingScreen, button_id: str) -> None:
     btn = screen.query_one(button_id, Button)
     screen.on_button_pressed(Button.Pressed(btn))
+
+
+async def _wait_onboarding_ready(pilot, screen: OnboardingScreen) -> None:
+    """Wait until on_mount has run (avoids racing _show_step(0) on slow CI)."""
+    for _ in range(100):
+        subtitle = str(screen.query_one("#onboard-subtitle", Static).content)
+        if "Step 1 of 3" in subtitle:
+            return
+        await pilot.pause(0.05)
+    pytest.fail("onboarding screen did not finish mounting")
+
+
+async def _advance_from_step(pilot, screen: OnboardingScreen, step: int) -> None:
+    _press(screen, "#ob-next")
+    panel_id = f"#onboard-step-{step}"
+    for _ in range(100):
+        if screen.query_one(panel_id).has_class("hidden"):
+            return
+        await pilot.pause(0.05)
+    pytest.fail(f"onboarding did not advance past step {step}")
 
 
 def _patch_paths(tmp: Path) -> None:
@@ -97,26 +117,29 @@ async def test_app_launches_onboarding_and_completes_deepseek_flow():
             await pilot.pause(0.5)  # on_mount timer → OnboardingScreen
             assert isinstance(app.screen, OnboardingScreen)
             screen = app.screen
+            await _wait_onboarding_ready(pilot, screen)
 
             prov = screen.query_one("#ob-provider", Select)
             prov.value = "deepseek"
             screen.on_select_changed(Mock(select=prov, value="deepseek"))
             screen.query_one("#ob-key", Input).value = "sk-test"
-            _press(screen, "#ob-next")
-            await pilot.pause(0.1)
+            await _advance_from_step(pilot, screen, 0)
 
-            assert screen.query_one("#onboard-step-0").has_class("hidden")
             assert not screen.query_one("#onboard-step-1").has_class("hidden")
             model_sel = screen.query_one("#ob-model", Select)
             values = [v for _, v in model_sel._options if v != Select.NULL]  # noqa: SLF001
             assert values == PROVIDER_DEFAULTS["deepseek"]
             model_sel.value = "deepseek-v4-pro"
-            _press(screen, "#ob-next")
-            await pilot.pause(0.1)
+            await _advance_from_step(pilot, screen, 1)
 
             screen.query_one("#ob-scope", Input).value = "example.com"
             _press(screen, "#ob-next")
-            await pilot.pause(0.5)  # async worker applies dismiss result
+            for _ in range(100):
+                if cfg.onboarded:
+                    break
+                await pilot.pause(0.05)
+            else:
+                pytest.fail("onboarding did not complete")
 
             assert cfg.onboarded is True
             assert cfg.model == "deepseek/deepseek-v4-pro"
