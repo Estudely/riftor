@@ -43,7 +43,7 @@ def test_context_system_prompt_includes_injection(tmp_workdir):
     eng = Engagement(tmp_workdir)
     eng.set_template("network")
     MemoryStore(tmp_workdir).add("box at 10.0.0.5 runs redis")
-    ctx = Context(lore=False, workdir=tmp_workdir)
+    ctx = Context(workdir=tmp_workdir)
     sp = ctx.system_prompt
     assert "box at 10.0.0.5 runs redis" in sp
     assert "NETWORK" in sp
@@ -52,7 +52,7 @@ def test_context_system_prompt_includes_injection(tmp_workdir):
 def test_context_without_workdir_unaffected(tmp_workdir):
     from riftor.agent.context import Context
     MemoryStore(tmp_workdir).add("should not appear")
-    ctx = Context(lore=False)  # no workdir
+    ctx = Context()  # no workdir
     assert "should not appear" not in ctx.system_prompt
 
 

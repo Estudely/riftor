@@ -15,7 +15,7 @@ from textual.widgets import Input, Markdown, Static
 
 
 async def main() -> None:
-    cfg = Config(model="ollama_chat/smoke", api_base="http://localhost:11434", lore=True)
+    cfg = Config(onboarded=True, model="ollama_chat/smoke", api_base="http://localhost:11434")
     workdir = tempfile.mkdtemp(prefix="riftor-smoke-")
     # redirect the config path so /theme and /config saves never touch the real one
     import riftor.config as cfgmod
@@ -54,23 +54,13 @@ async def main() -> None:
         await pilot.pause()
         assert app.status.model == "ollama_chat/other"
 
-        # /stage moves through the RIFT stages (by name or letter)
-        assert app.status.stage == "R"
-        inp.value = "/stage intrusion"
-        await pilot.press("enter")
-        await pilot.pause()
-        assert app.status.stage == "I", app.status.stage
-        inp.value = "/stage T"
-        await pilot.press("enter")
-        await pilot.pause()
-        assert app.status.stage == "T", app.status.stage
-
-        # /lore toggles persona
-        assert app.config.lore is True
-        inp.value = "/lore"
-        await pilot.press("enter")
-        await pilot.pause()
-        assert app.config.lore is False
+        # methodology checklist is seeded and reflected on the status bar
+        done, total = app.engagement.methodology_progress()
+        assert total > 0 and done == 0
+        app.engagement.check_methodology("Port scanning")
+        app._refresh_status()
+        assert app.status.methodology_done == 1
+        assert app.status.methodology_total == total
 
         # a normal user message is added (worker will try to stream; we cancel it)
         inp.value = "hello"
@@ -125,14 +115,14 @@ async def main() -> None:
         # mutation so later smoke steps see a clean app (mirrors the scope block).
         import os
         _saved_demo = os.environ.get("RIFTOR_DEMO_RESPONSE")
-        _saved_key, _saved_chakla_model = app.config.api_key, app.config.chakla_model
+        _saved_key, _saved_worker_model = app.config.api_key, app.config.worker_model
         os.environ["RIFTOR_DEMO_RESPONSE"] = "worker reporting: recon complete"
         app.engagement.add_scope("10.0.0.0/24", "in")
-        app.permissions.allow_for_session("dispatch_chakla")
+        app.permissions.allow_for_session("dispatch_worker")
         app.config.api_key = "smoke-key"  # blank worker model reuses main; needs creds
-        app.config.chakla_model = ""
+        app.config.worker_model = ""
         seen_rows = {"max": 0}
-        orig_progress = app._on_chakla_progress
+        orig_progress = app._on_worker_progress
 
         def _spy(event):
             orig_progress(event)
@@ -141,16 +131,16 @@ async def main() -> None:
 
         app.toolctx.progress = _spy
         await app._run_tool(
-            ToolCall(id="d1", name="dispatch_chakla",
+            ToolCall(id="d1", name="dispatch_worker",
                      arguments={"tasks": ["recon 10.0.0.5", "recon 10.0.0.6"], "tools": []})
         )
         await pilot.pause()
         assert seen_rows["max"] >= 2, f"expected >=2 flock rows during flight, saw {seen_rows['max']}"
         assert app._flock is None, "flock pane should be cleared after the dispatch"
-        assert app.status.chakla_tokens >= 0  # 🐦 usage segment fed (0 ok for demo)
+        assert app.status.worker_tokens >= 0  # worker usage segment fed (0 ok for demo)
         # restore callback + every mutation so later steps aren't polluted
-        app.toolctx.progress = app._on_chakla_progress
-        app.config.api_key, app.config.chakla_model = _saved_key, _saved_chakla_model
+        app.toolctx.progress = app._on_worker_progress
+        app.config.api_key, app.config.worker_model = _saved_key, _saved_worker_model
         if _saved_demo is None:
             os.environ.pop("RIFTOR_DEMO_RESPONSE", None)
         else:
@@ -218,9 +208,8 @@ async def main() -> None:
         all_field_ids = [
             "#cfg-provider", "#cfg-model-select", "#cfg-model", "#cfg-base", "#cfg-key",
             "#cfg-temp", "#cfg-maxtok",
-            "#cfg-chakla-provider", "#cfg-chakla-model-select", "#cfg-chakla-custom",
-            "#cfg-label-main", "#cfg-label-worker",
-            "#cfg-theme", "#cfg-lore",
+            "#cfg-worker-provider", "#cfg-worker-model-select", "#cfg-worker-custom",
+            "#cfg-theme",
             "#cfg-show-thinking", "#cfg-show-tool-output", "#cfg-reasoning-effort",
         ]
         for fid in all_field_ids:
@@ -392,12 +381,11 @@ async def main() -> None:
         await pilot.pause()
         assert not isinstance(app.screen, ScreenshotGalleryScreen)
 
-        # /template applies a playbook (sets stage + active template)
+        # /template applies a playbook (active template)
         inp.value = "/template webapp"
         await pilot.press("enter")
         await pilot.pause()
         assert app.engagement.active_template() == "webapp", app.engagement.active_template()
-        assert app.engagement.stage == "R", app.engagement.stage
 
         # /memory add persists, and injection surfaces both in the system prompt
         inp.value = "/memory add [pref] operator likes quiet scans"
@@ -658,7 +646,7 @@ def test_repair() -> None:
     """A dangling tool_use (interrupted turn) gets a synthetic result, in order."""
     from riftor.agent.context import Context
 
-    ctx = Context(lore=False)
+    ctx = Context()
     ctx.add_user("scan it")
     ctx.add_message(
         {
@@ -722,8 +710,12 @@ async def test_engagement() -> None:
         eng = Engagement(Path(d))
         ctx = ToolContext(workdir=Path(d), engagement=eng)
 
-        r = await tools.get("set_stage").execute({"stage": "I"}, ctx)
-        assert not r.is_error and eng.stage == "I", r.content
+        r = await tools.get("list_methodology").execute({}, ctx)
+        assert not r.is_error and "methodology:" in r.content, r.content
+        r = await tools.get("check_methodology").execute({"name": "Port scanning"}, ctx)
+        assert not r.is_error, r.content
+        done, total = eng.methodology_progress()
+        assert done >= 1 and total > 0
 
         r = await tools.get("record_service").execute(
             {"host": "10.0.0.5", "port": 443, "service": "https", "version": "nginx"}, ctx
@@ -752,9 +744,9 @@ async def test_engagement() -> None:
         )
         assert not r.is_error and len(eng.store.list_services()) == before + 1, r.content
 
-        # persistence: a fresh Engagement on the same dir restores stage
+        # persistence: a fresh Engagement on the same dir restores methodology
         eng2 = Engagement(Path(d))
-        assert eng2.stage == "I", eng2.stage
+        assert eng2.methodology_progress()[0] >= 1
 
     print("ENGAGEMENT OK")
 
@@ -778,7 +770,7 @@ async def _browser_smoke() -> None:
 
     fixture = Path(__file__).parent.parent / "tests" / "fixtures" / "login.html"
     with tempfile.TemporaryDirectory() as d:
-        ctx = ToolContext(workdir=Path(d), config=Config(browser_headless=True))
+        ctx = ToolContext(workdir=Path(d), config=Config(onboarded=True, browser_headless=True))
         r = await tools.get("browser_navigate").execute({"url": fixture.as_uri()}, ctx)
         assert not r.is_error and "Sign in" in r.content, r.content
         await ctx.browser.close()

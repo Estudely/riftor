@@ -1,13 +1,13 @@
 # riftor — build roadmap
 
-> An open-source offensive-security AI agent that lives in your terminal.
-> Find the rift. Open it. Cross through.
+> An open-source AI agent for authorized bug bounty and penetration testing in your terminal.
 
 ## What riftor is
 A Python TUI pentest assistant. Full-screen [Textual](https://textual.textualize.io/)
 interface, [litellm](https://docs.litellm.ai/) — **cloud-first** (Anthropic/OpenAI/
-OpenRouter/…), with local Ollama as an option — and a hand-rolled agent loop. Its
-spine is the **RIFT** methodology engine.
+OpenRouter/…), with local Ollama as an option — and a hand-rolled agent loop.
+Progress is tracked with an **OWASP/PTES methodology checklist** and parallel
+**workers** for independent recon.
 
 ## Locked decisions
 - **Name:** `riftor`  (repo: https://github.com/Estudely/riftor)
@@ -16,19 +16,23 @@ spine is the **RIFT** methodology engine.
 - **TUI:** Textual (full-screen)
 - **LLM layer:** litellm (own agent loop); cloud-first, local Ollama optional
 - **License:** GPL-3.0
-- **RIFT:** real methodology engine *and* branding
-- **Lore:** subtle, toggleable (`/lore`); professional by default
+- **Methodology:** OWASP/PTES checklist (v4); RIFT stages removed
 - **Theme:** `#08060f` bg, rift glow `#a855f7` → `#22d3ee`, danger magenta
 
-## The RIFT methodology engine
-| Stage | Meaning | Tools that live here |
-|-------|---------|----------------------|
-| **R** — Recon      | map the surface, find fault lines        | subfinder, dns, httpx, nmap |
-| **I** — Intrusion  | identify + open the rift (vulns, access)  | nuclei, ffuf, sqlmap |
-| **F** — Foothold   | hold position, post-exploitation, loot    | shells, persistence, creds |
-| **T** — Takeover   | privesc, lateral movement, objectives     | escalation, reporting |
+## v4.0.0 — SHIPPED ✅
+Major release: methodology checklist replaces RIFT stages; workers replace
+Baaj/Chakla; lore/genz removed. See `docs/RELEASE_NOTES_v4.0.0.md`.
 
-The agent tracks the current stage; the TUI shows `[R·I·F·T]` in the status bar.
+- [x] OWASP/PTES methodology checklist (`/methodology`, auto-tick, status bar)
+- [x] `dispatch_worker` + built-in worker roles + custom `~/.config/riftor/workers/`
+- [x] Config: `worker_model`, `worker_max_parallel`, `worker_timeout_s`
+- [x] v3 config migration on load (`chakla_*` → `worker_*`; drop lore/genz/labels)
+- [x] Docs, completions, man page updated for v4
+
+## The methodology checklist (v4)
+Categories include Reconnaissance, Authentication, Authorization, Injection, etc.
+The agent uses `list_methodology` / `check_methodology`; tool runs auto-tick items.
+The TUI shows `done/total` in the status bar. Replaces the v3 R·I·F·T stage model.
 
 ---
 
@@ -260,7 +264,7 @@ custom provider using `custom_route`.
 - uv 0.11.14, Python 3.12.3 at /usr/bin/python3
 - **Cloud-first**: default model `anthropic/claude-sonnet-4-6`; key in local
   config (`~/.config/riftor/config.toml`, perms 600, outside the repo)
-- Latest release: **v3.6.0** (PyPI + GitHub Release; 350+ bundled skills).
+- Latest release: **v4.0.0** (PyPI + GitHub Release; methodology checklist + workers).
   Website: https://riftor.dev (source: Estudely/riftor-website).
 - Local Ollama is a supported fallback, not the identity
 - Reference reads: NousResearch/hermes-agent (Python analog), earendil-works/pi (minimal core)
@@ -272,10 +276,11 @@ riftor/
   config.py              ~/.config/riftor/config.toml
   plugins.py             operator plugin discovery
   mcp.py                 stdio MCP client (optional riftor[mcp])
-  terminology.py         Baaj/Chakla renameable labels
+  terminology.py         Lead/Worker display labels
+  workers/               bundled worker specs + registry.py
   tui/
-    app.py               Textual App (agent loop, commands, scope, flock UI)
-    widgets.py           Banner + [R·I·F·T] status bar (palette-driven)
+    app.py               Textual App (agent loop, commands, scope, worker UI)
+    widgets.py           Banner + methodology status bar (palette-driven)
     theme.py             7 themes: rift / dusk / void / fracture / singularity / dawn / paper
     config_screen.py     /config settings modal (+ WORKERS)
     screenshot_gallery.py
@@ -285,14 +290,14 @@ riftor/
     custom_route.py      litellm registry-collision route markers
     context.py           conversation history (+ repair, dump/load)
     session.py           JSON session save/load/resume/branch/rollback
-    subagent.py          Chakla worker loop
-    prompts/system.md    offensive persona + RIFT methodology + tools
+    subagent.py          worker subagent loop
+    prompts/system.md    offensive persona + OWASP/PTES methodology + tools
   tools/
     base.py              Tool ABC, ToolResult, ToolContext
     core.py              bash / read / write / edit / grep / glob / webfetch
-    engagement.py        scope / findings / bounty / merge / skills / …
+    engagement.py        scope / methodology / findings / bounty / merge / skills / …
     browser.py           browser_* (optional Playwright)
-    subagent.py          dispatch_chakla
+    subagent.py          dispatch_worker
   safety/
     permissions.py       permission state + ConfirmScreen modal (scope warning)
     audit.py             JSONL audit log

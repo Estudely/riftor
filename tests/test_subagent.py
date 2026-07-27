@@ -1,53 +1,41 @@
-"""Tests for the Baaj/Chakla subagent feature (all offline)."""
+"""Tests for the worker subagent feature (all offline)."""
 from __future__ import annotations
 
 import asyncio
 
 from riftor import tools as tools_mod
 from riftor.agent.provider import Provider, ToolCall
-from riftor.agent.subagent import ChaklaResult, run_chakla, _run_chakla_tool, worker_schemas
+from riftor.agent.subagent import WorkerResult, run_worker, _run_worker_tool, worker_schemas
 from riftor.config import Config, ProviderCreds
 from riftor.safety.audit import AuditLog
 from riftor.safety.permissions import Permissions
 from riftor.terminology import terminology
 from riftor.tools.base import ToolContext
-from riftor.tools.subagent import DispatchChaklaTool
+from riftor.tools.subagent import DispatchWorkerTool
+from riftor.workers.registry import get_worker
 
 
-def test_config_has_chakla_defaults():
-    cfg = Config()
-    assert cfg.chakla_model == ""
-    assert cfg.chakla_max_workers == 5
-    assert cfg.chakla_timeout_s == 300
-    assert cfg.label_main == "Baaj"
-    assert cfg.label_worker == "Chakla"
+def test_config_has_worker_defaults():
+    cfg = Config(onboarded=True)
+    assert cfg.worker_model == ""
+    assert cfg.worker_max_parallel == 5
+    assert cfg.worker_timeout_s == 300
 
 
-def test_config_toml_roundtrips_chakla_fields():
-    cfg = Config(chakla_model="anthropic/claude-haiku-4-5-20251001", chakla_max_workers=3)
+def test_config_toml_roundtrips_worker_fields():
+    cfg = Config(onboarded=True, worker_model="anthropic/claude-haiku-4-5-20251001", worker_max_parallel=3)
     toml = cfg._to_toml()
-    assert 'chakla_model = "anthropic/claude-haiku-4-5-20251001"' in toml
-    assert "chakla_max_workers = 3" in toml
-    assert "chakla_timeout_s = 300" in toml
-    assert 'label_main = "Baaj"' in toml
-    assert 'label_worker = "Chakla"' in toml
+    assert 'worker_model = "anthropic/claude-haiku-4-5-20251001"' in toml
+    assert "worker_max_parallel = 3" in toml
+    assert "worker_timeout_s = 300" in toml
 
 
 def test_terminology_defaults():
-    t = terminology(Config())
-    assert t["main"] == "Baaj"
-    assert t["worker"] == "Chakla"
+    t = terminology()
+    assert t["main"] == "Lead"
+    assert t["worker"] == "Worker"
     assert t["main_emoji"] == "🦅"
-    assert t["worker_emoji"] == "🐦"
-
-
-def test_terminology_respects_renamed_labels():
-    t = terminology(Config(label_main="Hawk", label_worker="Finch"))
-    assert t["main"] == "Hawk"
-    assert t["worker"] == "Finch"
-    # emoji are fixed branding; only the text labels are renameable
-    assert t["main_emoji"] == "🦅"
-    assert t["worker_emoji"] == "🐦"
+    assert t["worker_emoji"] == "⚙"
 
 
 def test_toolcontext_new_fields_default_to_none(tmp_workdir, engagement):
@@ -59,7 +47,7 @@ def test_toolcontext_new_fields_default_to_none(tmp_workdir, engagement):
 
 
 def _worker_provider(cfg: Config) -> Provider:
-    return Provider(cfg.model_copy(update={"model": cfg.chakla_model or cfg.model}))
+    return Provider(cfg.model_copy(update={"model": cfg.worker_model or cfg.model}))
 
 
 async def _run_one(task, *, cfg, engagement, grant, yolo=False, monkeypatch_env):
@@ -73,8 +61,9 @@ async def _run_one(task, *, cfg, engagement, grant, yolo=False, monkeypatch_env)
         audit=AuditLog(),
         yolo=yolo,
     )
-    return await run_chakla(
+    return await run_worker(
         task,
+        worker_spec=get_worker("recon"),
         worker_provider=_worker_provider(cfg),
         toolctx=toolctx,
         permissions=toolctx.permissions,
@@ -86,8 +75,8 @@ async def _run_one(task, *, cfg, engagement, grant, yolo=False, monkeypatch_env)
     )
 
 
-def test_run_chakla_returns_result_with_text(tmp_workdir, engagement, monkeypatch):
-    cfg = Config()
+def test_run_worker_returns_result_with_text(tmp_workdir, engagement, monkeypatch):
+    cfg = Config(onboarded=True)
     result = asyncio.run(
         _run_one(
             "recon 10.0.0.5",
@@ -97,7 +86,7 @@ def test_run_chakla_returns_result_with_text(tmp_workdir, engagement, monkeypatc
             monkeypatch_env=monkeypatch.setenv,
         )
     )
-    assert isinstance(result, ChaklaResult)
+    assert isinstance(result, WorkerResult)
     assert result.status == "done"
     assert "recon complete" in result.text
     assert result.error is None
@@ -112,37 +101,37 @@ def _ctx(cfg, engagement):
 
 def test_worker_schemas_exclude_dispatch():
     names = [s["function"]["name"] for s in worker_schemas()]
-    assert "dispatch_chakla" not in names
+    assert "dispatch_worker" not in names
 
 
 def test_worker_readonly_tool_runs_without_grant(tmp_workdir, engagement):
-    cfg = Config()
+    cfg = Config(onboarded=True)
     ctx = _ctx(cfg, engagement)
     call = ToolCall(id="c1", name="scope_list", arguments={})
     content = asyncio.run(
-        _run_chakla_tool(call, ctx, ctx.permissions, ctx.audit,
+        _run_worker_tool(call, ctx, ctx.permissions, ctx.audit,
                          yolo=False, db_lock=asyncio.Lock(), grant=set())
     )
     assert "[denied]" not in content
 
 
 def test_worker_bash_denied_without_grant(tmp_workdir, engagement):
-    cfg = Config()
+    cfg = Config(onboarded=True)
     ctx = _ctx(cfg, engagement)
     call = ToolCall(id="c2", name="bash", arguments={"command": "echo hi"})
     content = asyncio.run(
-        _run_chakla_tool(call, ctx, ctx.permissions, ctx.audit,
+        _run_worker_tool(call, ctx, ctx.permissions, ctx.audit,
                          yolo=False, db_lock=asyncio.Lock(), grant=set())
     )
     assert "[denied]" in content
 
 
 def test_worker_bash_allowed_with_grant(tmp_workdir, engagement):
-    cfg = Config()
+    cfg = Config(onboarded=True)
     ctx = _ctx(cfg, engagement)
     call = ToolCall(id="c3", name="bash", arguments={"command": "echo hi"})
     content = asyncio.run(
-        _run_chakla_tool(call, ctx, ctx.permissions, ctx.audit,
+        _run_worker_tool(call, ctx, ctx.permissions, ctx.audit,
                          yolo=False, db_lock=asyncio.Lock(), grant={"bash"})
     )
     assert "[denied]" not in content
@@ -150,7 +139,7 @@ def test_worker_bash_allowed_with_grant(tmp_workdir, engagement):
 
 
 def test_worker_deny_rule_wins_over_grant(tmp_workdir, engagement):
-    cfg = Config()
+    cfg = Config(onboarded=True)
     perms = Permissions(deny=[{"tool": "bash"}])
     ctx = tools_mod.ToolContext(
         workdir=engagement.dir.parent, engagement=engagement, config=cfg,
@@ -158,27 +147,27 @@ def test_worker_deny_rule_wins_over_grant(tmp_workdir, engagement):
     )
     call = ToolCall(id="c4", name="bash", arguments={"command": "echo hi"})
     content = asyncio.run(
-        _run_chakla_tool(call, ctx, perms, ctx.audit,
+        _run_worker_tool(call, ctx, perms, ctx.audit,
                          yolo=False, db_lock=asyncio.Lock(), grant={"bash"})
     )
     assert "[blocked by policy]" in content
 
 
 def test_worker_out_of_scope_hard_blocked(tmp_workdir, engagement):
-    cfg = Config()
+    cfg = Config(onboarded=True)
     engagement.scope.add("10.0.0.0/24", "in")
     engagement.enforce = True
     ctx = _ctx(cfg, engagement)
     call = ToolCall(id="c5", name="bash", arguments={"command": "nmap 8.8.8.8"})
     content = asyncio.run(
-        _run_chakla_tool(call, ctx, ctx.permissions, ctx.audit,
+        _run_worker_tool(call, ctx, ctx.permissions, ctx.audit,
                          yolo=False, db_lock=asyncio.Lock(), grant={"bash"})
     )
     assert "[blocked: out of scope]" in content
 
 
 def test_dispatch_requires_config(tmp_workdir, engagement):
-    tool = DispatchChaklaTool()
+    tool = DispatchWorkerTool()
     bare = tools_mod.ToolContext(workdir=tmp_workdir, engagement=engagement)
     res = asyncio.run(tool.execute({"tasks": ["recon"]}, bare))
     assert res.is_error
@@ -187,8 +176,8 @@ def test_dispatch_requires_config(tmp_workdir, engagement):
 
 def test_dispatch_runs_workers_and_aggregates(tmp_workdir, engagement, monkeypatch):
     monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "worker done: nothing notable")
-    cfg = Config(api_key="test-key")  # blank worker reuses main model; needs creds
-    tool = DispatchChaklaTool()
+    cfg = Config(onboarded=True, api_key="test-key")  # blank worker reuses main model; needs creds
+    tool = DispatchWorkerTool()
     ctx = tools_mod.ToolContext(
         workdir=tmp_workdir, engagement=engagement, config=cfg,
         permissions=Permissions(), audit=AuditLog(), yolo=False,
@@ -202,8 +191,8 @@ def test_dispatch_runs_workers_and_aggregates(tmp_workdir, engagement, monkeypat
 
 def test_dispatch_clamps_to_max_workers(tmp_workdir, engagement, monkeypatch):
     monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "ok")
-    cfg = Config(chakla_max_workers=2, api_key="test-key")
-    tool = DispatchChaklaTool()
+    cfg = Config(onboarded=True, worker_max_parallel=2, api_key="test-key")
+    tool = DispatchWorkerTool()
     ctx = tools_mod.ToolContext(
         workdir=tmp_workdir, engagement=engagement, config=cfg,
         permissions=Permissions(), audit=AuditLog(),
@@ -215,27 +204,27 @@ def test_dispatch_clamps_to_max_workers(tmp_workdir, engagement, monkeypatch):
 
 def test_dispatch_tool_is_registered():
     names = [t.name for t in tools_mod.all_tools()]
-    assert "dispatch_chakla" in names
+    assert "dispatch_worker" in names
     # registered before the mutating core tools (write/edit/bash)
-    assert names.index("dispatch_chakla") < names.index("bash")
+    assert names.index("dispatch_worker") < names.index("bash")
 
 
 def test_dispatch_timeout_is_reported(tmp_workdir, engagement, monkeypatch):
     monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "ok")
-    cfg = Config(chakla_timeout_s=1, api_key="test-key")
-    tool = DispatchChaklaTool()
+    cfg = Config(onboarded=True, worker_timeout_s=1, api_key="test-key")
+    tool = DispatchWorkerTool()
     ctx = tools_mod.ToolContext(
         workdir=tmp_workdir, engagement=engagement, config=cfg,
         permissions=Permissions(), audit=AuditLog(),
     )
 
-    # Patch run_chakla to hang, so wait_for fires the timeout path.
+    # Patch run_worker to hang, so wait_for fires the timeout path.
     import riftor.tools.subagent as sub
 
     async def _hang(*a, **k):
         await asyncio.sleep(5)
 
-    monkeypatch.setattr(sub, "run_chakla", _hang)
+    monkeypatch.setattr(sub, "run_worker", _hang)
     res = asyncio.run(tool.execute({"tasks": ["slow task"]}, ctx))
     assert not res.is_error
     assert "timed out" in res.content
@@ -243,14 +232,14 @@ def test_dispatch_timeout_is_reported(tmp_workdir, engagement, monkeypatch):
 
 def test_headless_toolctx_carries_config(tmp_workdir):
     # Build the headless toolctx the way run_headless does and confirm the new
-    # fields are populated so dispatch_chakla is usable end-to-end.
+    # fields are populated so dispatch_worker is usable end-to-end.
     from riftor.engagement import Engagement
     from riftor.tools.base import ToolContext as TC
     from riftor.safety.permissions import Permissions as P
     from riftor.safety.audit import AuditLog as A
 
     eng = Engagement(tmp_workdir)
-    cfg = Config()
+    cfg = Config(onboarded=True)
     ctx = TC(workdir=tmp_workdir, engagement=eng, max_result_chars=cfg.max_result_chars,
              config=cfg, permissions=P(), audit=A(), yolo=False)
     assert ctx.config is cfg
@@ -258,35 +247,32 @@ def test_headless_toolctx_carries_config(tmp_workdir):
     assert ctx.audit is not None
 
 
-def test_statusbar_has_chakla_usage_setter():
+def test_statusbar_has_worker_usage_setter():
     from riftor.tui.widgets import StatusBar
     bar = StatusBar("anthropic/claude-sonnet-4-6")
     # refresh_bar() raises NoActiveAppError when the widget is not mounted;
     # the setter must set the fields BEFORE calling refresh_bar so the values
     # are visible even if the render fails.
     try:
-        bar.set_chakla_usage(1500, 0.012)
+        bar.set_worker_usage(1500, 0.012)
     except Exception:
         pass  # NoActiveAppError is expected on an unmounted widget
-    assert bar.chakla_tokens == 1500
-    assert bar.chakla_cost == 0.012
+    assert bar.worker_tokens == 1500
+    assert bar.worker_cost == 0.012
 
 
 def test_config_screen_result_keys_persist():
     # Simulate the dict ConfigScreen.dismiss returns, then apply it like _open_config.
     from riftor.config import ProviderCreds
-    cfg = Config()
+    cfg = Config(onboarded=True)
     result = {
         "model": cfg.model, "provider": "anthropic", "api_base": None,
-        "temperature": 0.3, "max_tokens": 2048, "theme": "rift", "lore": True,
-        "chakla_model": "anthropic/claude-haiku-4-5-20251001",
-        "chakla_provider": "anthropic", "api_key": "sk-anth",
-        "label_main": "Hawk", "label_worker": "Finch",
+        "temperature": 0.3, "max_tokens": 2048, "theme": "rift",
+        "worker_model": "anthropic/claude-haiku-4-5-20251001",
+        "worker_provider": "anthropic", "api_key": "sk-anth",
     }
     # Mirror _open_config: persist worker model + main provider creds.
-    cfg.chakla_model = result.get("chakla_model", cfg.chakla_model)
-    cfg.label_main = result["label_main"]
-    cfg.label_worker = result["label_worker"]
+    cfg.worker_model = result.get("worker_model", cfg.worker_model)
     provider = result.get("provider")
     if provider:
         entry = cfg.providers.get(provider) or ProviderCreds()
@@ -297,7 +283,7 @@ def test_config_screen_result_keys_persist():
         if entry.api_key or entry.api_base:
             cfg.providers[provider] = entry
     # Worker creds block (worker provider == main here, so main block covered it).
-    w_provider = result.get("chakla_provider")
+    w_provider = result.get("worker_provider")
     if w_provider and w_provider != provider:
         w_entry = cfg.providers.get(w_provider) or ProviderCreds()
         if result.get("api_base") is not None:
@@ -307,24 +293,22 @@ def test_config_screen_result_keys_persist():
         if w_entry.api_key or w_entry.api_base:
             cfg.providers[w_provider] = w_entry
 
-    assert cfg.label_main == "Hawk"
-    assert 'label_main = "Hawk"' in cfg._to_toml()
-    assert cfg.chakla_model == "anthropic/claude-haiku-4-5-20251001"
+    assert cfg.worker_model == "anthropic/claude-haiku-4-5-20251001"
     # The worker model's creds resolve from the stored provider table.
-    assert cfg.creds_for(cfg.chakla_model)[0] == "sk-anth"
+    assert cfg.creds_for(cfg.worker_model)[0] == "sk-anth"
 
 
 def test_worker_picker_creds_resolve_for_different_provider():
     # Main model on anthropic, worker pointed at a DIFFERENT provider (openai):
     # the worker provider gets the shared key stored and creds_for resolves it.
     from riftor.config import ProviderCreds
-    cfg = Config(model="anthropic/claude-sonnet-4-6")
+    cfg = Config(onboarded=True, model="anthropic/claude-sonnet-4-6")
     result = {
         "model": "anthropic/claude-sonnet-4-6", "provider": "anthropic",
         "api_base": None, "api_key": "sk-openai-worker",
-        "chakla_model": "openai/gpt-5.5-mini", "chakla_provider": "openai",
+        "worker_model": "openai/gpt-5.5-mini", "worker_provider": "openai",
     }
-    cfg.chakla_model = result.get("chakla_model", cfg.chakla_model)
+    cfg.worker_model = result.get("worker_model", cfg.worker_model)
     provider = result.get("provider")
     if provider:
         entry = cfg.providers.get(provider) or ProviderCreds()
@@ -334,7 +318,7 @@ def test_worker_picker_creds_resolve_for_different_provider():
             entry.api_key = result["api_key"]
         if entry.api_key or entry.api_base:
             cfg.providers[provider] = entry
-    w_provider = result.get("chakla_provider")
+    w_provider = result.get("worker_provider")
     if w_provider and w_provider != provider:
         w_entry = cfg.providers.get(w_provider) or ProviderCreds()
         if result.get("api_base") is not None:
@@ -345,19 +329,19 @@ def test_worker_picker_creds_resolve_for_different_provider():
             cfg.providers[w_provider] = w_entry
 
     assert "openai" in cfg.providers
-    assert cfg.creds_for(cfg.chakla_model)[0] == "sk-openai-worker"
+    assert cfg.creds_for(cfg.worker_model)[0] == "sk-openai-worker"
 
 
 def test_system_prompt_mentions_dispatch():
     from riftor.agent.context import _load_system_prompt
     prompt = _load_system_prompt()
-    assert "dispatch_chakla" in prompt
+    assert "dispatch_worker" in prompt
 
 
 def test_worker_does_not_inherit_session_grant(tmp_workdir, engagement):
     # Operator allowed `edit` for the session on the PARENT permissions. A worker
     # granted only `bash` must NOT be able to run `edit` via that session grant.
-    cfg = Config()
+    cfg = Config(onboarded=True)
     parent = Permissions()
     parent.allow_for_session("edit")
     worker_perms = parent.without_session_grants()
@@ -368,7 +352,7 @@ def test_worker_does_not_inherit_session_grant(tmp_workdir, engagement):
     call = ToolCall(id="c9", name="edit",
                     arguments={"path": "x.txt", "old_string": "a", "new_string": "b"})
     content = asyncio.run(
-        _run_chakla_tool(call, ctx, worker_perms, ctx.audit,
+        _run_worker_tool(call, ctx, worker_perms, ctx.audit,
                          yolo=False, db_lock=asyncio.Lock(), grant={"bash"})
     )
     assert "[denied]" in content  # edit was NOT granted and session-allow must not leak
@@ -376,7 +360,7 @@ def test_worker_does_not_inherit_session_grant(tmp_workdir, engagement):
 
 def test_worker_standing_allow_rule_still_binds(tmp_workdir, engagement):
     # A STANDING allow rule (from permissions.toml) DOES still authorize a worker.
-    cfg = Config()
+    cfg = Config(onboarded=True)
     perms = Permissions(allow=[{"tool": "edit"}])
     worker_perms = perms.without_session_grants()
     # edit a real file so execute succeeds past the gate
@@ -389,15 +373,15 @@ def test_worker_standing_allow_rule_still_binds(tmp_workdir, engagement):
     call = ToolCall(id="c10", name="edit",
                     arguments={"path": "note.txt", "old_string": "hello", "new_string": "hi"})
     content = asyncio.run(
-        _run_chakla_tool(call, ctx, worker_perms, ctx.audit,
+        _run_worker_tool(call, ctx, worker_perms, ctx.audit,
                          yolo=False, db_lock=asyncio.Lock(), grant=set())
     )
     assert "[denied]" not in content  # standing allow rule authorizes it
 
 
-def test_empty_chakla_model_reuses_main():
-    cfg = Config(model="deepseek/deepseek-v4-pro", chakla_model="")
-    assert (cfg.chakla_model or cfg.model) == "deepseek/deepseek-v4-pro"
+def test_empty_worker_model_reuses_main():
+    cfg = Config(onboarded=True, model="deepseek/deepseek-v4-pro", worker_model="")
+    assert (cfg.worker_model or cfg.model) == "deepseek/deepseek-v4-pro"
 
 
 def test_dispatch_refuses_explicit_worker_without_creds(tmp_workdir, engagement, monkeypatch):
@@ -405,14 +389,14 @@ def test_dispatch_refuses_explicit_worker_without_creds(tmp_workdir, engagement,
     # worker, NO anthropic creds anywhere → must refuse clearly, not 401.
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "ok")
-    cfg = Config(model="deepseek/deepseek-v4-pro",
-                 chakla_model="anthropic/claude-haiku-4-5-20251001")
+    cfg = Config(onboarded=True, model="deepseek/deepseek-v4-pro",
+                 worker_model="anthropic/claude-haiku-4-5-20251001")
     cfg.providers["deepseek"] = ProviderCreds(api_key="sk-deepseek-xxx")
     ctx = tools_mod.ToolContext(
         workdir=tmp_workdir, engagement=engagement, config=cfg,
         permissions=Permissions(), audit=AuditLog(),
     )
-    res = asyncio.run(DispatchChaklaTool().execute({"tasks": ["echo hi"], "tools": []}, ctx))
+    res = asyncio.run(DispatchWorkerTool().execute({"tasks": ["echo hi"], "tools": []}, ctx))
     assert res.is_error
     assert "no credentials for worker model" in res.content
     assert "anthropic/claude-haiku" in res.content
@@ -420,28 +404,28 @@ def test_dispatch_refuses_explicit_worker_without_creds(tmp_workdir, engagement,
 
 
 def test_dispatch_blank_worker_reuses_main_creds(tmp_workdir, engagement, monkeypatch):
-    # Same deepseek setup but blank chakla_model → reuses deepseek (credentialed) →
+    # Same deepseek setup but blank worker_model → reuses deepseek (credentialed) →
     # NO creds error (this is the out-of-box fix).
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "worker done")
-    cfg = Config(model="deepseek/deepseek-v4-pro", chakla_model="")
+    cfg = Config(onboarded=True, model="deepseek/deepseek-v4-pro", worker_model="")
     cfg.providers["deepseek"] = ProviderCreds(api_key="sk-deepseek-xxx")
     ctx = tools_mod.ToolContext(
         workdir=tmp_workdir, engagement=engagement, config=cfg,
         permissions=Permissions(), audit=AuditLog(),
     )
-    res = asyncio.run(DispatchChaklaTool().execute({"tasks": ["recon"], "tools": []}, ctx))
+    res = asyncio.run(DispatchWorkerTool().execute({"tasks": ["recon"], "tools": []}, ctx))
     assert "no credentials for worker model" not in res.content
 
 
 def test_dispatch_ollama_worker_needs_no_key(tmp_workdir, engagement, monkeypatch):
     monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "ok")
-    cfg = Config(model="ollama_chat/llama3", chakla_model="ollama_chat/llama3")
+    cfg = Config(onboarded=True, model="ollama_chat/llama3", worker_model="ollama_chat/llama3")
     ctx = tools_mod.ToolContext(
         workdir=tmp_workdir, engagement=engagement, config=cfg,
         permissions=Permissions(), audit=AuditLog(),
     )
-    res = asyncio.run(DispatchChaklaTool().execute({"tasks": ["x"], "tools": []}, ctx))
+    res = asyncio.run(DispatchWorkerTool().execute({"tasks": ["x"], "tools": []}, ctx))
     assert "no credentials for worker model" not in res.content
 
 
@@ -449,13 +433,13 @@ def test_dispatch_codex_worker_needs_no_key(tmp_workdir, engagement, monkeypatch
     # codex/ worker auth lives in ~/.codex/auth.json; creds_for() returns (None, None)
     # by design. The credential gate must treat codex/ as keyless, not refuse it.
     monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "ok")
-    cfg = Config(model="anthropic/claude-sonnet-4-6", chakla_model="codex/gpt-5.5-codex")
+    cfg = Config(onboarded=True, model="anthropic/claude-sonnet-4-6", worker_model="codex/gpt-5.5-codex")
     cfg.providers["anthropic"] = ProviderCreds(api_key="sk-anth-xxx")
     ctx = tools_mod.ToolContext(
         workdir=tmp_workdir, engagement=engagement, config=cfg,
         permissions=Permissions(), audit=AuditLog(),
     )
-    res = asyncio.run(DispatchChaklaTool().execute({"tasks": ["x"], "tools": []}, ctx))
+    res = asyncio.run(DispatchWorkerTool().execute({"tasks": ["x"], "tools": []}, ctx))
     assert "no credentials for worker model" not in res.content
 
 
@@ -473,7 +457,7 @@ def test_toolcontext_progress_is_callable_when_set(tmp_workdir, engagement):
     assert seen == [{"worker": 0, "state": "running"}]
 
 
-def test_run_chakla_emits_detail_events(tmp_workdir, engagement):
+def test_run_worker_emits_detail_events(tmp_workdir, engagement):
     from riftor.agent.provider import ToolCall, Turn, Usage
 
     class _StubProvider:
@@ -502,13 +486,14 @@ def test_run_chakla_emits_detail_events(tmp_workdir, engagement):
                 ))
 
     events = []
-    cfg = Config()
+    cfg = Config(onboarded=True)
     toolctx = tools_mod.ToolContext(
         workdir=engagement.dir.parent, engagement=engagement, config=cfg,
         permissions=Permissions(), audit=AuditLog(),
     )
-    result = asyncio.run(run_chakla(
+    result = asyncio.run(run_worker(
         "recon 10.0.0.5",
+        worker_spec=get_worker("recon"),
         worker_provider=_StubProvider(),  # type: ignore[arg-type]
         toolctx=toolctx, permissions=toolctx.permissions, audit=toolctx.audit,
         max_steps=cfg.max_steps, yolo=False,
@@ -522,7 +507,7 @@ def test_run_chakla_emits_detail_events(tmp_workdir, engagement):
     assert "usage" in detail_events[0]
 
 
-def test_run_chakla_detail_usage_is_snapshot(tmp_workdir, engagement):
+def test_run_worker_detail_usage_is_snapshot(tmp_workdir, engagement):
     # The usage on a detail event must be a point-in-time snapshot, not the live
     # accumulator (which keeps growing across turns).
     from riftor.agent.provider import ToolCall, Turn, Usage
@@ -552,7 +537,7 @@ def test_run_chakla_detail_usage_is_snapshot(tmp_workdir, engagement):
 
     import asyncio as _aio
     captured = {}
-    cfg = Config()
+    cfg = Config(onboarded=True)
     toolctx = tools_mod.ToolContext(
         workdir=engagement.dir.parent, engagement=engagement, config=cfg,
         permissions=Permissions(), audit=AuditLog(),
@@ -562,8 +547,9 @@ def test_run_chakla_detail_usage_is_snapshot(tmp_workdir, engagement):
         if e["state"] == "detail":
             captured["usage_tokens"] = e["usage"].total_tokens
 
-    result = _aio.run(run_chakla(
-        "recon", worker_provider=_StubProvider(),  # type: ignore[arg-type]
+    result = _aio.run(run_worker(
+        "recon", worker_spec=get_worker("recon"),
+        worker_provider=_StubProvider(),  # type: ignore[arg-type]
         toolctx=toolctx, permissions=toolctx.permissions, audit=toolctx.audit,
         max_steps=cfg.max_steps, yolo=False,
         db_lock=_aio.Lock(), grant=set(), progress=_grab,
@@ -579,7 +565,7 @@ def test_worker_provider_does_not_clobber_main_base():
     # The worker store must NOT overwrite the main openai entry's base, and must
     # give deepseek ITS OWN default base — not openai's and not a leaked one.
     from riftor.providers import PROVIDERS
-    cfg = Config(model="openai/gpt-5.5")
+    cfg = Config(onboarded=True, model="openai/gpt-5.5")
     # main provider stored first (as _open_config's main block does)
     cfg.providers["openai"] = ProviderCreds(
         api_key="sk-openai", api_base=PROVIDERS["openai"].default_base)
@@ -604,14 +590,14 @@ def test_worker_provider_does_not_clobber_main_base():
 
 def test_dispatch_emits_ordered_lifecycle_events(tmp_workdir, engagement, monkeypatch):
     monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "worker done")
-    cfg = Config(api_key="test-key")
+    cfg = Config(onboarded=True, api_key="test-key")
     events = []
     ctx = tools_mod.ToolContext(
         workdir=tmp_workdir, engagement=engagement, config=cfg,
         permissions=Permissions(), audit=AuditLog(), yolo=False,
         progress=lambda e: events.append(dict(e)),
     )
-    res = asyncio.run(DispatchChaklaTool().execute(
+    res = asyncio.run(DispatchWorkerTool().execute(
         {"tasks": ["recon A", "recon B", "recon C"], "tools": []}, ctx))
     assert not res.is_error
     by_worker = {}
@@ -628,14 +614,14 @@ def test_dispatch_emits_ordered_lifecycle_events(tmp_workdir, engagement, monkey
 
 def test_dispatch_terminal_events_carry_usage(tmp_workdir, engagement, monkeypatch):
     monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "worker done")
-    cfg = Config(api_key="test-key")
+    cfg = Config(onboarded=True, api_key="test-key")
     events = []
     ctx = tools_mod.ToolContext(
         workdir=tmp_workdir, engagement=engagement, config=cfg,
         permissions=Permissions(), audit=AuditLog(),
         progress=lambda e: events.append(dict(e)),
     )
-    asyncio.run(DispatchChaklaTool().execute({"tasks": ["a", "b"], "tools": []}, ctx))
+    asyncio.run(DispatchWorkerTool().execute({"tasks": ["a", "b"], "tools": []}, ctx))
     terminals = [e for e in events if e["state"] in ("done", "timeout", "error")]
     assert len(terminals) == 2
     for e in terminals:
@@ -647,18 +633,18 @@ def test_dispatch_terminal_usage_sums_to_worker_total(tmp_workdir, engagement, m
     import riftor.tools.subagent as sub
 
     async def _fake(task, **k):
-        return ChaklaResult(task=task, status="done",
+        return WorkerResult(task=task, status="done",
                             usage=Usage(completion_tokens=23_600, cost=0.007), n_recorded=1)
 
-    monkeypatch.setattr(sub, "run_chakla", _fake)
-    cfg = Config(api_key="test-key")
+    monkeypatch.setattr(sub, "run_worker", _fake)
+    cfg = Config(onboarded=True, api_key="test-key")
     events = []
     ctx = tools_mod.ToolContext(
         workdir=tmp_workdir, engagement=engagement, config=cfg,
         permissions=Permissions(), audit=AuditLog(),
         progress=lambda e: events.append(dict(e)),
     )
-    asyncio.run(DispatchChaklaTool().execute({"tasks": ["a", "b"], "tools": []}, ctx))
+    asyncio.run(DispatchWorkerTool().execute({"tasks": ["a", "b"], "tools": []}, ctx))
     accumulated = Usage()
     for e in events:
         if e["state"] in ("done", "timeout", "error") and e["usage"] is not None:
@@ -669,19 +655,19 @@ def test_dispatch_terminal_usage_sums_to_worker_total(tmp_workdir, engagement, m
 
 def test_dispatch_progress_none_is_safe(tmp_workdir, engagement, monkeypatch):
     monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "worker done: nothing notable")
-    cfg = Config(api_key="test-key")
+    cfg = Config(onboarded=True, api_key="test-key")
     ctx = tools_mod.ToolContext(
         workdir=tmp_workdir, engagement=engagement, config=cfg,
         permissions=Permissions(), audit=AuditLog(),
     )
-    res = asyncio.run(DispatchChaklaTool().execute({"tasks": ["recon A"], "tools": []}, ctx))
+    res = asyncio.run(DispatchWorkerTool().execute({"tasks": ["recon A"], "tools": []}, ctx))
     assert not res.is_error
     assert "recon A" in res.content
 
 
 def test_dispatch_timeout_emits_timeout_event(tmp_workdir, engagement, monkeypatch):
     monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "ok")
-    cfg = Config(chakla_timeout_s=1, api_key="test-key")
+    cfg = Config(onboarded=True, worker_timeout_s=1, api_key="test-key")
     events = []
     ctx = tools_mod.ToolContext(
         workdir=tmp_workdir, engagement=engagement, config=cfg,
@@ -693,8 +679,8 @@ def test_dispatch_timeout_emits_timeout_event(tmp_workdir, engagement, monkeypat
     async def _hang(*a, **k):
         await asyncio.sleep(5)
 
-    monkeypatch.setattr(sub, "run_chakla", _hang)
-    res = asyncio.run(DispatchChaklaTool().execute({"tasks": ["slow"], "tools": []}, ctx))
+    monkeypatch.setattr(sub, "run_worker", _hang)
+    res = asyncio.run(DispatchWorkerTool().execute({"tasks": ["slow"], "tools": []}, ctx))
     assert not res.is_error
     states = [e["state"] for e in events if e["worker"] == 0]
     assert "timeout" in states, states
@@ -769,14 +755,14 @@ def test_dispatch_through_app_mounts_flock_without_error(monkeypatch, tmp_path):
     monkeypatch.setenv("RIFTOR_DEMO_RESPONSE", "worker done: nothing notable")
 
     async def _drive():
-        cfg = Config(model="ollama_chat/x", api_base="http://localhost:11434", api_key="k")
-        cfg.chakla_model = ""  # reuse main (ollama => no creds needed)
+        cfg = Config(onboarded=True, model="ollama_chat/x", api_base="http://localhost:11434", api_key="k")
+        cfg.worker_model = ""  # reuse main (ollama => no creds needed)
         app = RiftorApp(cfg, workdir=tmp_path)
         async with app.run_test() as pilot:
             app.engagement.add_scope("10.0.0.0/24", "in")
-            app.permissions.allow_for_session("dispatch_chakla")
+            app.permissions.allow_for_session("dispatch_worker")
             await app._run_tool(ToolCall(
-                id="d1", name="dispatch_chakla",
+                id="d1", name="dispatch_worker",
                 arguments={"tasks": ["recon 10.0.0.5", "recon 10.0.0.6"], "tools": []}))
             await pilot.pause()
         return app
@@ -801,7 +787,7 @@ def test_flock_cleared_on_agent_finally_and_reset(monkeypatch, tmp_path):
     from textual.widgets import Static
 
     async def _drive():
-        cfg = Config(model="ollama_chat/x", api_base="http://localhost:11434")
+        cfg = Config(onboarded=True, model="ollama_chat/x", api_base="http://localhost:11434")
         app = RiftorApp(cfg, workdir=tmp_path)
         async with app.run_test():
             # Simulate a mounted flock (as if a dispatch were in flight).

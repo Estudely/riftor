@@ -22,23 +22,21 @@ def test_host_service_finding_edges(engagement):
         title="SQL Injection",
         severity="high",
         host="10.0.0.5",
-        stage="I",
     )
     engagement.add_finding(
         title="Open SSH",
         severity="low",
         host="10.0.0.5",
-        stage="R",
     )
 
     graph = build_graph(engagement)
     kinds = {n["kind"] for n in graph["nodes"]}
-    assert kinds >= {"host", "service", "finding", "stage"}
+    assert kinds >= {"host", "service", "finding"}
+    assert "stage" not in kinds
 
     edge_kinds = {e["kind"] for e in graph["edges"]}
     assert "hosts" in edge_kinds
     assert "on_host" in edge_kinds
-    assert "stage_order" in edge_kinds
 
     host_nodes = [n for n in graph["nodes"] if n["kind"] == "host"]
     assert len(host_nodes) == 1
@@ -47,8 +45,7 @@ def test_host_service_finding_edges(engagement):
 
 def test_mermaid_contains_flowchart(engagement):
     engagement.add_service(host="example.com", port=80, service="http")
-    engagement.add_finding(title="XSS", severity="medium", host="example.com", stage="F")
-
+    engagement.add_finding(title="XSS", severity="medium", host="example.com")
     mermaid = to_mermaid(build_graph(engagement))
     assert "flowchart TD" in mermaid
     assert "-->" in mermaid

@@ -52,10 +52,10 @@ def test_service_dedup(engagement):
 
 def test_activity_log(engagement):
     engagement.add_scope("example.com", "in")
-    engagement.set_stage("I")
+    engagement.check_methodology("Port scanning")
     engagement.add_finding(title="X", severity="low")
     events = {e["event"] for e in engagement.store.list_activity()}
-    assert {"scope_add", "stage", "finding_add"} <= events
+    assert {"scope_add", "methodology_check", "finding_add"} <= events
 
 
 def test_scope_import_export(engagement):

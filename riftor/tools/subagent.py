@@ -1,33 +1,28 @@
-"""DispatchChaklaTool: Baaj dispatches a batch of cheap Chakla workers.
+"""DispatchWorkerTool: dispatch a batch of parallel worker subagents.
 
 One worker per task string, run in parallel (asyncio.gather) with a per-worker
-timeout. Workers share the engagement DB; their findings persist directly. The
-tool returns a compact per-worker digest — the full data lives in the DB.
+timeout. Workers share the engagement DB; their findings persist directly.
 """
 from __future__ import annotations
 
 import asyncio
 
 from riftor.agent.provider import Provider, Usage
-from riftor.agent.subagent import ChaklaResult, run_chakla
+from riftor.agent.subagent import WorkerResult, run_worker
 from riftor.terminology import terminology
 from riftor.tools.base import Tool, ToolContext, ToolResult
-
-#: Privileged tools granted to workers by default when a dispatch is approved.
-_DEFAULT_GRANT = ["bash"]
+from riftor.workers.registry import get_worker
 
 
-class DispatchChaklaTool(Tool):
-    name = "dispatch_chakla"
+class DispatchWorkerTool(Tool):
+    name = "dispatch_worker"
     description = (
-        "Dispatch a batch of lightweight worker subagents (Chakla) to run discrete, "
-        "low-effort tasks in parallel — ideal for recon (one worker per host/tool). "
-        "Provide an explicit list of task strings; one worker runs per task on a cheap "
-        "model. Workers share the engagement scope and database, so any services or "
-        "findings they record appear immediately. Workers are sandboxed: they enforce "
-        "scope, obey deny rules, and may only run the tools this dispatch grants. Use "
-        "this to fan out independent work; do not use it for a single task you can do "
-        "yourself."
+        "Dispatch a batch of lightweight worker subagents to run discrete tasks "
+        "in parallel — ideal for recon (one worker per host/tool). Provide an "
+        "explicit list of task strings and a worker role (recon, scout, tester, "
+        "analyst, exploiter). One worker runs per task on a cheaper model. "
+        "Workers share the engagement scope and database. Use this to fan out "
+        "independent work; do not use it for a single task or sequential work."
     )
     parameters = {
         "type": "object",
@@ -37,12 +32,19 @@ class DispatchChaklaTool(Tool):
                 "items": {"type": "string"},
                 "description": "Discrete task descriptions; one worker runs per task.",
             },
+            "worker": {
+                "type": "string",
+                "description": (
+                    "Worker role: recon, scout, tester, analyst, or exploiter. "
+                    "Defaults to recon."
+                ),
+            },
             "tools": {
                 "type": "array",
                 "items": {"type": "string"},
                 "description": (
-                    "Privileged tools to grant the workers beyond the always-free "
-                    "read-only set. Defaults to [\"bash\"]. Scope is still enforced."
+                    "Privileged tools to grant beyond the worker role defaults. "
+                    "Scope is still enforced."
                 ),
             },
         },
@@ -54,9 +56,11 @@ class DispatchChaklaTool(Tool):
 
     def preview(self, args: dict) -> str:
         tasks = args.get("tasks") or []
-        grant = args.get("tools") or _DEFAULT_GRANT
+        worker = args.get("worker") or "recon"
+        grant = args.get("tools") or []
         n = len(tasks) if isinstance(tasks, list) else 0
-        return f"dispatch {n} workers · grant {list(grant)} · " + "; ".join(
+        grant_s = f" grant {list(grant)}" if grant else ""
+        return f"dispatch {n} {worker} workers{grant_s} · " + "; ".join(
             str(t) for t in (tasks[:3] if isinstance(tasks, list) else [])
         )[:240]
 
@@ -74,32 +78,27 @@ class DispatchChaklaTool(Tool):
         if not tasks:
             return ToolResult("error: 'tasks' is empty", is_error=True)
 
+        worker_name = str(args.get("worker") or "recon").strip().lower()
+        spec = get_worker(worker_name)
+        if spec is None:
+            return ToolResult(f"error: unknown worker '{worker_name}'", is_error=True)
+
         cfg = ctx.config
-        labels = terminology(cfg)
-        max_workers = max(1, cfg.chakla_max_workers)
+        labels = terminology()
+        max_workers = max(1, cfg.worker_max_parallel)
         clamped = False
         if len(tasks) > max_workers:
             tasks = tasks[:max_workers]
             clamped = True
 
         grant_list = args.get("tools")
-        if (not isinstance(grant_list, list) or not grant_list
-                or not all(isinstance(t, str) for t in grant_list)):
-            grant_list = list(_DEFAULT_GRANT)
-        grant = {t for t in grant_list}
+        if isinstance(grant_list, list) and grant_list and all(isinstance(t, str) for t in grant_list):
+            grant = {t for t in grant_list}
+        else:
+            grant = set(spec.tools)
 
-        # Resolve the worker model: empty chakla_model => reuse the main model,
-        # which is always credentialed (the user configured cfg.model). Primary
-        # defense against the "worker has no creds" auth-failure bug.
-        worker_model = cfg.chakla_model or cfg.model
+        worker_model = spec.model or cfg.worker_model or cfg.model
 
-        # Defense-in-depth: if an explicit worker model has no resolvable creds —
-        # and it isn't a local/Ollama model that needs none — refuse to dispatch
-        # with a clear, actionable error instead of fanning out N workers that all
-        # fail "authentication failed" (and possibly leak the wrong provider's key).
-        # We gate on api_key only: the reported failure mode is a missing/mismatched
-        # key. A keyless custom endpoint (api_base but no key) is the rare exception
-        # and is refused here; set any placeholder key or use the blank-reuse path.
         is_local = worker_model.startswith(("ollama/", "ollama_chat/", "codex/"))
         api_key, _api_base = cfg.creds_for(worker_model)
         if not is_local and api_key is None:
@@ -113,20 +112,15 @@ class DispatchChaklaTool(Tool):
         worker_cfg = cfg.model_copy(update={"model": worker_model})
         worker_provider = Provider(worker_cfg)
         db_lock = asyncio.Lock()
-        timeout = max(1, cfg.chakla_timeout_s)
+        timeout = max(1, cfg.worker_timeout_s)
         emit = ctx.progress or (lambda _e: None)
 
-        # All rows appear immediately: emit queued for every worker up front.
         for idx, task in enumerate(tasks):
             emit({"worker": idx, "task": task, "state": "queued",
                   "detail": "", "usage": None, "n_recorded": 0})
 
-        async def _one(idx: int, task: str) -> ChaklaResult:
+        async def _one(idx: int, task: str) -> WorkerResult:
             def worker_emit(partial: dict) -> None:
-                # run_chakla supplies state/detail/usage; we add worker/task and
-                # fill any missing keys so every emitted event has the full
-                # 6-key shape (worker/task/state/detail/usage/n_recorded).
-                # `partial` overrides the defaults.
                 emit({"worker": idx, "task": task, "state": "detail",
                       "detail": "", "usage": None, "n_recorded": 0, **partial})
 
@@ -134,8 +128,9 @@ class DispatchChaklaTool(Tool):
                   "detail": "", "usage": None, "n_recorded": 0})
             try:
                 r = await asyncio.wait_for(
-                    run_chakla(
+                    run_worker(
                         task,
+                        worker_spec=spec,
                         worker_provider=worker_provider,
                         toolctx=ctx,
                         permissions=perms,
@@ -149,7 +144,7 @@ class DispatchChaklaTool(Tool):
                     timeout=timeout,
                 )
             except asyncio.TimeoutError:
-                r = ChaklaResult(task=task, status="timeout",
+                r = WorkerResult(task=task, status="timeout",
                                  error=f"timed out after {timeout}s")
             emit({"worker": idx, "task": task, "state": r.status,
                   "detail": (r.error or _terminal_detail(r)),
@@ -157,18 +152,23 @@ class DispatchChaklaTool(Tool):
             return r
 
         results = await asyncio.gather(*[_one(i, t) for i, t in enumerate(tasks)])
-        return ToolResult(_format(results, labels, worker_cfg.model, clamped))
+        return ToolResult(_format(results, labels, worker_cfg.model, worker_name, clamped))
 
 
-def _terminal_detail(r: ChaklaResult) -> str:
-    """A short one-liner for a finished worker's terminal event."""
+def _terminal_detail(r: WorkerResult) -> str:
     if r.n_recorded:
         return f"{r.n_recorded} recorded"
     first = r.text.strip().splitlines()[0] if r.text.strip() else ""
     return first[:80]
 
 
-def _format(results: list[ChaklaResult], labels: dict, model: str, clamped: bool) -> str:
+def _format(
+    results: list[WorkerResult],
+    labels: dict,
+    model: str,
+    worker_name: str,
+    clamped: bool,
+) -> str:
     total = Usage()
     done = sum(1 for r in results if r.status == "done")
     timed = sum(1 for r in results if r.status == "timeout")
@@ -180,14 +180,14 @@ def _format(results: list[ChaklaResult], labels: dict, model: str, clamped: bool
         total.total_tokens
     )
     header = (
-        f"{labels['worker_emoji']} {len(results)} {labels['worker']} workers ({model}) · "
+        f"{labels['worker_emoji']} {len(results)} {worker_name} workers ({model}) · "
         f"{done} done"
         + (f", {timed} timed out" if timed else "")
         + (f", {errored} errored" if errored else "")
         + f" · {tok} tok · ${total.cost:.3f}"
     )
     if clamped:
-        header += "  [tasks clamped to chakla_max_workers]"
+        header += "  [tasks clamped to worker_max_parallel]"
 
     lines = [header]
     for i, r in enumerate(results, 1):
@@ -197,3 +197,7 @@ def _format(results: list[ChaklaResult], labels: dict, model: str, clamped: bool
         detail = r.error if r.error else (r.text.strip().splitlines()[0] if r.text.strip() else "")
         lines.append(f"[{i}] {mark} {task1}{recorded}" + (f" — {detail}"[:200] if detail else ""))
     return "\n".join(lines)
+
+
+# Backward-compat alias
+DispatchChaklaTool = DispatchWorkerTool

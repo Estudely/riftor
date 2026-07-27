@@ -1,15 +1,17 @@
 .TH RIFTOR 1 "2026" "riftor" "User Commands"
 .SH NAME
-riftor \- offensive-security AI agent that lives in your terminal
+riftor \- AI agent for authorized bug bounty and penetration testing
 .SH SYNOPSIS
 .B riftor
 [\fIOPTIONS\fR]
 .SH DESCRIPTION
 .B riftor
-is a full-screen terminal (TUI) penetration-testing assistant organised around
-the RIFT methodology: Recon, Intrusion, Foothold, Takeover. The agent runs
-recon/scanning tools through a permission-gated shell, enforces an engagement
-scope, records services and findings, and writes CVSS-scored reports.
+is a full-screen terminal (TUI) assistant for authorized bug bounty programs
+and penetration testing. The agent runs recon/scanning tools through a
+permission-gated shell, enforces an engagement scope, tracks OWASP/PTES
+methodology checklist progress, records services and findings, and writes
+CVSS-scored reports. Parallel workers fan out independent tasks via
+\fBdispatch_worker\fR.
 .SH OPTIONS
 .TP
 .B \-\-version
@@ -21,8 +23,11 @@ Print the path of the config file and exit.
 .B \-\-model \fIMODEL\fR
 Override the model for this run (any litellm id, e.g. anthropic/claude-sonnet-4-6).
 .TP
+.B \-\-worker\-model \fIMODEL\fR
+Override the worker subagent model for this run. Empty default reuses the main model.
+.TP
 .B \-\-chakla\-model \fIMODEL\fR
-Override the Chakla (worker) model for this run.
+Hidden alias for \fB\-\-worker\-model\fR (v3 compatibility).
 .TP
 .B \-\-api\-key \fIKEY\fR
 Override the API key for this run (prefer the provider's environment variable).
@@ -43,8 +48,9 @@ Non-interactive mode; reads the prompt from \fB\-\-prompt\fR or stdin.
 Run the Playwright browser visibly for this run only (not persisted; default is headless).
 .SH IN-APP COMMANDS
 Type \fB/help\fR inside riftor for the full list, including \fB/scope\fR,
-\fB/stage\fR, \fB/findings\fR, \fB/report\fR, \fB/permissions\fR, \fB/cost\fR,
-\fB/retry\fR, \fB/continue\fR, \fB/compact\fR, \fB/timeline\fR, \fB/browser\fR and \fB/export\fR.
+\fB/methodology\fR, \fB/workers\fR, \fB/findings\fR, \fB/report\fR,
+\fB/permissions\fR, \fB/cost\fR, \fB/retry\fR, \fB/continue\fR, \fB/compact\fR,
+\fB/timeline\fR, \fB/browser\fR and \fB/export\fR.
 \fB/browser\fR shows browser status; \fB/browser headed\fR / \fB/browser headless\fR
 switch the mode (persisted) and \fB/browser close\fR tears it down.
 .SH EXIT STATUS
@@ -75,6 +81,9 @@ Runtime configuration (model, theme, limits). Written 0600.
 .I ~/.config/riftor/permissions.toml
 Persistent tool allow/deny rules.
 .TP
+.I ~/.config/riftor/workers/
+Optional custom worker role specs (\fI<name>.md\fR with YAML front matter).
+.TP
 .I ./.riftor/
 Per-engagement state: sqlite store, sessions, reports, exports.
 .SH CONFIGURATION
@@ -83,20 +92,14 @@ Selected keys from \fB~/.config/riftor/config.toml\fR (\fB[riftor]\fR table):
 .B model
 Main-agent litellm model id (default: \fIanthropic/claude-sonnet-4-6\fR).
 .TP
-.B chakla_model
-Chakla worker model id. Empty (default) reuses the main \fBmodel\fR.
+.B worker_model
+Worker subagent model id. Empty (default) reuses the main \fBmodel\fR.
 .TP
-.B chakla_max_workers
-Maximum number of Chakla workers per dispatch batch (default: \fI5\fR).
+.B worker_max_parallel
+Maximum number of workers per dispatch batch (default: \fI5\fR).
 .TP
-.B chakla_timeout_s
+.B worker_timeout_s
 Per-worker wall-clock timeout in seconds (default: \fI300\fR).
-.TP
-.B label_main
-Display name for the orchestrator agent (default: \fIBaaj\fR).
-.TP
-.B label_worker
-Display name for worker subagents (default: \fIChakla\fR).
 .TP
 .B browser_headless
 Run the Playwright browser headless (default: \fItrue\fR).

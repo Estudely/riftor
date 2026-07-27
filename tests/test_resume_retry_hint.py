@@ -25,7 +25,7 @@ async def test_resume_cmd_incomplete_hints_retry():
     with tempfile.TemporaryDirectory() as d:
         workdir = Path(d)
         _patch_paths(workdir)
-        app = RiftorApp(Config(), workdir=workdir)
+        app = RiftorApp(Config(onboarded=True), workdir=workdir)
         async with app.run_test():
             # Save after mount so _offer_recovery does not fire on this sid.
             msgs = [
@@ -51,7 +51,7 @@ async def test_resume_cmd_complete_omits_retry_hint():
     with tempfile.TemporaryDirectory() as d:
         workdir = Path(d)
         _patch_paths(workdir)
-        app = RiftorApp(Config(), workdir=workdir)
+        app = RiftorApp(Config(onboarded=True), workdir=workdir)
         async with app.run_test():
             msgs = [
                 {"role": "user", "content": "done"},

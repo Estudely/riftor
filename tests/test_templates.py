@@ -21,7 +21,7 @@ def test_every_template_is_valid():
     for key, t in TEMPLATES.items():
         assert isinstance(t, Template)
         assert t.key == key
-        assert t.stage in ("R", "I", "F", "T")
+        assert t.label.strip()
         assert t.methodology.strip()
         assert t.tools and all(isinstance(x, str) for x in t.tools)
         assert t.description.strip()
