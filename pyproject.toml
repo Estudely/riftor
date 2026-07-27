@@ -65,8 +65,10 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["riftor"]
 
-[tool.hatch.build.targets.wheel.force-include]
-"riftor/workers" = "riftor/workers"
+[tool.hatch.build]
+artifacts = [
+  "riftor/workers/*.md",
+]
 
 [tool.ruff]
 line-length = 100
