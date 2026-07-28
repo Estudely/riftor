@@ -893,6 +893,75 @@ async def test_model_discovery_failure_keeps_curated_models_selectable(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("provider_key", "choice_label", "query", "saved_base"),
+    [
+        (
+            "openai",
+            PROVIDERS["openai"].label,
+            None,
+            "https://saved-openai.example/v1",
+        ),
+        (
+            "custom",
+            PROVIDERS["custom"].label,
+            "custom",
+            "https://saved-custom.example/v1",
+        ),
+    ],
+)
+async def test_main_discovery_uses_selected_non_current_provider_saved_base(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    provider_key: str,
+    choice_label: str,
+    query: str | None,
+    saved_base: str,
+) -> None:
+    calls: list[tuple[str, str | None, str | None]] = []
+
+    def capture(
+        selected_provider: str,
+        api_base: str | None,
+        api_key: str | None,
+    ) -> FetchResult:
+        calls.append((selected_provider, api_base, api_key))
+        return FetchResult(
+            models=list(PROVIDER_DEFAULTS[selected_provider]),
+            source="curated",
+        )
+
+    _stub_model_fetch(monkeypatch, capture)
+    app = _make_app(
+        tmp_path,
+        monkeypatch,
+        Config(
+            onboarded=True,
+            model="anthropic/claude-sonnet-4-6",
+            providers={
+                provider_key: ProviderCreds(api_base=saved_base),
+            },
+        ),
+    )
+
+    async with app.run_test() as pilot:
+        picker = await _open_setting(app, pilot, "Main model")
+        await _choose_choice(
+            picker,
+            pilot,
+            choice_label,
+            query=query,
+        )
+        await _wait_until(pilot, lambda: bool(calls))
+
+        assert any(
+            selected == provider_key and base == saved_base
+            for selected, base, _key in calls
+        ), calls
+        assert app.config.model == "anthropic/claude-sonnet-4-6"
+
+
+@pytest.mark.asyncio
 async def test_current_non_curated_model_stays_selectable_in_its_provider(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -975,6 +1044,34 @@ async def test_openrouter_custom_model_applies_full_slug_prefix_only_on_submit(
         assert _persisted_config().model == expected
         assert app.status.model == expected
         assert app.provider is not provider_before
+
+
+@pytest.mark.asyncio
+async def test_groq_curated_nested_id_keeps_the_selected_provider_prefix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _stub_model_fetch(monkeypatch, _curated_fetch)
+    app = _make_app(
+        tmp_path,
+        monkeypatch,
+        Config(onboarded=True, model="anthropic/claude-sonnet-4-6"),
+    )
+
+    async with app.run_test() as pilot:
+        picker = await _open_setting(app, pilot, "Main model")
+        await _choose_choice(picker, pilot, "Groq")
+
+        assert app.config.model == "anthropic/claude-sonnet-4-6"
+        assert "openai/gpt-oss-120b" in {
+            _widget_text(row).strip() for row in _visible_choice_rows(picker)
+        }
+
+        await _choose_choice(picker, pilot, "openai/gpt-oss-120b")
+
+        expected = "groq/openai/gpt-oss-120b"
+        assert app.config.model == expected
+        assert _persisted_config().model == expected
+        assert app.status.model == expected
 
 
 @pytest.mark.asyncio
@@ -1102,6 +1199,73 @@ async def test_worker_provider_uses_own_default_base_without_clobbering_main_cre
 
 
 @pytest.mark.asyncio
+async def test_worker_provider_uses_its_env_key_without_persisting_main_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    groq_env_key = "sk-groq-from-env"
+    main_key = "sk-openai-main-only"
+    main_base = "https://main-openai.example/v1"
+    monkeypatch.setenv("GROQ_API_KEY", groq_env_key)
+    calls: list[tuple[str, str | None, str | None]] = []
+
+    def capture(
+        provider_key: str,
+        api_base: str | None,
+        api_key: str | None,
+    ) -> FetchResult:
+        calls.append((provider_key, api_base, api_key))
+        return FetchResult(
+            models=list(PROVIDER_DEFAULTS[provider_key]),
+            source="curated",
+        )
+
+    _stub_model_fetch(monkeypatch, capture)
+    config = Config(
+        onboarded=True,
+        model="openai/gpt-5.5",
+        worker_model="",
+        providers={
+            "openai": ProviderCreds(
+                api_key=main_key,
+                api_base=main_base,
+            )
+        },
+    )
+    app = _make_app(tmp_path, monkeypatch, config)
+
+    async with app.run_test() as pilot:
+        picker = await _open_setting(app, pilot, "Worker model")
+        await _choose_choice(picker, pilot, "Groq")
+        await _wait_until(pilot, lambda: bool(calls))
+
+        expected_base = PROVIDERS["groq"].default_base
+        assert ("groq", expected_base, groq_env_key) in calls
+
+        await _choose_choice(picker, pilot, "llama-3.3-70b-versatile")
+
+        expected_model = "groq/llama-3.3-70b-versatile"
+        assert app.config.worker_model == expected_model
+        assert app.config.providers["openai"] == ProviderCreds(
+            api_key=main_key,
+            api_base=main_base,
+        )
+        assert app.config.providers["groq"].api_key is None
+        assert app.config.providers["groq"].api_base == expected_base
+        assert app.config.creds_for(expected_model) == (
+            groq_env_key,
+            expected_base,
+        )
+
+        loaded = _persisted_config()
+        assert loaded.providers["groq"].api_key is None
+        assert loaded.providers["groq"].api_base == expected_base
+        assert loaded.creds_for(expected_model) == (
+            groq_env_key,
+            expected_base,
+        )
+
+
+@pytest.mark.asyncio
 async def test_api_key_replace_is_blank_masked_and_never_renders_secret(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1155,6 +1319,79 @@ async def test_api_key_replace_is_blank_masked_and_never_renders_secret(
         assert _persisted_config().providers["openai"].api_key == new_secret
         assert app.provider is not provider_before
         assert new_secret not in _widget_text(picker)
+        _assert_row_value(
+            _visible_setting_rows(picker),
+            "API credentials",
+            "set",
+        )
+
+
+@pytest.mark.asyncio
+async def test_replacing_provider_key_preserves_effective_legacy_base_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    legacy_base = "https://legacy-openai.example/v1"
+    replacement_key = "sk-provider-replacement"
+    app = _make_app(
+        tmp_path,
+        monkeypatch,
+        Config(
+            onboarded=True,
+            model="openai/gpt-5.5",
+            api_base=legacy_base,
+        ),
+    )
+
+    async with app.run_test() as pilot:
+        picker = await _open_setting(app, pilot, "API credentials")
+        await _choose_choice(picker, pilot, "Replace API key")
+        await _submit_editor(pilot, replacement_key)
+
+        assert app.config.creds_for(app.config.model) == (
+            replacement_key,
+            legacy_base,
+        )
+        assert _persisted_config().creds_for(app.config.model) == (
+            replacement_key,
+            legacy_base,
+        )
+        _assert_row_value(
+            _visible_setting_rows(picker),
+            "Base URL",
+            legacy_base,
+        )
+
+
+@pytest.mark.asyncio
+async def test_setting_provider_base_preserves_effective_legacy_api_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    legacy_key = "sk-legacy-openai"
+    provider_base = "https://provider-openai.example/v1"
+    app = _make_app(
+        tmp_path,
+        monkeypatch,
+        Config(
+            onboarded=True,
+            model="openai/gpt-5.5",
+            api_key=legacy_key,
+        ),
+    )
+
+    async with app.run_test() as pilot:
+        picker = await _open_setting(app, pilot, "Base URL")
+        await _submit_editor(pilot, provider_base)
+
+        assert app.config.creds_for(app.config.model) == (
+            legacy_key,
+            provider_base,
+        )
+        assert _persisted_config().creds_for(app.config.model) == (
+            legacy_key,
+            provider_base,
+        )
         _assert_row_value(
             _visible_setting_rows(picker),
             "API credentials",
