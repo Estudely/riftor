@@ -37,7 +37,7 @@ from riftor.engagement.report import write_reports
 from riftor.safety.audit import AuditLog
 from riftor.safety.permissions import ConfirmScreen, Permissions
 from riftor.tools import ToolContext, ToolResult
-from riftor.tui.config_screen import ConfigScreen
+from riftor.tui.config_picker import ConfigPicker
 from riftor.tui.screenshot_gallery import ScreenshotGalleryScreen
 from riftor.tui.theme import THEMES, css_variable_defaults, palette
 from riftor.tui.onboarding import OnboardingScreen
@@ -429,6 +429,7 @@ class RiftorApp(App):
         )
         yield StatusBar(self.config.model, yolo=self.yolo)
         yield CommandDropdown(_COMMANDS, id="cmd-dropdown")
+        yield ConfigPicker(self.config, id="config-picker")
         yield PromptInput(placeholder="task riftor — or /help", id="prompt")
 
     def get_css_variables(self) -> dict[str, str]:
@@ -679,6 +680,10 @@ class RiftorApp(App):
     def cmd_dropdown(self) -> CommandDropdown:
         return self.query_one("#cmd-dropdown", CommandDropdown)
 
+    @property
+    def config_picker(self) -> ConfigPicker:
+        return self.query_one("#config-picker", ConfigPicker)
+
     # ---- mount helpers ---------------------------------------------------------
     def _pal(self) -> dict[str, str]:
         return palette(self)
@@ -754,6 +759,12 @@ class RiftorApp(App):
 
     # ---- events ----------------------------------------------------------------
     def on_input_submitted(self, event: Input.Submitted) -> None:
+        inp = self.query_one("#prompt", PromptInput)
+        if self.config_picker.is_open and event.input is inp:
+            self.cmd_dropdown.hide()
+            self.config_picker.activate(inp)
+            return
+
         # Dropdown selection: if the dropdown is visible and the user hasn't
         # typed an exact command match, fill with the highlighted suggestion.
         # Exact matches pass through to normal command dispatch.
@@ -769,7 +780,6 @@ class RiftorApp(App):
                 return
             self.cmd_dropdown.hide()
 
-        inp = self.query_one("#prompt", PromptInput)
         # Expand any [Pasted ~N lines] chip back to its full text before use.
         text = inp.expand(event.value).strip()
         inp.clear()
@@ -791,6 +801,11 @@ class RiftorApp(App):
     def on_input_changed(self, event: Input.Changed) -> None:
         """Show the command dropdown when the user starts typing a slash command."""
         value = event.value
+        inp = self.query_one("#prompt", PromptInput)
+        if self.config_picker.is_open and event.input is inp:
+            self.cmd_dropdown.hide()
+            self.config_picker.filter(value)
+            return
         if value.startswith("/") and " " not in value:
             self.cmd_dropdown.filter(value)
         else:
@@ -798,6 +813,15 @@ class RiftorApp(App):
 
     def on_key(self, event) -> None:
         inp = self.query_one("#prompt", PromptInput)
+
+        if (
+            self.config_picker.is_open
+            and inp.has_focus
+            and event.key in ("up", "down")
+        ):
+            self.config_picker.move(-1 if event.key == "up" else 1)
+            event.prevent_default()
+            return
 
         # Dropdown navigation — takes priority over history recall.
         if self.cmd_dropdown.visible and inp.has_focus:
@@ -1044,59 +1068,10 @@ class RiftorApp(App):
         self._apply_theme(name)
         self._note(f"theme → {name}")
 
-    @work(group="config")
-    async def _open_config(self) -> None:
-        from riftor.config import ProviderCreds  # local import: keep app import-time light
-
-        result = await self.push_screen_wait(ConfigScreen(self.config))
-        if not isinstance(result, dict):
-            self._note("config unchanged")
-            return
-        self.config.model = result["model"]
-        self.config.temperature = result["temperature"]
-        self.config.max_tokens = result["max_tokens"]
-        self.config.max_steps = result.get("max_steps", self.config.max_steps)
-        self.max_steps = self.config.max_steps
-        self.config.worker_model = result.get("worker_model", self.config.worker_model)
-        self.config.show_thinking = result.get("show_thinking", self.config.show_thinking)
-        self.config.show_tool_output = result.get("show_tool_output", self.config.show_tool_output)
-        self.config.browser_headless = result.get("browser_headless", self.config.browser_headless)
-        self.config.browser_persistent_profile = result.get(
-            "browser_persistent_profile", self.config.browser_persistent_profile)
-        self.config.reasoning_effort = result.get("reasoning_effort", self.config.reasoning_effort)
-
-        provider = result.get("provider")
-        if provider:
-            entry = self.config.providers.get(provider) or ProviderCreds()
-            if result.get("api_base") is not None:
-                entry.api_base = result["api_base"]
-            if result.get("api_key"):
-                entry.api_key = result["api_key"]
-            if entry.api_key or entry.api_base:
-                self.config.providers[provider] = entry
-
-        # Worker may use a different provider than the main model. Ensure that
-        # provider has resolvable creds WITHOUT corrupting the main provider's
-        # entry: never copy the shared (main) base here — use the worker
-        # provider's own default base. Reuse the shared key only if one was
-        # entered this session and the worker provider has no key yet.
-        from riftor.providers import PROVIDERS as _PROVIDERS  # local: keep import-time light
-        w_provider = result.get("worker_provider")
-        if w_provider and w_provider != provider:
-            w_entry = self.config.providers.get(w_provider) or ProviderCreds()
-            if not w_entry.api_key and result.get("api_key"):
-                w_entry.api_key = result["api_key"]
-            if not w_entry.api_base:
-                w_entry.api_base = _PROVIDERS[w_provider].default_base
-            if w_entry.api_key or w_entry.api_base:
-                self.config.providers[w_provider] = w_entry
-
-        self.provider = Provider(self.config)
-        self.status.set_model(self.config.model)
-        self.config.theme = result["theme"]
-        self._apply_theme(result["theme"])
-        self.config.save()
-        self._note("config saved")
+    def _open_config(self) -> None:
+        self.cmd_dropdown.hide()
+        prompt = self.query_one("#prompt", PromptInput)
+        self.config_picker.open(prompt)
 
     def _permissions_cmd(self, arg: str) -> None:
         parts = arg.split()
@@ -2033,6 +2008,10 @@ class RiftorApp(App):
         self.exit()
 
     def action_cancel(self) -> None:
+        if self.config_picker.is_open:
+            prompt = self.query_one("#prompt", PromptInput)
+            self.config_picker.back(prompt)
+            return
         self.workers.cancel_all()
         self._close_modals()
         self.status.set_busy(False)
