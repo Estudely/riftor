@@ -1266,6 +1266,130 @@ async def test_worker_provider_uses_its_env_key_without_persisting_main_key(
 
 
 @pytest.mark.asyncio
+async def test_worker_ignores_stale_legacy_api_key_when_bootstrapping_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A leftover root api_key must not count as the worker provider's own key.
+
+    Replacing the OpenAI key writes providers.openai but historically left
+    config.api_key alone. Field-wise creds_for() would then treat that stale
+    root key as Groq's credential and skip copying the real main key.
+    """
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    stale_legacy = "sk-stale-legacy-root"
+    main_key = "sk-openai-current"
+    main_base = "https://main-openai.example/v1"
+    config = Config(
+        onboarded=True,
+        model="openai/gpt-5.5",
+        worker_model="",
+        api_key=stale_legacy,
+        providers={
+            "openai": ProviderCreds(
+                api_key=main_key,
+                api_base=main_base,
+            )
+        },
+    )
+    app = _make_app(tmp_path, monkeypatch, config)
+    _stub_model_fetch(monkeypatch, _curated_fetch)
+
+    async with app.run_test() as pilot:
+        picker = await _open_setting(app, pilot, "Worker model")
+        await _choose_choice(picker, pilot, "Groq")
+        await _choose_choice(picker, pilot, "llama-3.3-70b-versatile")
+
+        expected_model = "groq/llama-3.3-70b-versatile"
+        expected_base = PROVIDERS["groq"].default_base
+        assert app.config.worker_model == expected_model
+        assert app.config.providers["groq"] == ProviderCreds(
+            api_key=main_key,
+            api_base=expected_base,
+        )
+        assert app.config.creds_for(expected_model) == (main_key, expected_base)
+        assert stale_legacy not in {
+            app.config.providers["groq"].api_key,
+            app.config.creds_for(expected_model)[0],
+        }
+        loaded = _persisted_config()
+        assert loaded.providers["groq"] == app.config.providers["groq"]
+        _assert_success_status(picker)
+
+
+@pytest.mark.asyncio
+async def test_main_discovery_ignores_legacy_base_for_other_providers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Legacy api_base is for the active provider only — not every discovery probe."""
+    legacy_base = "https://legacy-active-only.example/v1"
+    calls: list[tuple[str, str | None, str | None]] = []
+
+    def capture(
+        provider_key: str,
+        api_base: str | None,
+        api_key: str | None,
+    ) -> FetchResult:
+        calls.append((provider_key, api_base, api_key))
+        return FetchResult(
+            models=list(PROVIDER_DEFAULTS[provider_key]),
+            source="curated",
+        )
+
+    _stub_model_fetch(monkeypatch, capture)
+    app = _make_app(
+        tmp_path,
+        monkeypatch,
+        Config(
+            onboarded=True,
+            model="anthropic/claude-sonnet-4-6",
+            api_base=legacy_base,
+        ),
+    )
+
+    async with app.run_test() as pilot:
+        picker = await _open_setting(app, pilot, "Main model")
+        await _choose_choice(picker, pilot, "OpenAI")
+        await _wait_until(pilot, lambda: bool(calls))
+
+        assert (
+            "openai",
+            PROVIDERS["openai"].default_base,
+            None,
+        ) in calls
+        assert not any(base == legacy_base for _provider, base, _key in calls), calls
+        assert app.config.model == "anthropic/claude-sonnet-4-6"
+
+
+@pytest.mark.asyncio
+async def test_replacing_api_key_clears_legacy_root_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    legacy_key = "sk-legacy-root"
+    replacement = "sk-provider-table"
+    app = _make_app(
+        tmp_path,
+        monkeypatch,
+        Config(
+            onboarded=True,
+            model="openai/gpt-5.5",
+            api_key=legacy_key,
+        ),
+    )
+
+    async with app.run_test() as pilot:
+        picker = await _open_setting(app, pilot, "API credentials")
+        await _choose_choice(picker, pilot, "Replace API key")
+        await _submit_editor(pilot, replacement)
+
+        assert app.config.api_key is None
+        assert app.config.providers["openai"].api_key == replacement
+        assert _persisted_config().api_key is None
+        assert _persisted_config().providers["openai"].api_key == replacement
+        _assert_success_status(picker)
+
+
+@pytest.mark.asyncio
 async def test_api_key_replace_is_blank_masked_and_never_renders_secret(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
