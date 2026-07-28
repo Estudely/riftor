@@ -365,8 +365,8 @@ never writes it except to persist a refreshed token.
 
 **Via `/config`:** open `/config`, choose **Main model** → **Codex (ChatGPT)**,
 and pick a model such as `codex/gpt-5.5-codex`. No API key is required — a
-**Codex login** status line in the panel shows whether you are authenticated
-and roughly when the token expires.
+**Codex login** row shows whether you are authenticated and roughly when the
+token expires.
 
 **Via CLI flag:**
 
