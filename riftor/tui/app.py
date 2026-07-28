@@ -24,7 +24,7 @@ from textual.command import Hit, Hits
 from textual.command import Provider as CommandProvider
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Collapsible, Input, Markdown, RichLog, Static
+from textual.widgets import Button, Input, Markdown, Static
 
 from riftor import tools
 from riftor.agent import antiloop, circuit
@@ -34,10 +34,11 @@ from riftor.agent.provider import Provider, ProviderError, ToolCall, Turn, Usage
 from riftor import config as configmod
 from riftor.engagement import Engagement
 from riftor.engagement.report import write_reports
+from riftor.providers import PROVIDERS, provider_key_for_model
 from riftor.safety.audit import AuditLog
 from riftor.safety.permissions import ConfirmScreen, Permissions
 from riftor.tools import ToolContext, ToolResult
-from riftor.tui.config_screen import ConfigScreen
+from riftor.tui.config_picker import ConfigPicker
 from riftor.tui.screenshot_gallery import ScreenshotGalleryScreen
 from riftor.tui.theme import THEMES, css_variable_defaults, palette
 from riftor.tui.onboarding import OnboardingScreen
@@ -153,7 +154,7 @@ class PromptInput(Input):
 
 # Commands offered for fuzzy "did you mean" suggestions.
 _COMMANDS = [
-    "/audit", "/branch", "/browser", "/clear", "/clearlog", "/compact",
+    "/audit", "/branch", "/browser", "/clear", "/compact",
     "/config", "/continue", "/conversation", "/copy", "/cost", "/delete-finding",
     "/doctor", "/edit-finding", "/exit", "/export", "/finding", "/findings",
     "/graph", "/help", "/hosts", "/hypotheses", "/lesson", "/lessons",
@@ -201,8 +202,8 @@ _Skills_
 
 _Settings & sessions_
 - `/model [name]` — show or switch the model · `/theme [name]` (rift/dusk/void/fracture/singularity/dawn/paper)
-- `/config` — settings panel · `/permissions` — review allow/deny rules
-- `/audit` — recent tool-call audit log · `/clearlog` — clear the shell output pane
+- `/config` — open the inline settings picker · `/permissions` — review allow/deny rules
+- `/audit` — recent tool-call audit log
 - `/doctor` — check which external recon tools (nmap/httpx/…) are installed
 - `/browser [headed|headless|close]` — browser mode / teardown · `/screenshots` — view captures
 - `/review` — self-critique findings for false positives before reporting
@@ -212,8 +213,10 @@ _Settings & sessions_
 - `/rollback <n>` — keep only the first *n* messages · `/rollback last [k]` — drop the last *k* user turns (default 1)
 - `/tools` — list available agent tools · `/exit` · `/quit` — quit (`Ctrl+C`)
 
-Type anything else to task the agent. `↑/↓` recall input · `PgUp/PgDn` scroll ·
-`Esc` cancels a running response. Drag to select text, `Ctrl+Y` copies it.
+Type anything else to task the agent. Prefix with `!` to run a shell command
+(output appears inline in chat; it is not sent to the model). `↑/↓` recall input ·
+`PgUp/PgDn` scroll · `Esc` cancels a running response. Drag to select text,
+`Ctrl+Y` copies it.
 """
 
 
@@ -242,8 +245,7 @@ _PALETTE_COMMANDS = [
     ("/hypotheses", "Hypotheses", "List attack hypotheses"),
     ("/lessons", "Lessons", "List durable cross-session lessons"),
     ("/lesson", "Add lesson", "Save a durable lesson"),
-    ("/clearlog", "Clear shell log", "Clear the shell output pane"),
-    ("/config", "Config", "Open the settings panel"),
+    ("/config", "Config", "Open the inline settings picker"),
     ("/new", "New session", "Start a fresh conversation"),
     ("/clear", "Clear", "Clear the conversation"),
     ("/screenshots", "Screenshots", "Browse, view, and delete screenshots"),
@@ -393,7 +395,6 @@ class RiftorApp(App):
         # input history + last-output tracking + rate limiting
         self._history: list[str] = []
         self._history_idx: int | None = None
-        self._shell_history: list[str] = []
         self._tool_results: dict[int, str] = {}
         self._last_output: str = ""
         self._last_user_text: str | None = None
@@ -421,14 +422,9 @@ class RiftorApp(App):
         with Horizontal(id="main-row"):
             yield EngagementSidebar(id="sidebar")
             yield VerticalScroll(id="chat")
-        yield Collapsible(
-            RichLog(id="shell-log", highlight=True, markup=False),
-            id="shell-pane",
-            title="Shell output",
-            collapsed=True,
-        )
         yield StatusBar(self.config.model, yolo=self.yolo)
         yield CommandDropdown(_COMMANDS, id="cmd-dropdown")
+        yield ConfigPicker(self.config, id="config-picker")
         yield PromptInput(placeholder="task riftor — or /help", id="prompt")
 
     def get_css_variables(self) -> dict[str, str]:
@@ -679,6 +675,10 @@ class RiftorApp(App):
     def cmd_dropdown(self) -> CommandDropdown:
         return self.query_one("#cmd-dropdown", CommandDropdown)
 
+    @property
+    def config_picker(self) -> ConfigPicker:
+        return self.query_one("#config-picker", ConfigPicker)
+
     # ---- mount helpers ---------------------------------------------------------
     def _pal(self) -> dict[str, str]:
         return palette(self)
@@ -712,48 +712,230 @@ class RiftorApp(App):
             return
 
         p = self._pal()
-        shell_log = self.query_one("#shell-log", RichLog)
-        shell_pane = self.query_one("#shell-pane", Collapsible)
-
-        shell_log.write(Text(f"$ {command}", style=f"bold {p['violet']}"))
-
         try:
             result = await run_shell(command, str(self.workdir), timeout=120)
         except Exception as exc:
-            shell_log.write(Text(f"[error: {exc}]", style=f"bold {p['danger']}"))
-            self.audit.record("shell_error", command, allowed=False, is_error=True)
-        else:
-            self._shell_history.append(command)
-            self.audit.record("shell_cmd", command, allowed=True)
-            if result.stderr:
-                shell_log.write(Text(result.stderr, style=p['danger']))
-            if result.stdout:
-                shell_log.write(Text(result.stdout))
-            if result.exit_code != 0:
-                shell_log.write(
-                    Text(f"[exit {result.exit_code}]", style=f"bold {p['magenta']}")
+            await self._mount(
+                Static(
+                    Text(f"$ {command} · error", style=f"bold {p['danger']}"),
+                    classes="shell-cmd",
+                    markup=False,
                 )
+            )
+            await self._mount(
+                Static(
+                    Text(str(exc), style=f"bold {p['danger']}"),
+                    classes="shell-output error",
+                    markup=False,
+                )
+            )
+            self.audit.record("shell_error", command, allowed=False, is_error=True)
+            return
 
-        shell_log.write("")
-
-        shell_pane.title = f"Shell output — {len(self._shell_history)} commands"
-        shell_pane.collapsed = False
-
-    def _clearlog_cmd(self) -> None:
-        """Clear the shell output log and collapse the pane."""
-        shell_log = self.query_one("#shell-log", RichLog)
-        shell_pane = self.query_one("#shell-pane", Collapsible)
-        shell_log.clear()
-        shell_pane.title = "Shell output"
-        shell_pane.collapsed = True
-        self._shell_history.clear()
+        self.audit.record("shell_cmd", command, allowed=True)
+        header_style = (
+            f"bold {p['magenta']}" if result.exit_code != 0 else f"bold {p['violet']}"
+        )
+        await self._mount(
+            Static(
+                Text(
+                    f"$ {command} · exit {result.exit_code}",
+                    style=header_style,
+                ),
+                classes="shell-cmd",
+                markup=False,
+            )
+        )
+        if result.stderr.strip():
+            await self._mount(
+                Static(
+                    Text(result.stderr.rstrip("\n"), style=p["danger"]),
+                    classes="shell-output error",
+                    markup=False,
+                )
+            )
+        if result.stdout.strip():
+            await self._mount(
+                Static(
+                    Text(result.stdout.rstrip("\n")),
+                    classes="shell-output",
+                    markup=False,
+                )
+            )
 
     async def _mount(self, widget) -> None:
         await self.chat.mount(widget)
         self._scroll_if_following()
 
     # ---- events ----------------------------------------------------------------
+    def on_config_picker_activated(self, event: ConfigPicker.Activated) -> None:
+        """Validate, persist, and apply every final picker activation."""
+        error = self._apply_config_picker_activation(event)
+        if error is not None:
+            self.config_picker.show_error(error)
+            return
+
+        self.config.save()
+        key = event.setting_key
+        if key in {
+            "model",
+            "api_key",
+            "api_base",
+            "temperature",
+            "max_tokens",
+            "reasoning_effort",
+        }:
+            self.provider = Provider(self.config)
+        if key == "model":
+            self.status.set_model(self.config.model)
+        elif key == "max_steps":
+            self.max_steps = self.config.max_steps
+        elif key == "theme":
+            self._apply_theme(self.config.theme)
+
+        prompt = self.query_one("#prompt", PromptInput)
+        self.config_picker.complete_activation(
+            prompt,
+            f"saved · {event.setting.label}",
+        )
+
+    def _apply_config_picker_activation(
+        self,
+        event: ConfigPicker.Activated,
+    ) -> str | None:
+        """Validate one activation completely before mutating live config."""
+        key = event.setting_key
+        raw = event.value
+        provider_key = event.provider_key
+        value: float | int | bool | str
+
+        if key == "temperature":
+            try:
+                value = float(raw)
+            except ValueError:
+                return "temperature must be a number"
+        elif key == "max_tokens":
+            try:
+                value = int(raw)
+            except ValueError:
+                return "max tokens must be an integer"
+        elif key == "max_steps":
+            try:
+                value = int(raw)
+            except ValueError:
+                return "tool call steps must be an integer"
+            if value < 1:
+                return "tool call steps must be at least 1"
+        elif key in {
+            "show_thinking",
+            "show_tool_output",
+            "browser_headless",
+            "browser_persistent_profile",
+        }:
+            if raw not in {"true", "false"}:
+                return f"{event.setting.label.casefold()} must be on or off"
+            value = raw == "true"
+        elif key == "reasoning_effort":
+            if raw not in configmod.REASONING_EFFORTS:
+                return "reasoning effort is invalid"
+            value = raw
+        elif key == "theme":
+            if raw not in THEMES:
+                return "theme is invalid"
+            value = raw
+        elif key == "model":
+            value = raw.strip()
+            if not value:
+                return "model ID cannot be blank"
+            if provider_key is not None and provider_key not in PROVIDERS:
+                return "provider is invalid"
+        elif key == "worker_model":
+            value = raw.strip()
+            if value and provider_key not in PROVIDERS:
+                return "provider is invalid"
+        elif key in {"api_key", "api_base"}:
+            value = raw.strip()
+            provider_key = provider_key or provider_key_for_model(self.config.model)
+            if provider_key not in PROVIDERS:
+                return "provider is invalid"
+        else:
+            return f"unsupported setting: {event.setting.label}"
+
+        if key in {
+            "temperature",
+            "max_tokens",
+            "max_steps",
+            "show_thinking",
+            "show_tool_output",
+            "browser_headless",
+            "browser_persistent_profile",
+            "reasoning_effort",
+            "theme",
+            "model",
+        }:
+            setattr(self.config, key, value)
+            return None
+
+        if key == "worker_model":
+            worker_model = str(value)
+            self.config.worker_model = worker_model
+            provider_key = event.provider_key
+            main_provider = provider_key_for_model(self.config.model)
+            if (
+                worker_model
+                and provider_key in PROVIDERS
+                and provider_key != main_provider
+                and provider_key != "codex"
+            ):
+                existing = self.config.providers.get(provider_key)
+                if existing is None or not (
+                    existing.api_key or existing.api_base
+                ):
+                    main_key, _ = self.config.creds_for(self.config.model)
+                    selected_key = self.config.owned_key_for_provider(provider_key)
+                    default_base = PROVIDERS[provider_key].default_base
+                    if main_key or default_base:
+                        self.config.providers[provider_key] = (
+                            configmod.ProviderCreds(
+                                api_key=None if selected_key else main_key,
+                                api_base=default_base,
+                            )
+                        )
+            return None
+
+        assert provider_key is not None
+        existing = self.config.providers.get(provider_key)
+        entry = configmod.ProviderCreds(
+            api_key=existing.api_key if existing else None,
+            api_base=existing.api_base if existing else None,
+        )
+        if key == "api_key":
+            if event.action == "clear":
+                entry.api_key = None
+                self.config.api_key = None
+            elif value:
+                entry.api_key = str(value)
+                # Move the secret into the provider table; do not leave a stale
+                # root key that would look like every other provider's credential.
+                self.config.api_key = None
+            # A blank replacement intentionally leaves every stored key unchanged.
+        else:
+            entry.api_base = str(value) or None
+            self.config.api_base = None
+
+        if entry.api_key or entry.api_base:
+            self.config.providers[provider_key] = entry
+        else:
+            self.config.providers.pop(provider_key, None)
+        return None
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
+        inp = self.query_one("#prompt", PromptInput)
+        if self.config_picker.is_open and event.input is inp:
+            self.cmd_dropdown.hide()
+            self.config_picker.activate(inp)
+            return
+
         # Dropdown selection: if the dropdown is visible and the user hasn't
         # typed an exact command match, fill with the highlighted suggestion.
         # Exact matches pass through to normal command dispatch.
@@ -769,7 +951,6 @@ class RiftorApp(App):
                 return
             self.cmd_dropdown.hide()
 
-        inp = self.query_one("#prompt", PromptInput)
         # Expand any [Pasted ~N lines] chip back to its full text before use.
         text = inp.expand(event.value).strip()
         inp.clear()
@@ -791,6 +972,11 @@ class RiftorApp(App):
     def on_input_changed(self, event: Input.Changed) -> None:
         """Show the command dropdown when the user starts typing a slash command."""
         value = event.value
+        inp = self.query_one("#prompt", PromptInput)
+        if self.config_picker.is_open and event.input is inp:
+            self.cmd_dropdown.hide()
+            self.config_picker.filter(value)
+            return
         if value.startswith("/") and " " not in value:
             self.cmd_dropdown.filter(value)
         else:
@@ -798,6 +984,21 @@ class RiftorApp(App):
 
     def on_key(self, event) -> None:
         inp = self.query_one("#prompt", PromptInput)
+
+        if self.config_picker.is_open and event.key in ("tab", "shift+tab"):
+            inp.focus()
+            event.prevent_default()
+            event.stop()
+            return
+
+        if (
+            self.config_picker.is_open
+            and inp.has_focus
+            and event.key in ("up", "down")
+        ):
+            self.config_picker.move(-1 if event.key == "up" else 1)
+            event.prevent_default()
+            return
 
         # Dropdown navigation — takes priority over history recall.
         if self.cmd_dropdown.visible and inp.has_focus:
@@ -908,7 +1109,6 @@ class RiftorApp(App):
             "/lessons": self._lessons_cmd,
             "/memory": lambda: self._memory_cmd(arg),
             "/template": lambda: self._template_cmd(arg),
-            "/clearlog": self._clearlog_cmd,
         }
 
     def _command(self, text: str) -> None:
@@ -1044,59 +1244,10 @@ class RiftorApp(App):
         self._apply_theme(name)
         self._note(f"theme → {name}")
 
-    @work(group="config")
-    async def _open_config(self) -> None:
-        from riftor.config import ProviderCreds  # local import: keep app import-time light
-
-        result = await self.push_screen_wait(ConfigScreen(self.config))
-        if not isinstance(result, dict):
-            self._note("config unchanged")
-            return
-        self.config.model = result["model"]
-        self.config.temperature = result["temperature"]
-        self.config.max_tokens = result["max_tokens"]
-        self.config.max_steps = result.get("max_steps", self.config.max_steps)
-        self.max_steps = self.config.max_steps
-        self.config.worker_model = result.get("worker_model", self.config.worker_model)
-        self.config.show_thinking = result.get("show_thinking", self.config.show_thinking)
-        self.config.show_tool_output = result.get("show_tool_output", self.config.show_tool_output)
-        self.config.browser_headless = result.get("browser_headless", self.config.browser_headless)
-        self.config.browser_persistent_profile = result.get(
-            "browser_persistent_profile", self.config.browser_persistent_profile)
-        self.config.reasoning_effort = result.get("reasoning_effort", self.config.reasoning_effort)
-
-        provider = result.get("provider")
-        if provider:
-            entry = self.config.providers.get(provider) or ProviderCreds()
-            if result.get("api_base") is not None:
-                entry.api_base = result["api_base"]
-            if result.get("api_key"):
-                entry.api_key = result["api_key"]
-            if entry.api_key or entry.api_base:
-                self.config.providers[provider] = entry
-
-        # Worker may use a different provider than the main model. Ensure that
-        # provider has resolvable creds WITHOUT corrupting the main provider's
-        # entry: never copy the shared (main) base here — use the worker
-        # provider's own default base. Reuse the shared key only if one was
-        # entered this session and the worker provider has no key yet.
-        from riftor.providers import PROVIDERS as _PROVIDERS  # local: keep import-time light
-        w_provider = result.get("worker_provider")
-        if w_provider and w_provider != provider:
-            w_entry = self.config.providers.get(w_provider) or ProviderCreds()
-            if not w_entry.api_key and result.get("api_key"):
-                w_entry.api_key = result["api_key"]
-            if not w_entry.api_base:
-                w_entry.api_base = _PROVIDERS[w_provider].default_base
-            if w_entry.api_key or w_entry.api_base:
-                self.config.providers[w_provider] = w_entry
-
-        self.provider = Provider(self.config)
-        self.status.set_model(self.config.model)
-        self.config.theme = result["theme"]
-        self._apply_theme(result["theme"])
-        self.config.save()
-        self._note("config saved")
+    def _open_config(self) -> None:
+        self.cmd_dropdown.hide()
+        prompt = self.query_one("#prompt", PromptInput)
+        self.config_picker.open(prompt)
 
     def _permissions_cmd(self, arg: str) -> None:
         parts = arg.split()
@@ -2033,6 +2184,10 @@ class RiftorApp(App):
         self.exit()
 
     def action_cancel(self) -> None:
+        if self.config_picker.is_open:
+            prompt = self.query_one("#prompt", PromptInput)
+            self.config_picker.back(prompt)
+            return
         self.workers.cancel_all()
         self._close_modals()
         self.status.set_busy(False)

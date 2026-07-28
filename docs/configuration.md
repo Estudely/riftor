@@ -2,11 +2,14 @@
 
 riftor reads `~/.config/riftor/config.toml` (or `$XDG_CONFIG_HOME/riftor/`). The
 file is created on first run and written with `0600` perms (it may hold an API
-key). Edit it directly, or use the in-app `/config` panel and `/model` / `/theme`
-commands — those persist your changes back to the file.
+key). Edit it directly, or use the in-app `/config` keyboard picker and
+`/model` / `/theme` commands — each valid change is applied and persisted
+immediately (there is no Save/Cancel).
 
 A malformed config never blocks startup: if the file can't be parsed, riftor
 falls back to detected defaults (it won't overwrite your file) and launches.
+
+Prefix a prompt with `!` to run a local shell command; stdout/stderr appear inline in the conversation (not sent to the model). There is no permanent shell pane.
 
 ## `[riftor]` fields
 
@@ -17,11 +20,11 @@ falls back to detected defaults (it won't overwrite your file) and launches.
 | `api_key` | string | — | Legacy global key. Prefer the provider's env var or a `[providers.<key>]` entry. |
 | `temperature` | float | `0.3` | Sampling temperature, `0.0`–`2.0`. Lower = more deterministic. |
 | `max_tokens` | int | `2048` | Max tokens per model response. |
-| `theme` | string | `rift` | Dark: `rift` `dusk` `void` `fracture` `singularity` · Light: `dawn` `paper`. Changing it in `/config` previews live. |
+| `theme` | string | `rift` | Dark: `rift` `dusk` `void` `fracture` `singularity` · Light: `dawn` `paper`. Changing it in `/config` applies live. |
 | `show_thinking` | bool | `true` | Show the model's reasoning as a dim block above each answer (and on stderr in `--headless`). |
-| `show_tool_output` | bool | `true` | Render tool-result blocks in the chat. When off, the `⛏` call line still shows and hidden output stays reachable via `/show <id>`. |
+| `show_tool_output` | bool | `true` | Render tool-result blocks in the chat. When off, the `⛏` call line still shows and hidden output stays reachable via `/show <id>`. Does **not** hide direct `!` shell output. |
 | `reasoning_effort` | string | `medium` | Thinking budget requested from the model: `none` `low` `medium` `high`. `none` (or `show_thinking = false`) sends no reasoning request. |
-| `max_steps` | int | `16` | Tool-call steps per task before pausing. `/continue [N]` raises the live session budget (and the barren-round ceiling) so recon isn't cut short every few rounds; the config file is unchanged until you Save in `/config`. Also caps each worker's step budget. In `--headless` / `--prompt`, exceeding this exits with code `4`. |
+| `max_steps` | int | `16` | Tool-call steps per task before pausing. `/continue [N]` raises the live session budget (and the barren-round ceiling) so recon isn't cut short every few rounds; changing Tool call steps in `/config` updates both the live session and the config file. Also caps each worker's step budget. In `--headless` / `--prompt`, exceeding this exits with code `4`. |
 | `max_result_chars` | int | `30000` | Cap on tool output fed back to the model. |
 | `result_preview_lines` | int | `25` | Lines of a tool result shown before `…/show <id>`. |
 | `rate_limit_per_min` | int | `0` | Cap model calls per minute (`0` = unlimited). |
@@ -300,25 +303,16 @@ operator hand-offs or a shared workdir copy — not a live multi-writer sync ser
 
 ## Providers & models
 
-Open `/config` to pick a provider and model. The **Provider** dropdown lists
+Open `/config` for a prompt-owned inline picker (type to filter, `↑`/`↓` to
+move, `Enter` to change a value, `Esc` to go back/close). Choosing **Main model**
+or **Worker model** first picks a provider, then a curated or custom model id —
+the change commits only when you confirm the final model. Live discovery merges
+provider `/models` (or Ollama `/api/tags`) with curated favourites; a fetch
+failure keeps the curated list and shows an inline status hint.
+
 Anthropic, OpenAI, OpenRouter, Gemini, Groq, DeepSeek, Mistral, Ollama, Codex
-(ChatGPT), and Custom. Picking one prefills the **Base URL** with that
-provider's default and
-fills the **Model** dropdown with curated suggestions. The **Custom id** field
-overrides the dropdown with any litellm model id you type; the **Custom** provider
-is for self-hosted / OpenAI-compatible servers.
-
-**Fetch models** pulls the live model list from the provider's endpoint and
-merges it with the curated favourites (favourites pinned first):
-
-- OpenAI-compatible providers (OpenAI, OpenRouter, Groq, DeepSeek, Mistral,
-  Custom) query `{base}/models`.
-- Ollama queries `{base}/api/tags`.
-- Anthropic and Gemini have no public list endpoint, so only curated suggestions
-  show.
-
-If a fetch fails (offline, bad key), riftor keeps the curated list and shows a
-hint in the panel title — it never blocks you.
+(ChatGPT), and Custom are supported. **Custom** is for self-hosted /
+OpenAI-compatible servers.
 
 ## API keys
 
@@ -369,10 +363,10 @@ never writes it except to persist a refreshed token.
 
 ### Selecting Codex in riftor
 
-**Via `/config`:** open `/config`, set **Provider** to **Codex (ChatGPT)**,
+**Via `/config`:** open `/config`, choose **Main model** → **Codex (ChatGPT)**,
 and pick a model such as `codex/gpt-5.5-codex`. No API key is required — a
-**Codex login** status line in the panel shows whether you are authenticated
-and roughly when the token expires.
+**Codex login** row shows whether you are authenticated and roughly when the
+token expires.
 
 **Via CLI flag:**
 

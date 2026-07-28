@@ -101,8 +101,8 @@ Screen {
     color: $error;
 }
 
-/* ───────────────────────── modals: permission + config ───────────────────── */
-ConfirmScreen, ConfigScreen {
+/* ───────────────────────── modals: permission confirm ───────────────────── */
+ConfirmScreen {
     align: center middle;
     background: $background 75%;
 }
@@ -117,7 +117,7 @@ ConfirmScreen, ConfigScreen {
     background: $panel;
     border: round $violet;
 }
-/* title bar — own background + divider, matching the config modal's title bar.
+/* title bar — own background + divider.
    (The glyph text colour comes from the inline Rich style in permissions.py;
    this rule controls the bar background, divider, and bold weight.) */
 #confirm-title {
@@ -128,125 +128,6 @@ ConfirmScreen, ConfigScreen {
     background: $surface;
     border-bottom: solid $border;
     text-style: bold;
-}
-
-/* --- config modal: bars + sidebar; no card padding so bars span edge-to-edge --- */
-/* Fixed height 30 (the densest section, Model, needs ~30 rows) with the content
-   pane scrolling inside (see #config-pane). This gives the modal a CONSISTENT
-   size across sections and keeps the title/footer bars pinned. max-height 100%
-   shrinks the box to fit terminals under 30 rows (the pane scrolls), so the
-   footer is never pushed off-screen even on short terminals. */
-#config-box {
-    layout: vertical;
-    width: 80;
-    max-width: 92%;
-    height: 30;
-    max-height: 100%;
-    padding: 0;
-    background: $panel;
-    border: round $violet;
-}
-/* title BAR — own background, spans the card, divider underneath */
-#config-title {
-    width: 1fr;
-    height: 3;
-    padding: 1 2 0 2;
-    background: $surface;
-    border-bottom: solid $border;
-    color: $foreground;
-    text-style: bold;
-}
-
-/* — config sidebar: nav column + content pane — */
-/* The middle band flexes (1fr) to fill the fixed-height box between the title
-   and footer bars. Nav and pane both 1fr, so they share the same height and
-   the divider (border-left on the pane) spans the full band. */
-#config-main {
-    height: 1fr;
-    layout: horizontal;
-}
-
-/* left nav — slightly-off background column */
-#config-nav {
-    width: 20;
-    height: 1fr;
-    background: $surface;
-    padding: 1 0;
-}
-#config-nav > ListItem {
-    padding: 0 2;
-    color: $muted;
-}
-#config-nav > ListItem.--highlight {
-    background: $violet 25%;
-    color: $foreground;
-    border-left: thick $violet;
-}
-
-/* right content pane — scrolls when a section is taller than the band (so the
-   pinned footer stays visible); its left border is the nav/content divider. */
-#config-pane {
-    width: 1fr;
-    height: 1fr;
-    padding: 1 2;
-    border-left: solid $border;
-    overflow-y: auto;
-    scrollbar-color: $border;
-}
-
-/* only the active section panel is shown */
-.config-section-panel {
-    height: auto;
-}
-.config-section-panel.hidden {
-    display: none;
-}
-.field-row.hidden {
-    display: none;
-}
-
-.config-section {
-    width: 1fr;
-    color: $cyan;
-    text-style: bold;
-    margin: 0 0 1 0;
-}
-
-.field-row {
-    height: 3;
-    align: left middle;
-    margin-bottom: 0;
-}
-
-.field-label {
-    width: 14;
-    height: 3;
-    color: $muted;
-    content-align: left middle;
-}
-
-.field-row Input,
-.field-row Select {
-    width: 1fr;
-}
-
-/* A Select's natural height is 5 (it reserves space for its overlay); without
-   pinning it to 3 it overflows the 3-tall row and overlaps the next field.
-   Pinning matches the Inputs (whose natural height is already 3). */
-.field-row Select {
-    height: 3;
-}
-
-.field-row Switch {
-    height: 3;
-}
-
-/* focus glow on the active field. Uses `outline` (not `border`): outline
-   draws over the widget edge without consuming an inner row, so focusing a
-   field does NOT change its height and cannot shove neighbors around. */
-.field-row Input:focus,
-.field-row Select:focus {
-    outline: round $violet;
 }
 
 /* — confirm modal detail/diff — */
@@ -271,14 +152,14 @@ ConfirmScreen, ConfigScreen {
     scrollbar-color: $border;
 }
 
-/* — confirm footer: slim centered actions, matching the config footer — */
+/* — confirm footer: slim centered actions — */
 #confirm-buttons {
     height: auto;
     align: center middle;
     padding-top: 1;
 }
-/* flat height-1 "text" buttons (no chunky bordered blocks), like the config
-   footer. The five decision keys keep their bindings; #once (Allow once, the
+/* flat height-1 "text" buttons (no chunky bordered blocks).
+   The five decision keys keep their bindings; #once (Allow once, the
    auto-focused safe default) is the filled primary. */
 #confirm-buttons Button {
     height: 1;
@@ -298,40 +179,93 @@ ConfirmScreen, ConfigScreen {
     text-style: bold reverse;
 }
 
-/* — config footer BAR: slim, right-aligned actions — */
-/* The buttons are flat height-1 "text" buttons (border: none), not the default
-   3-tall bordered blocks: a tall footer looked heavy/ugly and the border-top
-   clipped 3-tall buttons. height:3 bar = 1 divider row + 1 button row + 1 of
-   breathing room. */
-#config-buttons {
-    height: 3;
-    align: right middle;
-    background: $surface;
-    border-top: solid $border;
-    padding: 0 2;
-}
-#config-buttons Button {
-    height: 1;
-    min-height: 1;
-    min-width: 10;
-    border: none;
-    margin: 0 0 0 2;
-}
-/* filled primary Save; muted text Cancel */
-#config-buttons #save {
-    background: $violet;
-    color: $background;
-    text-style: bold;
-}
-#config-buttons #cancel {
-    background: $surface;
-    color: $muted;
-}
-
 StatusBar {
     height: 1;
     background: $panel;
     padding: 0 2;
+}
+
+/* ───────────────────── prompt-owned config picker ─────────────────── */
+#config-picker {
+    display: none;
+    height: auto;
+    max-height: 12;
+    margin: 0 1;
+    background: $panel;
+    color: $foreground;
+}
+
+#config-picker.active {
+    display: block;
+}
+
+#config-picker-list {
+    height: auto;
+    max-height: 10;
+    padding: 0 1;
+    background: $panel;
+    scrollbar-color: $border;
+    scrollbar-color-hover: $violet;
+}
+
+#config-picker .picker-hidden {
+    display: none;
+}
+
+.config-setting-group {
+    height: 1;
+    padding: 0 1;
+    color: $violet;
+    text-style: bold;
+}
+
+.config-setting-row,
+.config-choice-row {
+    height: 1;
+    padding: 0 2;
+    color: $muted;
+}
+
+.config-setting-row.highlighted,
+.config-choice-row.highlighted {
+    border-left: thick $violet;
+    background: $violet 25%;
+    color: $foreground;
+}
+
+#config-picker-child-title {
+    height: 1;
+    padding: 0 1;
+    color: $violet;
+    text-style: bold;
+}
+
+#config-picker-editor-note {
+    height: 1;
+    padding: 0 2;
+    color: $muted;
+}
+
+#config-picker-status {
+    height: 1;
+    padding: 0 2;
+    background: $surface;
+    color: $muted;
+}
+
+#config-picker-status.config-status-success {
+    color: $cyan;
+}
+
+#config-picker-status.config-status-error {
+    color: $danger;
+}
+
+#config-picker-hint {
+    height: 1;
+    padding: 0 2;
+    background: $surface;
+    color: $dim;
 }
 
 #prompt {
@@ -382,20 +316,21 @@ StatusBar {
     border-left: thick $violet;
 }
 
-#shell-pane {
-    height: auto;
-    max-height: 14;
-    margin: 0 1 0 1;
-    border-top: solid $border;
+/* Direct `!` shell shortcut — contextual blocks in #chat (no permanent pane). */
+.shell-cmd {
+    margin: 1 2 0 2;
+    color: $violet;
 }
 
-#shell-log {
-    height: auto;
-    max-height: 10;
-    background: $surface;
+.shell-output {
+    margin: 0 2 0 2;
     color: $foreground;
-    padding: 0 2;
-    scrollbar-color: $border;
+    text-style: dim;
+}
+
+.shell-output.error {
+    color: $danger;
+    text-style: none;
 }
 
 /* ─────────────────────── screenshot gallery ────────────────────────── */

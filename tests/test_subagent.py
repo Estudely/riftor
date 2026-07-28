@@ -261,8 +261,8 @@ def test_statusbar_has_worker_usage_setter():
     assert bar.worker_cost == 0.012
 
 
-def test_config_screen_result_keys_persist():
-    # Simulate the dict ConfigScreen.dismiss returns, then apply it like _open_config.
+def test_worker_provider_creds_persist_for_shared_provider():
+    # Persist worker model + main provider creds the way the inline picker does.
     from riftor.config import ProviderCreds
     cfg = Config(onboarded=True)
     result = {
@@ -271,7 +271,7 @@ def test_config_screen_result_keys_persist():
         "worker_model": "anthropic/claude-haiku-4-5-20251001",
         "worker_provider": "anthropic", "api_key": "sk-anth",
     }
-    # Mirror _open_config: persist worker model + main provider creds.
+    # Mirror picker persistence: worker model + main provider creds.
     cfg.worker_model = result.get("worker_model", cfg.worker_model)
     provider = result.get("provider")
     if provider:
