@@ -14,27 +14,32 @@ from riftor.tui.app import RiftorApp
 from riftor.tui.widgets import CommandDropdown, StatusBar
 
 
-def _make_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> RiftorApp:
+def _make_app(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    config: Config | None = None,
+) -> RiftorApp:
     config_dir = tmp_path / "config"
     monkeypatch.setattr(cfgmod, "CONFIG_DIR", config_dir)
     monkeypatch.setattr(cfgmod, "CONFIG_PATH", config_dir / "config.toml")
     monkeypatch.setattr(cfgmod, "PERMISSIONS_PATH", config_dir / "permissions.toml")
     monkeypatch.setattr(cfgmod, "KEYBINDINGS_PATH", config_dir / "keybindings.toml")
-    config = Config(
-        onboarded=True,
-        model="openai/gpt-5.5",
-        temperature=0.7,
-        max_tokens=4096,
-        max_steps=24,
-        worker_model="anthropic/claude-sonnet-4-6",
-        worker_max_parallel=3,
-        worker_timeout_s=180,
-        theme="paper",
-        show_thinking=False,
-        show_tool_output=True,
-        browser_headless=False,
-        browser_persistent_profile=True,
-    )
+    if config is None:
+        config = Config(
+            onboarded=True,
+            model="openai/gpt-5.5",
+            temperature=0.7,
+            max_tokens=4096,
+            max_steps=24,
+            worker_model="anthropic/claude-sonnet-4-6",
+            worker_max_parallel=3,
+            worker_timeout_s=180,
+            theme="paper",
+            show_thinking=False,
+            show_tool_output=True,
+            browser_headless=False,
+            browser_persistent_profile=True,
+        )
     return RiftorApp(config, workdir=tmp_path)
 
 
@@ -54,6 +59,10 @@ async def _open_picker(app: RiftorApp, pilot) -> Widget:
 def _widget_text(widget: Widget) -> str:
     nodes = ([widget] if isinstance(widget, Static) else []) + list(widget.query(Static))
     return " ".join(str(node.content) for node in nodes)
+
+
+def _rendered_text(widget: Widget) -> str:
+    return str(widget.render())
 
 
 def _visible_setting_rows(picker: Widget) -> list[Widget]:
@@ -127,6 +136,63 @@ async def test_root_renders_grouped_settings_with_current_values(
 
 
 @pytest.mark.asyncio
+async def test_root_exposes_only_interactive_settings_not_advanced_toml_fields(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = _make_app(tmp_path, monkeypatch)
+    async with app.run_test() as pilot:
+        picker = await _open_picker(app, pilot)
+
+        expected_labels = (
+            "Provider",
+            "Model",
+            "API key",
+            "Base URL",
+            "Temperature",
+            "Max tokens",
+            "Tool call steps",
+            "Reasoning effort",
+            "Worker model",
+            "Theme",
+            "Show thinking",
+            "Show tool output",
+            "Browser headless",
+            "Persistent profile",
+        )
+        row_text = [_rendered_text(row).lstrip() for row in _visible_setting_rows(picker)]
+
+        assert len(row_text) == len(expected_labels)
+        for label, rendered in zip(expected_labels, row_text, strict=True):
+            assert rendered.startswith(label), row_text
+        assert not any(
+            rendered.startswith(("Max parallel", "Timeout"))
+            for rendered in row_text
+        )
+
+
+@pytest.mark.asyncio
+async def test_markup_like_custom_model_id_renders_literally(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    custom_model = "custom/[bold]literal-model[/bold]"
+    app = _make_app(
+        tmp_path,
+        monkeypatch,
+        Config(onboarded=True, model=custom_model),
+    )
+    async with app.run_test() as pilot:
+        picker = await _open_picker(app, pilot)
+        rows = _visible_setting_rows(picker)
+        model_rows = [
+            row for row in rows if _rendered_text(row).lstrip().startswith("Model")
+        ]
+
+        assert app.query_one("#prompt", Input).has_focus
+        assert len(model_rows) == 1
+        assert custom_model in _rendered_text(model_rows[0])
+
+
+@pytest.mark.asyncio
 async def test_typing_filters_setting_rows_and_never_opens_command_autocomplete(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -149,6 +215,27 @@ async def test_typing_filters_setting_rows_and_never_opens_command_autocomplete(
         await pilot.pause()
         assert prompt.value == "/"
         assert not app.query_one("#cmd-dropdown", CommandDropdown).visible
+
+
+@pytest.mark.asyncio
+async def test_tab_keeps_prompt_focus_and_picker_filtering_active(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = _make_app(tmp_path, monkeypatch)
+    async with app.run_test() as pilot:
+        picker = await _open_picker(app, pilot)
+        prompt = app.query_one("#prompt", Input)
+
+        await pilot.press("tab")
+        await pilot.pause()
+        assert prompt.has_focus
+
+        await _type_text(pilot, "theme")
+        await pilot.pause()
+        visible_rows = _visible_setting_rows(picker)
+        assert prompt.value == "theme"
+        assert len(visible_rows) == 1
+        assert "Theme" in _widget_text(visible_rows[0])
 
 
 @pytest.mark.asyncio
