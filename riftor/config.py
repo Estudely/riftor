@@ -177,6 +177,22 @@ class Config(BaseModel):
                 api_key = os.environ.get(env)
         return api_key, api_base
 
+    def owned_key_for_provider(self, provider_key: str) -> str | None:
+        """Return a key that belongs to ``provider_key`` alone.
+
+        Looks at the per-provider table entry and that provider's environment
+        variable. Does **not** fall back to the legacy root ``api_key`` — that
+        shared field must not look like provider-owned credentials when the
+        picker bootstraps a different provider (e.g. worker Groq).
+        """
+        entry = self.providers.get(provider_key)
+        if entry and entry.api_key:
+            return entry.api_key
+        meta = PROVIDERS.get(provider_key)
+        if meta is not None and meta.env:
+            return os.environ.get(meta.env)
+        return None
+
     @classmethod
     def load(cls) -> "Config":
         if CONFIG_PATH.exists():

@@ -854,10 +854,25 @@ class ConfigPicker(Vertical):
         *,
         worker: bool,
     ) -> tuple[str | None, str | None]:
+        """Resolve fetch credentials for one provider's model list.
+
+        Per-provider saved values and that provider's env key win. Legacy root
+        ``api_base`` / ``api_key`` apply only when discovering the *current*
+        main-model provider — never when browsing a different provider.
+        Workers may fall back to the main model's key when the selected
+        provider has no owned credential.
+        """
         meta = PROVIDERS[provider_key]
-        probe = apply_prefix(provider_key, "__model_discovery__")
-        api_key, api_base = self.config.creds_for(probe)
-        if worker and provider_key != "codex" and not api_key:
+        saved = self.config.providers.get(provider_key)
+        api_key = self.config.owned_key_for_provider(provider_key)
+        api_base = saved.api_base if saved else None
+        same_as_main = provider_key == provider_key_for_model(self.config.model)
+        if same_as_main:
+            if not api_base:
+                api_base = self.config.api_base
+            if not api_key:
+                api_key = self.config.api_key
+        elif worker and provider_key != "codex" and not api_key:
             api_key, _ = self.config.creds_for(self.config.model)
         return api_base or meta.default_base, api_key
 

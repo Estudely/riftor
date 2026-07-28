@@ -34,7 +34,7 @@ from riftor.agent.provider import Provider, ProviderError, ToolCall, Turn, Usage
 from riftor import config as configmod
 from riftor.engagement import Engagement
 from riftor.engagement.report import write_reports
-from riftor.providers import PROVIDERS, apply_prefix, provider_key_for_model
+from riftor.providers import PROVIDERS, provider_key_for_model
 from riftor.safety.audit import AuditLog
 from riftor.safety.permissions import ConfirmScreen, Permissions
 from riftor.tools import ToolContext, ToolResult
@@ -883,9 +883,7 @@ class RiftorApp(App):
                     existing.api_key or existing.api_base
                 ):
                     main_key, _ = self.config.creds_for(self.config.model)
-                    selected_key, _ = self.config.creds_for(
-                        apply_prefix(provider_key, "__worker_credentials__")
-                    )
+                    selected_key = self.config.owned_key_for_provider(provider_key)
                     default_base = PROVIDERS[provider_key].default_base
                     if main_key or default_base:
                         self.config.providers[provider_key] = (
@@ -908,6 +906,9 @@ class RiftorApp(App):
                 self.config.api_key = None
             elif value:
                 entry.api_key = str(value)
+                # Move the secret into the provider table; do not leave a stale
+                # root key that would look like every other provider's credential.
+                self.config.api_key = None
             # A blank replacement intentionally leaves every stored key unchanged.
         else:
             entry.api_base = str(value) or None
