@@ -144,7 +144,7 @@ async def test_typing_filters_setting_rows_and_never_opens_command_autocomplete(
         assert "Theme" in _widget_text(visible_rows[0])
         assert not app.query_one("#cmd-dropdown", CommandDropdown).visible
 
-        await pilot.press("ctrl+a")
+        await pilot.press("ctrl+shift+a")
         await _type_text(pilot, "/")
         await pilot.pause()
         assert prompt.value == "/"
@@ -255,7 +255,7 @@ async def test_editor_and_close_restore_prompt_password_history_and_slash_behavi
         await pilot.pause()
         assert prompt.value == "remember me"
 
-        await pilot.press("ctrl+a", "backspace")
+        await pilot.press("ctrl+shift+a", "backspace")
         await _type_text(pilot, "/he")
         await pilot.pause()
         assert app.query_one("#cmd-dropdown", CommandDropdown).visible
