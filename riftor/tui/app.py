@@ -814,6 +814,12 @@ class RiftorApp(App):
     def on_key(self, event) -> None:
         inp = self.query_one("#prompt", PromptInput)
 
+        if self.config_picker.is_open and event.key in ("tab", "shift+tab"):
+            inp.focus()
+            event.prevent_default()
+            event.stop()
+            return
+
         if (
             self.config_picker.is_open
             and inp.has_focus

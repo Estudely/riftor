@@ -63,13 +63,17 @@ class _PromptState:
 class _SettingGroup(Static):
     def __init__(self, name: str) -> None:
         self.group_name = name
-        super().__init__(name, classes="config-setting-group")
+        super().__init__(name, markup=False, classes="config-setting-group")
 
 
 class _SettingRow(Static):
     def __init__(self, setting: ConfigSetting) -> None:
         self.setting = setting
-        super().__init__(self._content(setting), classes="config-setting-row")
+        super().__init__(
+            self._content(setting),
+            markup=False,
+            classes="config-setting-row",
+        )
 
     @staticmethod
     def _content(setting: ConfigSetting) -> str:
@@ -86,6 +90,7 @@ class _ChoiceRow(Static):
         self.choice = choice
         super().__init__(
             choice.label,
+            markup=False,
             classes="config-choice-row picker-hidden",
         )
 
@@ -187,20 +192,6 @@ def _settings_for(config: "Config") -> tuple[ConfigSetting, ...]:
             editor_value=config.worker_model,
         ),
         ConfigSetting(
-            "WORKERS",
-            "worker_max_parallel",
-            "Max parallel",
-            str(config.worker_max_parallel),
-            editor_value=str(config.worker_max_parallel),
-        ),
-        ConfigSetting(
-            "WORKERS",
-            "worker_timeout_s",
-            "Timeout",
-            f"{config.worker_timeout_s}s",
-            editor_value=str(config.worker_timeout_s),
-        ),
-        ConfigSetting(
             "APPEARANCE",
             "theme",
             "Theme",
@@ -275,11 +266,13 @@ class ConfigPicker(Vertical):
         }
         self._child_title = Static(
             "",
+            markup=False,
             id="config-picker-child-title",
             classes="picker-hidden",
         )
         self._editor_note = Static(
             "Type the new value in the prompt.",
+            markup=False,
             id="config-picker-editor-note",
             classes="picker-hidden",
         )
@@ -297,6 +290,7 @@ class ConfigPicker(Vertical):
                 yield from self._choice_rows.get(setting.key, ())
         yield Static(
             "↑/↓ move · Enter activate · Esc back/close",
+            markup=False,
             id="config-picker-hint",
         )
 
