@@ -22,7 +22,7 @@ class ProviderMeta:
     default_base: str | None
 
 
-# Order here = dropdown order in /config.
+# Order here = provider list order in /config.
 PROVIDERS: dict[str, ProviderMeta] = {
     "anthropic": ProviderMeta("anthropic", "Anthropic", "anthropic/", "ANTHROPIC_API_KEY",
                               "none", None),

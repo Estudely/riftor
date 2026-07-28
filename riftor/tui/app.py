@@ -245,7 +245,7 @@ _PALETTE_COMMANDS = [
     ("/hypotheses", "Hypotheses", "List attack hypotheses"),
     ("/lessons", "Lessons", "List durable cross-session lessons"),
     ("/lesson", "Add lesson", "Save a durable lesson"),
-    ("/config", "Config", "Open the settings panel"),
+    ("/config", "Config", "Open the inline settings picker"),
     ("/new", "New session", "Start a fresh conversation"),
     ("/clear", "Clear", "Clear the conversation"),
     ("/screenshots", "Screenshots", "Browse, view, and delete screenshots"),
