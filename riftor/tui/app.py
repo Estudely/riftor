@@ -24,7 +24,7 @@ from textual.command import Hit, Hits
 from textual.command import Provider as CommandProvider
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Collapsible, Input, Markdown, RichLog, Static
+from textual.widgets import Button, Input, Markdown, Static
 
 from riftor import tools
 from riftor.agent import antiloop, circuit
@@ -154,7 +154,7 @@ class PromptInput(Input):
 
 # Commands offered for fuzzy "did you mean" suggestions.
 _COMMANDS = [
-    "/audit", "/branch", "/browser", "/clear", "/clearlog", "/compact",
+    "/audit", "/branch", "/browser", "/clear", "/compact",
     "/config", "/continue", "/conversation", "/copy", "/cost", "/delete-finding",
     "/doctor", "/edit-finding", "/exit", "/export", "/finding", "/findings",
     "/graph", "/help", "/hosts", "/hypotheses", "/lesson", "/lessons",
@@ -203,7 +203,7 @@ _Skills_
 _Settings & sessions_
 - `/model [name]` — show or switch the model · `/theme [name]` (rift/dusk/void/fracture/singularity/dawn/paper)
 - `/config` — settings panel · `/permissions` — review allow/deny rules
-- `/audit` — recent tool-call audit log · `/clearlog` — clear the shell output pane
+- `/audit` — recent tool-call audit log
 - `/doctor` — check which external recon tools (nmap/httpx/…) are installed
 - `/browser [headed|headless|close]` — browser mode / teardown · `/screenshots` — view captures
 - `/review` — self-critique findings for false positives before reporting
@@ -243,7 +243,6 @@ _PALETTE_COMMANDS = [
     ("/hypotheses", "Hypotheses", "List attack hypotheses"),
     ("/lessons", "Lessons", "List durable cross-session lessons"),
     ("/lesson", "Add lesson", "Save a durable lesson"),
-    ("/clearlog", "Clear shell log", "Clear the shell output pane"),
     ("/config", "Config", "Open the settings panel"),
     ("/new", "New session", "Start a fresh conversation"),
     ("/clear", "Clear", "Clear the conversation"),
@@ -394,7 +393,6 @@ class RiftorApp(App):
         # input history + last-output tracking + rate limiting
         self._history: list[str] = []
         self._history_idx: int | None = None
-        self._shell_history: list[str] = []
         self._tool_results: dict[int, str] = {}
         self._last_output: str = ""
         self._last_user_text: str | None = None
@@ -422,12 +420,6 @@ class RiftorApp(App):
         with Horizontal(id="main-row"):
             yield EngagementSidebar(id="sidebar")
             yield VerticalScroll(id="chat")
-        yield Collapsible(
-            RichLog(id="shell-log", highlight=True, markup=False),
-            id="shell-pane",
-            title="Shell output",
-            collapsed=True,
-        )
         yield StatusBar(self.config.model, yolo=self.yolo)
         yield CommandDropdown(_COMMANDS, id="cmd-dropdown")
         yield ConfigPicker(self.config, id="config-picker")
@@ -718,41 +710,56 @@ class RiftorApp(App):
             return
 
         p = self._pal()
-        shell_log = self.query_one("#shell-log", RichLog)
-        shell_pane = self.query_one("#shell-pane", Collapsible)
-
-        shell_log.write(Text(f"$ {command}", style=f"bold {p['violet']}"))
-
         try:
             result = await run_shell(command, str(self.workdir), timeout=120)
         except Exception as exc:
-            shell_log.write(Text(f"[error: {exc}]", style=f"bold {p['danger']}"))
-            self.audit.record("shell_error", command, allowed=False, is_error=True)
-        else:
-            self._shell_history.append(command)
-            self.audit.record("shell_cmd", command, allowed=True)
-            if result.stderr:
-                shell_log.write(Text(result.stderr, style=p['danger']))
-            if result.stdout:
-                shell_log.write(Text(result.stdout))
-            if result.exit_code != 0:
-                shell_log.write(
-                    Text(f"[exit {result.exit_code}]", style=f"bold {p['magenta']}")
+            await self._mount(
+                Static(
+                    Text(f"$ {command} · error", style=f"bold {p['danger']}"),
+                    classes="shell-cmd",
+                    markup=False,
                 )
+            )
+            await self._mount(
+                Static(
+                    Text(str(exc), style=f"bold {p['danger']}"),
+                    classes="shell-output error",
+                    markup=False,
+                )
+            )
+            self.audit.record("shell_error", command, allowed=False, is_error=True)
+            return
 
-        shell_log.write("")
-
-        shell_pane.title = f"Shell output — {len(self._shell_history)} commands"
-        shell_pane.collapsed = False
-
-    def _clearlog_cmd(self) -> None:
-        """Clear the shell output log and collapse the pane."""
-        shell_log = self.query_one("#shell-log", RichLog)
-        shell_pane = self.query_one("#shell-pane", Collapsible)
-        shell_log.clear()
-        shell_pane.title = "Shell output"
-        shell_pane.collapsed = True
-        self._shell_history.clear()
+        self.audit.record("shell_cmd", command, allowed=True)
+        header_style = (
+            f"bold {p['magenta']}" if result.exit_code != 0 else f"bold {p['violet']}"
+        )
+        await self._mount(
+            Static(
+                Text(
+                    f"$ {command} · exit {result.exit_code}",
+                    style=header_style,
+                ),
+                classes="shell-cmd",
+                markup=False,
+            )
+        )
+        if result.stderr.strip():
+            await self._mount(
+                Static(
+                    Text(result.stderr.rstrip("\n"), style=p["danger"]),
+                    classes="shell-output error",
+                    markup=False,
+                )
+            )
+        if result.stdout.strip():
+            await self._mount(
+                Static(
+                    Text(result.stdout.rstrip("\n")),
+                    classes="shell-output",
+                    markup=False,
+                )
+            )
 
     async def _mount(self, widget) -> None:
         await self.chat.mount(widget)
@@ -1100,7 +1107,6 @@ class RiftorApp(App):
             "/lessons": self._lessons_cmd,
             "/memory": lambda: self._memory_cmd(arg),
             "/template": lambda: self._template_cmd(arg),
-            "/clearlog": self._clearlog_cmd,
         }
 
     def _command(self, text: str) -> None:

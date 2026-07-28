@@ -67,6 +67,11 @@ async def _wait_until(pilot, condition: Callable[[], bool]) -> None:
     assert condition()
 
 
+def _no_shell_pane(app: RiftorApp) -> None:
+    assert list(app.query("#shell-pane")) == []
+    assert list(app.query("#shell-log")) == []
+
+
 @pytest.mark.asyncio
 async def test_idle_app_has_no_permanent_shell_pane(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -74,8 +79,7 @@ async def test_idle_app_has_no_permanent_shell_pane(
     app = _make_app(tmp_path, monkeypatch)
     async with app.run_test() as pilot:
         await pilot.pause()
-        assert app.query("#shell-pane") == []
-        assert app.query("#shell-log") == []
+        _no_shell_pane(app)
         assert not hasattr(app, "_shell_history")
 
 
@@ -97,7 +101,7 @@ async def test_bang_stdout_renders_inline_header_and_output(
         ), headers
         outputs = _chat_class_texts(app, "shell-output")
         assert any("hello-inline-shell" in text for text in outputs), outputs
-        assert app.query("#shell-pane") == []
+        _no_shell_pane(app)
         # Direct shell output must not enter the model conversation.
         assert all(
             "hello-inline-shell" not in str(message.get("content", ""))
@@ -174,14 +178,13 @@ async def test_clearlog_command_is_removed(
     assert "/clearlog" not in _COMMANDS
     assert all(cmd != "/clearlog" for cmd, _title, _help in _PALETTE_COMMANDS)
     assert "/clearlog" not in HELP
+    assert "/clearlog" not in RiftorApp._command_handlers(app, "")
 
     async with app.run_test() as pilot:
-        await pilot.press("ctrl+shift+a", "backspace")
-        for character in "/clearlog":
-            await pilot.press(character)
-        await pilot.press("enter")
+        await pilot.pause()
+        app._command("/clearlog")
         await pilot.pause()
 
         note = _chat_text(app).casefold()
-        assert "unknown" in note or "did you mean" in note or "clearlog" in note
-        assert app.query("#shell-pane") == []
+        assert "unknown command: /clearlog" in note
+        _no_shell_pane(app)

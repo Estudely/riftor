@@ -465,20 +465,21 @@ StatusBar {
     border-left: thick $violet;
 }
 
-#shell-pane {
-    height: auto;
-    max-height: 14;
-    margin: 0 1 0 1;
-    border-top: solid $border;
+/* Direct `!` shell shortcut — contextual blocks in #chat (no permanent pane). */
+.shell-cmd {
+    margin: 1 2 0 2;
+    color: $violet;
 }
 
-#shell-log {
-    height: auto;
-    max-height: 10;
-    background: $surface;
+.shell-output {
+    margin: 0 2 0 2;
     color: $foreground;
-    padding: 0 2;
-    scrollbar-color: $border;
+    text-style: dim;
+}
+
+.shell-output.error {
+    color: $danger;
+    text-style: none;
 }
 
 /* ─────────────────────── screenshot gallery ────────────────────────── */
