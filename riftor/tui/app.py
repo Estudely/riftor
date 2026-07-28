@@ -153,14 +153,14 @@ class PromptInput(Input):
 
 # Commands offered for fuzzy "did you mean" suggestions.
 _COMMANDS = [
-    "/help", "/clear", "/model", "/scope", "/findings", "/finding",
-    "/edit-finding", "/delete-finding", "/hosts", "/services", "/report",
-    "/sessions", "/resume", "/new", "/branch", "/rollback", "/theme", "/config", "/tools", "/skills",
-    "/permissions", "/cost", "/retry", "/continue",
-    "/compact", "/copy", "/show", "/timeline", "/audit", "/export", "/conversation",
-    "/doctor", "/review", "/hypotheses", "/lesson", "/lessons", "/memory", "/template",
-    "/methodology", "/workers",
-    "/browser", "/screenshots", "/graph", "/merge", "/clearlog", "/exit", "/quit",
+    "/audit", "/branch", "/browser", "/clear", "/clearlog", "/compact",
+    "/config", "/continue", "/conversation", "/copy", "/cost", "/delete-finding",
+    "/doctor", "/edit-finding", "/exit", "/export", "/finding", "/findings",
+    "/graph", "/help", "/hosts", "/hypotheses", "/lesson", "/lessons",
+    "/memory", "/merge", "/methodology", "/model", "/new", "/permissions",
+    "/quit", "/report", "/resume", "/retry", "/review", "/rollback",
+    "/scope", "/screenshots", "/services", "/sessions", "/show", "/skills",
+    "/template", "/theme", "/timeline", "/tools", "/workers",
 ]
 
 HELP = """\
