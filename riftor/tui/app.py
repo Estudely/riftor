@@ -202,7 +202,7 @@ _Skills_
 
 _Settings & sessions_
 - `/model [name]` — show or switch the model · `/theme [name]` (rift/dusk/void/fracture/singularity/dawn/paper)
-- `/config` — settings panel · `/permissions` — review allow/deny rules
+- `/config` — open the inline settings picker · `/permissions` — review allow/deny rules
 - `/audit` — recent tool-call audit log
 - `/doctor` — check which external recon tools (nmap/httpx/…) are installed
 - `/browser [headed|headless|close]` — browser mode / teardown · `/screenshots` — view captures
@@ -213,8 +213,10 @@ _Settings & sessions_
 - `/rollback <n>` — keep only the first *n* messages · `/rollback last [k]` — drop the last *k* user turns (default 1)
 - `/tools` — list available agent tools · `/exit` · `/quit` — quit (`Ctrl+C`)
 
-Type anything else to task the agent. `↑/↓` recall input · `PgUp/PgDn` scroll ·
-`Esc` cancels a running response. Drag to select text, `Ctrl+Y` copies it.
+Type anything else to task the agent. Prefix with `!` to run a shell command
+(output appears inline in chat; it is not sent to the model). `↑/↓` recall input ·
+`PgUp/PgDn` scroll · `Esc` cancels a running response. Drag to select text,
+`Ctrl+Y` copies it.
 """
 
 
