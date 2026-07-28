@@ -396,7 +396,9 @@ class ConfigPicker(Vertical):
     def complete_activation(self, prompt: Input, message: str) -> None:
         """Refresh values and return to root after the app persisted a value."""
         self.refresh_values()
-        self._show_root(prompt, self._root_query)
+        # Clear any pre-drill filter so the full updated root list is visible
+        # (e.g. Base URL after replacing an API key opened via "API credentials").
+        self._show_root(prompt, "")
         self._status.update(message)
         self._status.remove_class("config-status-error")
         self._status.add_class("config-status-success")
@@ -853,22 +855,10 @@ class ConfigPicker(Vertical):
         worker: bool,
     ) -> tuple[str | None, str | None]:
         meta = PROVIDERS[provider_key]
-        saved = self.config.providers.get(provider_key)
-        if worker:
-            if provider_key == "codex":
-                return None, None
-            main_key, main_base = self.config.creds_for(self.config.model)
-            api_key = (saved.api_key if saved else None) or main_key
-            same_as_main = provider_key == provider_key_for_model(self.config.model)
-            api_base = (saved.api_base if saved else None) or (
-                main_base if same_as_main else None
-            ) or meta.default_base
-            return api_base, api_key
-
-        probe = f"{meta.prefix}__model_discovery__" if meta.prefix else self.config.model
-        api_key, resolved_base = self.config.creds_for(probe)
-        current_provider = provider_key_for_model(self.config.model)
-        api_base = resolved_base if provider_key == current_provider else None
+        probe = apply_prefix(provider_key, "__model_discovery__")
+        api_key, api_base = self.config.creds_for(probe)
+        if worker and provider_key != "codex" and not api_key:
+            api_key, _ = self.config.creds_for(self.config.model)
         return api_base or meta.default_base, api_key
 
     @work(thread=True, exclusive=False, group="config-model-fetch")

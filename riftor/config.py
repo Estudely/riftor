@@ -157,9 +157,9 @@ class Config(BaseModel):
     def creds_for(self, model: str) -> tuple[str | None, str | None]:
         """Resolve (api_key, api_base) for ``model``.
 
-        Precedence: per-provider table → legacy global fields → env var (key
-        only) → (None, None). Model-keyed so a future multi-model feature can
-        resolve each model's creds without touching this layer.
+        Each field resolves independently: per-provider value → legacy global
+        value → environment (key only). Model-keyed so a future multi-model
+        feature can resolve each model's creds without touching this layer.
         """
         if model.startswith("codex/"):
             # Codex auth lives in ~/.codex/auth.json, read by the litellm handler.
@@ -169,14 +169,13 @@ class Config(BaseModel):
         # layer (it prefixes/stores under the chosen provider); see Task 6/7.
         key_name = provider_key_for_model(model)
         entry = self.providers.get(key_name)
-        if entry and (entry.api_key or entry.api_base):
-            return entry.api_key, entry.api_base
-        if self.api_key or self.api_base:
-            return self.api_key, self.api_base
-        env = self.provider_env(model)
-        if env and os.environ.get(env):
-            return os.environ[env], None
-        return None, None
+        api_key = (entry.api_key if entry else None) or self.api_key
+        api_base = (entry.api_base if entry else None) or self.api_base
+        if not api_key:
+            env = self.provider_env(model)
+            if env:
+                api_key = os.environ.get(env)
+        return api_key, api_base
 
     @classmethod
     def load(cls) -> "Config":

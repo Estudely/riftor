@@ -34,7 +34,7 @@ from riftor.agent.provider import Provider, ProviderError, ToolCall, Turn, Usage
 from riftor import config as configmod
 from riftor.engagement import Engagement
 from riftor.engagement.report import write_reports
-from riftor.providers import PROVIDERS, provider_key_for_model
+from riftor.providers import PROVIDERS, apply_prefix, provider_key_for_model
 from riftor.safety.audit import AuditLog
 from riftor.safety.permissions import ConfirmScreen, Permissions
 from riftor.tools import ToolContext, ToolResult
@@ -883,11 +883,14 @@ class RiftorApp(App):
                     existing.api_key or existing.api_base
                 ):
                     main_key, _ = self.config.creds_for(self.config.model)
+                    selected_key, _ = self.config.creds_for(
+                        apply_prefix(provider_key, "__worker_credentials__")
+                    )
                     default_base = PROVIDERS[provider_key].default_base
                     if main_key or default_base:
                         self.config.providers[provider_key] = (
                             configmod.ProviderCreds(
-                                api_key=main_key,
+                                api_key=None if selected_key else main_key,
                                 api_base=default_base,
                             )
                         )
