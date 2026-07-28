@@ -715,14 +715,52 @@ def _stream_responses(
     The SINGLE inference network seam — tests monkeypatch *this* to feed canned
     SSE lines. Uses stdlib ``urllib`` and streams the response line-by-line so
     the SSE parser sees frames as they arrive.
+
+    HTTP errors are re-raised as ``RuntimeError`` carrying the Codex JSON
+    ``detail`` (or truncated body) so operators see *why* the backend rejected
+    the request instead of a bare ``HTTP Error 400: Bad Request``.
     """
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         RESPONSES_URL, data=data, headers=headers, method="POST"
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 — fixed https endpoint
-        for raw in resp:
-            yield raw.decode("utf-8", errors="replace")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 — fixed https endpoint
+            for raw in resp:
+                yield raw.decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(_format_http_error(exc)) from exc
+
+
+def _format_http_error(exc: urllib.error.HTTPError) -> str:
+    """Build an operator-facing message from a Codex/urllib HTTPError."""
+    body = ""
+    try:
+        raw = exc.read()
+        if isinstance(raw, bytes):
+            body = raw.decode("utf-8", errors="replace")
+        elif raw is not None:
+            body = str(raw)
+    except Exception:  # noqa: BLE001 — body is best-effort
+        body = ""
+    body = body.strip()
+    detail = body
+    if body:
+        try:
+            parsed = json.loads(body)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, dict):
+            if isinstance(parsed.get("detail"), str):
+                detail = parsed["detail"]
+            else:
+                err = parsed.get("error")
+                if isinstance(err, dict) and isinstance(err.get("message"), str):
+                    detail = err["message"]
+                elif isinstance(err, str):
+                    detail = err
+    detail = (detail or exc.reason or "Bad Request")[:400]
+    return f"HTTP {exc.code}: {detail}"
 
 
 # litellm registry-matches the bare model name and will hijack any id it knows
