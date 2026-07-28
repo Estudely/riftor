@@ -29,3 +29,7 @@ reports/
 # internal AI planning/spec docs — kept locally, not shipped or tracked
 docs/superpowers/
 .env
+
+# local UI-capture scratch outputs
+dev/ui_capture.py
+dev/ui-captures/

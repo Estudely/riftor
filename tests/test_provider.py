@@ -399,6 +399,13 @@ def test_classify_message_fallback_when_no_status():
     assert err.kind == "server"
 
 
+def test_classify_missing_module_not_retryable_network():
+    """litellm 1.92 APIConnectionError embeds 'connection' but means missing deps."""
+    err = prov.classify_error(Exception("APIConnectionError: No module named 'fastapi'"))
+    assert err.kind == "config"
+    assert err.retryable is False
+
+
 # --- cost estimation (#114) ---------------------------------------------------
 
 @pytest.mark.asyncio

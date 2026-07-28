@@ -164,6 +164,14 @@ def classify_error(exc: Exception) -> ProviderError:
     def _msg_has_status(*codes: str) -> bool:
         return any(re.search(rf"\b{c}\b", text) for c in codes)
 
+    # litellm 1.92+ surfaces missing proxy deps as APIConnectionError whose message
+    # contains "connection" — check import failures before the network heuristics.
+    if isinstance(exc, (ImportError, ModuleNotFoundError)) or "no module named" in low:
+        return ProviderError(
+            "config",
+            "missing Python dependency for the LLM layer — reinstall/upgrade riftor. " + text[:160],
+            retryable=False,
+        )
     if status == 401 or status == 403 or "authentication" in name or "auth" in low \
             or "api key" in low or (status is None and _msg_has_status("401", "403")):
         return ProviderError(
