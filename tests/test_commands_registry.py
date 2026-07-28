@@ -27,7 +27,7 @@ def test_handler_keys_subset_of_commands():
         workdir = Path(d)
         _patch_paths(workdir)
         app = RiftorApp(Config(onboarded=True), workdir=workdir)
-        handler_keys = set(app._command_handlers("").keys()) | {"/exit", "/quit"}
+        handler_keys = set(RiftorApp._command_handlers(app, "").keys()) | {"/exit", "/quit"}
         missing = handler_keys - set(_COMMANDS)
         assert not missing, f"handlers missing from _COMMANDS: {sorted(missing)}"
 
@@ -41,3 +41,8 @@ def test_help_lists_hypotheses_and_lessons_separately_from_memory():
     memory_line = next(line for line in HELP.splitlines() if "`/memory" in line)
     assert "hypothes" not in memory_line.lower()
     assert "lesson" not in memory_line.lower()
+
+
+def test_commands_are_alphabetized():
+    """Slash-command suggestions should stay alphabetized for operators."""
+    assert _COMMANDS == sorted(_COMMANDS)
