@@ -406,6 +406,68 @@ def test_classify_missing_module_not_retryable_network():
     assert err.retryable is False
 
 
+def test_classify_api_connection_wrapping_http_400_is_validation_not_network():
+    """litellm wraps urllib HTTP 400 as APIConnectionError / MidStreamFallbackError.
+
+    The word 'connection' in the type name must not beat an explicit HTTP 400 —
+    otherwise Codex payload rejections look like flaky network and get retried.
+    """
+    msg = (
+        "litellm.MidStreamFallbackError: litellm.APIConnectionError: "
+        "HTTP Error 400: Bad Request"
+    )
+    err = prov.classify_error(Exception(msg))
+    assert err.kind == "validation"
+    assert err.retryable is False
+    assert "400" in str(err) or "rejected" in str(err).lower()
+
+
+def test_classify_uses_http_error_code_attribute():
+    import io
+    import urllib.error
+
+    body = io.BytesIO(b'{"detail":"Unsupported parameter: metadata"}')
+    exc = urllib.error.HTTPError(
+        "https://chatgpt.com/backend-api/codex/responses",
+        400,
+        "Bad Request",
+        hdrs=None,
+        fp=body,
+    )
+    err = prov.classify_error(exc)
+    assert err.kind == "validation"
+    assert err.retryable is False
+
+
+@pytest.mark.asyncio
+async def test_stream_turn_classifies_mid_stream_errors(monkeypatch):
+    """Errors raised while iterating the stream (after acompletion returns)
+    must become ProviderError — not a raw MidStreamFallbackError dump.
+    """
+    monkeypatch.delenv("RIFTOR_DEMO_RESPONSE", raising=False)
+
+    class _BoomStream:
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise Exception(
+                "litellm.MidStreamFallbackError: litellm.APIConnectionError: "
+                "HTTP Error 400: Bad Request"
+            )
+
+    async def fake_acompletion(self, **kwargs):
+        return _BoomStream()
+
+    monkeypatch.setattr(prov.Provider, "_acompletion", fake_acompletion)
+    p = Provider_for_test()
+    with pytest.raises(prov.ProviderError) as ei:
+        async for _ in p.stream_turn([{"role": "user", "content": "go"}]):
+            pass
+    assert ei.value.kind == "validation"
+    assert ei.value.retryable is False
+
+
 # --- cost estimation (#114) ---------------------------------------------------
 
 @pytest.mark.asyncio
