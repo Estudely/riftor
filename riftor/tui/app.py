@@ -34,6 +34,7 @@ from riftor.agent.provider import Provider, ProviderError, ToolCall, Turn, Usage
 from riftor import config as configmod
 from riftor.engagement import Engagement
 from riftor.engagement.report import write_reports
+from riftor.providers import PROVIDERS, provider_key_for_model
 from riftor.safety.audit import AuditLog
 from riftor.safety.permissions import ConfirmScreen, Permissions
 from riftor.tools import ToolContext, ToolResult
@@ -758,6 +759,163 @@ class RiftorApp(App):
         self._scroll_if_following()
 
     # ---- events ----------------------------------------------------------------
+    def on_config_picker_activated(self, event: ConfigPicker.Activated) -> None:
+        """Validate, persist, and apply every final picker activation."""
+        error = self._apply_config_picker_activation(event)
+        if error is not None:
+            self.config_picker.show_error(error)
+            return
+
+        self.config.save()
+        key = event.setting_key
+        if key in {
+            "model",
+            "api_key",
+            "api_base",
+            "temperature",
+            "max_tokens",
+            "reasoning_effort",
+        }:
+            self.provider = Provider(self.config)
+        if key == "model":
+            self.status.set_model(self.config.model)
+        elif key == "max_steps":
+            self.max_steps = self.config.max_steps
+        elif key == "theme":
+            self._apply_theme(self.config.theme)
+
+        prompt = self.query_one("#prompt", PromptInput)
+        self.config_picker.complete_activation(
+            prompt,
+            f"saved · {event.setting.label}",
+        )
+
+    def _apply_config_picker_activation(
+        self,
+        event: ConfigPicker.Activated,
+    ) -> str | None:
+        """Validate one activation completely before mutating live config."""
+        key = event.setting_key
+        raw = event.value
+        provider_key = event.provider_key
+        value: float | int | bool | str
+
+        if key == "temperature":
+            try:
+                value = float(raw)
+            except ValueError:
+                return "temperature must be a number"
+        elif key == "max_tokens":
+            try:
+                value = int(raw)
+            except ValueError:
+                return "max tokens must be an integer"
+        elif key == "max_steps":
+            try:
+                value = int(raw)
+            except ValueError:
+                return "tool call steps must be an integer"
+            if value < 1:
+                return "tool call steps must be at least 1"
+        elif key in {
+            "show_thinking",
+            "show_tool_output",
+            "browser_headless",
+            "browser_persistent_profile",
+        }:
+            if raw not in {"true", "false"}:
+                return f"{event.setting.label.casefold()} must be on or off"
+            value = raw == "true"
+        elif key == "reasoning_effort":
+            if raw not in configmod.REASONING_EFFORTS:
+                return "reasoning effort is invalid"
+            value = raw
+        elif key == "theme":
+            if raw not in THEMES:
+                return "theme is invalid"
+            value = raw
+        elif key == "model":
+            value = raw.strip()
+            if not value:
+                return "model ID cannot be blank"
+            if provider_key is not None and provider_key not in PROVIDERS:
+                return "provider is invalid"
+        elif key == "worker_model":
+            value = raw.strip()
+            if value and provider_key not in PROVIDERS:
+                return "provider is invalid"
+        elif key in {"api_key", "api_base"}:
+            value = raw.strip()
+            provider_key = provider_key or provider_key_for_model(self.config.model)
+            if provider_key not in PROVIDERS:
+                return "provider is invalid"
+        else:
+            return f"unsupported setting: {event.setting.label}"
+
+        if key in {
+            "temperature",
+            "max_tokens",
+            "max_steps",
+            "show_thinking",
+            "show_tool_output",
+            "browser_headless",
+            "browser_persistent_profile",
+            "reasoning_effort",
+            "theme",
+            "model",
+        }:
+            setattr(self.config, key, value)
+            return None
+
+        if key == "worker_model":
+            worker_model = str(value)
+            self.config.worker_model = worker_model
+            provider_key = event.provider_key
+            main_provider = provider_key_for_model(self.config.model)
+            if (
+                worker_model
+                and provider_key in PROVIDERS
+                and provider_key != main_provider
+                and provider_key != "codex"
+            ):
+                existing = self.config.providers.get(provider_key)
+                if existing is None or not (
+                    existing.api_key or existing.api_base
+                ):
+                    main_key, _ = self.config.creds_for(self.config.model)
+                    default_base = PROVIDERS[provider_key].default_base
+                    if main_key or default_base:
+                        self.config.providers[provider_key] = (
+                            configmod.ProviderCreds(
+                                api_key=main_key,
+                                api_base=default_base,
+                            )
+                        )
+            return None
+
+        assert provider_key is not None
+        existing = self.config.providers.get(provider_key)
+        entry = configmod.ProviderCreds(
+            api_key=existing.api_key if existing else None,
+            api_base=existing.api_base if existing else None,
+        )
+        if key == "api_key":
+            if event.action == "clear":
+                entry.api_key = None
+                self.config.api_key = None
+            elif value:
+                entry.api_key = str(value)
+            # A blank replacement intentionally leaves every stored key unchanged.
+        else:
+            entry.api_base = str(value) or None
+            self.config.api_base = None
+
+        if entry.api_key or entry.api_base:
+            self.config.providers[provider_key] = entry
+        else:
+            self.config.providers.pop(provider_key, None)
+        return None
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
         inp = self.query_one("#prompt", PromptInput)
         if self.config_picker.is_open and event.input is inp:

@@ -395,6 +395,21 @@ StatusBar {
     color: $muted;
 }
 
+#config-picker-status {
+    height: 1;
+    padding: 0 2;
+    background: $surface;
+    color: $muted;
+}
+
+#config-picker-status.config-status-success {
+    color: $cyan;
+}
+
+#config-picker-status.config-status-error {
+    color: $danger;
+}
+
 #config-picker-hint {
     height: 1;
     padding: 0 2;
