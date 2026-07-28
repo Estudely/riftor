@@ -189,6 +189,34 @@ def test_refresh_http_error_becomes_auth_error(tmp_path, monkeypatch):
     assert "codex login" in str(ei.value)
 
 
+def test_stream_responses_surfaces_http_400_detail(monkeypatch):
+    """Codex returns {"detail": "..."} on 400 — include it so operators see why."""
+    import io
+
+    detail = '{"detail":"Unsupported parameter: metadata"}'
+
+    def fake_urlopen(req, timeout=120.0):
+        raise urllib.error.HTTPError(
+            "https://chatgpt.com/backend-api/codex/responses",
+            400,
+            "Bad Request",
+            hdrs=None,
+            fp=io.BytesIO(detail.encode()),
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    with pytest.raises(RuntimeError) as ei:
+        list(
+            codex_provider._stream_responses(
+                {"model": "gpt-5.5", "input": [], "store": False, "stream": True},
+                {"Authorization": "Bearer x"},
+            )
+        )
+    msg = str(ei.value)
+    assert "400" in msg
+    assert "Unsupported parameter: metadata" in msg
+
+
 def test_refresh_non_json_becomes_auth_error(tmp_path, monkeypatch):
     _write_auth(tmp_path, {"access_token": "old-at", "refresh_token": "old-rt"})
 

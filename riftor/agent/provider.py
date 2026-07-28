@@ -131,20 +131,45 @@ class ProviderError(Exception):
 
 
 def _status_code(exc: Exception) -> int | None:
-    """Best-effort HTTP status from a litellm/httpx exception.
+    """Best-effort HTTP status from a litellm/httpx/urllib exception.
 
     litellm's typed exceptions carry ``status_code``; httpx nests it under
-    ``.response.status_code``. Using the real code avoids the substring-matching
-    false positives (issue #117) where a message mentioning a port or byte count
-    like "5000" was misread as a 500 server error.
+    ``.response.status_code``; ``urllib.error.HTTPError`` uses ``.code``.
+    Using the real code avoids the substring-matching false positives
+    (issue #117) where a message mentioning a port or byte count like "5000"
+    was misread as a 500 server error.
+
+    Also walks ``__cause__`` / ``__context__`` one level so a litellm wrapper
+    (e.g. MidStreamFallbackError) that preserves the urllib HTTPError still
+    yields its status.
     """
-    for attr in ("status_code", "code"):
-        val = getattr(exc, attr, None)
-        if isinstance(val, int):
-            return val
-    resp = getattr(exc, "response", None)
-    code = getattr(resp, "status_code", None)
-    return code if isinstance(code, int) else None
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        for attr in ("status_code", "code"):
+            val = getattr(cur, attr, None)
+            if isinstance(val, int):
+                return val
+        resp = getattr(cur, "response", None)
+        code = getattr(resp, "status_code", None)
+        if isinstance(code, int):
+            return code
+        nxt = cur.__cause__ or cur.__context__
+        cur = nxt if isinstance(nxt, BaseException) else None
+    return None
+
+
+def _http_status_in_message(text: str) -> int | None:
+    """Parse an explicit ``HTTP Error NNN`` / ``HTTP NNN`` token from ``text``.
+
+    Used when litellm stringifies an urllib HTTPError into an APIConnectionError
+    message and drops the typed status attribute.
+    """
+    match = re.search(r"\bHTTP(?:\s+Error)?\s+(\d{3})\b", text, flags=re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+    return None
 
 
 def classify_error(exc: Exception) -> ProviderError:
@@ -158,6 +183,8 @@ def classify_error(exc: Exception) -> ProviderError:
     text = str(exc)
     low = text.lower()
     status = _status_code(exc)
+    if status is None:
+        status = _http_status_in_message(text)
 
     # A standalone HTTP status token in the message, only as a fallback when the
     # exception carries no real status_code attribute.
@@ -185,6 +212,12 @@ def classify_error(exc: Exception) -> ProviderError:
                              retryable=True)
     if "timeout" in name or "timed out" in low:
         return ProviderError("timeout", "request timed out. " + text[:160], retryable=True)
+    # Prefer an explicit HTTP status (incl. from "HTTP Error 400: …" messages)
+    # over the "connection" substring in litellm's APIConnectionError type name.
+    if status == 400 or "badrequest" in name or "invalid" in low \
+            or (status is None and _msg_has_status("400")):
+        return ProviderError("validation", "request rejected by the provider. " + text[:200],
+                             retryable=False)
     if (status is not None and 500 <= status <= 599) or "overloaded" in low \
             or (status is None and _msg_has_status("500", "502", "503", "504", "529")):
         return ProviderError("server", "provider server error — retrying. " + text[:160], retryable=True)
@@ -197,10 +230,6 @@ def classify_error(exc: Exception) -> ProviderError:
             "context window exceeded — clear/compact the conversation (/clear or /compact). " + text[:160],
             retryable=False,
         )
-    if status == 400 or "badrequest" in name or "invalid" in low \
-            or (status is None and _msg_has_status("400")):
-        return ProviderError("validation", "request rejected by the provider. " + text[:200],
-                             retryable=False)
     return ProviderError("unknown", text[:240] or name, retryable=False)
 
 
@@ -293,13 +322,18 @@ class Provider:
             yield demo
             return
         response = await self._acompletion(**self._kwargs(messages))
-        async for chunk in response:  # type: ignore[union-attr]  # litellm stream is async-iterable
-            try:
-                content = chunk.choices[0].delta.content
-            except (IndexError, AttributeError):
-                content = None
-            if content:
-                yield content
+        try:
+            async for chunk in response:  # type: ignore[union-attr]  # litellm stream is async-iterable
+                try:
+                    content = chunk.choices[0].delta.content
+                except (IndexError, AttributeError):
+                    content = None
+                if content:
+                    yield content
+        except ProviderError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — classify mid-stream provider failures
+            raise classify_error(exc) from exc
 
     async def stream_turn(
         self, messages: list[dict], tools: list[dict] | None = None
@@ -330,78 +364,83 @@ class Provider:
         _seq = 0
         usage = Usage()
 
-        async for chunk in response:  # type: ignore[union-attr]  # litellm stream is async-iterable
-            seen = _extract_usage(chunk)
-            if seen is not None:
-                usage = seen
-            try:
-                delta = chunk.choices[0].delta
-            except (IndexError, AttributeError):
-                continue
+        try:
+            async for chunk in response:  # type: ignore[union-attr]  # litellm stream is async-iterable
+                seen = _extract_usage(chunk)
+                if seen is not None:
+                    usage = seen
+                try:
+                    delta = chunk.choices[0].delta
+                except (IndexError, AttributeError):
+                    continue
 
-            content = getattr(delta, "content", None)
-            if content:
-                text_parts.append(content)
-                yield ("text", content)
+                content = getattr(delta, "content", None)
+                if content:
+                    text_parts.append(content)
+                    yield ("text", content)
 
-            reasoning = getattr(delta, "reasoning_content", None)
-            if reasoning:
-                # Display-only: surface the model's thinking to the UI but never
-                # accumulate it into the assistant message (keeps history clean,
-                # avoids provider replay issues with thinking blocks).
-                yield ("thinking", reasoning)
+                reasoning = getattr(delta, "reasoning_content", None)
+                if reasoning:
+                    # Display-only: surface the model's thinking to the UI but never
+                    # accumulate it into the assistant message (keeps history clean,
+                    # avoids provider replay issues with thinking blocks).
+                    yield ("thinking", reasoning)
 
-            for tc in getattr(delta, "tool_calls", None) or []:
-                tc_id = getattr(tc, "id", None)
-                fn = getattr(tc, "function", None)
-                fn_name = getattr(fn, "name", None) if fn is not None else None
-                # Spec-conformant streams (OpenAI/litellm) tag every fragment with a
-                # stable ``index`` so fragments of one call reassemble correctly.
-                # Some providers omit it; defaulting all of them to 0 (the old bug)
-                # collapsed distinct calls onto one slot. When ``index`` is absent we
-                # resolve the slot by the strongest signal available — id, then a
-                # fresh-name fragment, then a same-name continuation — and only fall
-                # back to "most recent" as a last resort (issue #116).
-                raw_idx = getattr(tc, "index", None)
-                if raw_idx is not None:
-                    key: object = ("idx", raw_idx)
-                elif tc_id is not None:
-                    # Match an existing slot with this id (continuation), else new.
-                    key = next(
-                        (k for k, s in acc.items() if s.get("id") == tc_id), None
-                    )  # type: ignore[assignment]
-                    if key is None:
+                for tc in getattr(delta, "tool_calls", None) or []:
+                    tc_id = getattr(tc, "id", None)
+                    fn = getattr(tc, "function", None)
+                    fn_name = getattr(fn, "name", None) if fn is not None else None
+                    # Spec-conformant streams (OpenAI/litellm) tag every fragment with a
+                    # stable ``index`` so fragments of one call reassemble correctly.
+                    # Some providers omit it; defaulting all of them to 0 (the old bug)
+                    # collapsed distinct calls onto one slot. When ``index`` is absent we
+                    # resolve the slot by the strongest signal available — id, then a
+                    # fresh-name fragment, then a same-name continuation — and only fall
+                    # back to "most recent" as a last resort (issue #116).
+                    raw_idx = getattr(tc, "index", None)
+                    if raw_idx is not None:
+                        key: object = ("idx", raw_idx)
+                    elif tc_id is not None:
+                        # Match an existing slot with this id (continuation), else new.
+                        key = next(
+                            (k for k, s in acc.items() if s.get("id") == tc_id), None
+                        )  # type: ignore[assignment]
+                        if key is None:
+                            key = ("seq", _seq)
+                            _seq += 1
+                    elif fn_name is not None:
+                        # No id/index but a name present → this fragment starts (or is)
+                        # a distinct call. Reuse a same-named slot only if it's still
+                        # waiting for its arguments; otherwise start a fresh slot so two
+                        # same-named calls don't merge.
+                        key = next(
+                            (k for k, s in acc.items()
+                             if s.get("name") == fn_name and not s.get("args")),
+                            None,
+                        )  # type: ignore[assignment]
+                        if key is None:
+                            key = ("seq", _seq)
+                            _seq += 1
+                    elif acc:
+                        # Pure continuation fragment (no id, no index, no name): the only
+                        # safe assumption is it continues the most recently touched call.
+                        key = next(reversed(acc))
+                    else:
                         key = ("seq", _seq)
                         _seq += 1
-                elif fn_name is not None:
-                    # No id/index but a name present → this fragment starts (or is)
-                    # a distinct call. Reuse a same-named slot only if it's still
-                    # waiting for its arguments; otherwise start a fresh slot so two
-                    # same-named calls don't merge.
-                    key = next(
-                        (k for k, s in acc.items()
-                         if s.get("name") == fn_name and not s.get("args")),
-                        None,
-                    )  # type: ignore[assignment]
-                    if key is None:
-                        key = ("seq", _seq)
-                        _seq += 1
-                elif acc:
-                    # Pure continuation fragment (no id, no index, no name): the only
-                    # safe assumption is it continues the most recently touched call.
-                    key = next(reversed(acc))
-                else:
-                    key = ("seq", _seq)
-                    _seq += 1
-                slot = acc.setdefault(key, {"id": None, "name": None, "args": ""})
-                if tc_id:
-                    slot["id"] = tc_id
-                if fn is not None:
-                    if fn_name:
-                        slot["name"] = fn_name
-                    fn_args = getattr(fn, "arguments", None)
-                    if fn_args:
-                        slot["args"] += fn_args
+                    slot = acc.setdefault(key, {"id": None, "name": None, "args": ""})
+                    if tc_id:
+                        slot["id"] = tc_id
+                    if fn is not None:
+                        if fn_name:
+                            slot["name"] = fn_name
+                        fn_args = getattr(fn, "arguments", None)
+                        if fn_args:
+                            slot["args"] += fn_args
+        except ProviderError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — classify mid-stream provider failures
+            raise classify_error(exc) from exc
 
         tool_calls: list[ToolCall] = []
         raw_tool_calls: list[dict] = []
