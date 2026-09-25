@@ -14,7 +14,7 @@ on:
       - ".github/workflows/demo.yml"
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   ANTHROPIC_API_KEY: sk-demo  # dummy; the tape only uses offline commands
@@ -36,10 +36,12 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y ffmpeg
-          sudo curl -fsSL https://github.com/tsl0922/ttyd/releases/latest/download/ttyd.x86_64 \
-            -o /usr/local/bin/ttyd
-          sudo chmod +x /usr/local/bin/ttyd
-          go install github.com/charmbracelet/vhs@latest
+          curl -fsSL https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 \
+            -o /tmp/ttyd.x86_64
+          echo "8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55  /tmp/ttyd.x86_64" \
+            | sha256sum --check --status
+          sudo install /tmp/ttyd.x86_64 /usr/local/bin/ttyd
+          go install github.com/charmbracelet/vhs@v0.12.0
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - name: Render demo.gif
         run: |
@@ -47,6 +49,27 @@ jobs:
           ttyd --version
           vhs --version
           vhs demo.tape
+      - name: Upload rendered demo
+        uses: actions/upload-artifact@v4
+        with:
+          name: rendered-demo
+          path: demo.gif
+          if-no-files-found: error
+          retention-days: 1
+
+  commit:
+    needs: gif
+    if: github.ref_type == 'branch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download rendered demo
+        uses: actions/download-artifact@v4
+        with:
+          name: rendered-demo
+          path: .
       - name: Commit demo.gif if changed
         run: |
           set -euo pipefail
@@ -54,13 +77,7 @@ jobs:
             echo "demo.gif unchanged"
             exit 0
           fi
-          # Resolve the branch to push to. On a tag/detached checkout there is
-          # none — skip rather than fail (the workflow shouldn't run there anyway).
           BRANCH="${GITHUB_REF_NAME}"
-          if [ "${GITHUB_REF_TYPE}" != "branch" ]; then
-            echo "not on a branch (ref_type=${GITHUB_REF_TYPE}); skipping commit"
-            exit 0
-          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add demo.gif

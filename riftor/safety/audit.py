@@ -11,14 +11,44 @@ from __future__ import annotations
 import gzip
 import json
 import os
+import re
 import time
 from pathlib import Path
+
+
+_SECRET_ASSIGNMENT = re.compile(
+    r"(?i)(\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret|password|passwd|authorization)\b"
+    r"\s*(?:=|:)\s*|--(?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret|password|passwd)\s+)"
+    r"(\"[^\"]*\"|'[^']*'|[^\s,;&]+)"
+)
+_BEARER_VALUE = re.compile(r"(?i)(\bBearer\s+)(\"[^\"]*\"|'[^']*'|[^\s,;&]+)")
+_URL_PASSWORD = re.compile(r"(?i)(https?://[^:/\s]+:)[^@/\s]+(@)")
+
+
+def _redact_preview(preview: str) -> str:
+    preview = _BEARER_VALUE.sub(r"\1[REDACTED]", preview)
+    preview = _SECRET_ASSIGNMENT.sub(r"\1[REDACTED]", preview)
+    return _URL_PASSWORD.sub(r"\1[REDACTED]\2", preview)
 
 
 def _state_dir() -> Path:
     base = os.environ.get("XDG_STATE_HOME")
     root = Path(base) if base else Path.home() / ".local" / "state"
     return root / "riftor"
+
+
+def _private_fd(path: Path, flags: int) -> int:
+    """Open a file with owner-only permissions, including when it already exists."""
+    fd = os.open(path, flags, 0o600)
+    try:
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, 0o600)
+        else:
+            os.chmod(path, 0o600)
+    except Exception:
+        os.close(fd)
+        raise
+    return fd
 
 
 class AuditLog:
@@ -35,9 +65,17 @@ class AuditLog:
             if not self.path.exists() or self.path.stat().st_size < self.max_bytes:
                 return
             archive = self.path.with_suffix(self.path.suffix + ".1.gz")
-            with self.path.open("rb") as src, gzip.open(archive, "wb") as dst:
-                dst.writelines(src)
-            self.path.write_text("", encoding="utf-8")
+            archive_fd = _private_fd(
+                archive, os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+            )
+            with os.fdopen(archive_fd, "wb") as raw:
+                with self.path.open("rb") as src:
+                    with gzip.GzipFile(fileobj=raw, mode="wb") as dst:
+                        dst.writelines(src)
+            empty_fd = _private_fd(
+                self.path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+            )
+            os.close(empty_fd)
         except Exception:  # noqa: BLE001 — rotation must never crash the agent
             pass
 
@@ -54,7 +92,7 @@ class AuditLog:
         record = {
             "ts": round(time.time(), 3),
             "tool": tool,
-            "preview": preview[:500],
+            "preview": _redact_preview(preview)[:500],
             "allowed": allowed,
             "is_error": is_error,
             "duration_s": round(duration, 3),
@@ -62,7 +100,8 @@ class AuditLog:
         }
         try:
             self._maybe_rotate()
-            with self.path.open("a", encoding="utf-8") as fh:
+            fd = _private_fd(self.path, os.O_WRONLY | os.O_CREAT | os.O_APPEND)
+            with os.fdopen(fd, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps(record) + "\n")
         except Exception:  # noqa: BLE001 — auditing must never crash the agent
             pass
