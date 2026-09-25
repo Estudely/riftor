@@ -6,11 +6,11 @@
 [![CI](https://github.com/Estudely/riftor/actions/workflows/ci.yml/badge.svg)](https://github.com/Estudely/riftor/actions/workflows/ci.yml)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)](https://github.com/Estudely/riftor/blob/main/LICENSE)
 
-**🌐 Website:** https://riftor.dev · **Latest:** [v4.0.0](https://github.com/Estudely/riftor/releases/tag/v4.0.0)
+**🌐 Website:** https://riftor.dev · **Latest:** [v4.1.1](https://github.com/Estudely/riftor/releases/tag/v4.1.1)
 
 ![riftor demo](https://raw.githubusercontent.com/Estudely/riftor/main/demo.gif)
 
-### Featured — v4.0.0
+### Featured — v4.1.1
 An open-source AI agent for **authorized** bug bounty and penetration testing in
 your terminal. Set scope, task the agent, approve the dangerous bits, and walk
 out with CVSS-scored findings and md/html/json/SARIF reports. **350+**
@@ -38,9 +38,8 @@ checklist** (not a fixed kill-chain stage). Powered by any major LLM through
 > it spinning on a repeated call. **Workers** fan out independent recon in
 > parallel via `dispatch_worker`. Plus input history + command palette, headless
 > one-shot mode, Docker, and pytest + types in CI. See
-> [`todo.md`](https://github.com/Estudely/riftor/blob/main/todo.md) for the
-> roadmap and [`docs/`](https://github.com/Estudely/riftor/tree/main/docs) for
-> configuration.
+> [v4.1.1 release notes](docs/RELEASE_NOTES_v4.1.1.md) for the latest changes
+> and [`docs/configuration.md`](docs/configuration.md) for configuration.
 
 ## Install
 ```bash

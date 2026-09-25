@@ -18,7 +18,8 @@ classifiers = [
 ]
 dependencies = [
     "textual>=0.79",
-    "litellm>=1.93",
+    # 1.93.0 is affected by GHSA-3cv6-jpf6-8222; keep the published floor patched.
+    "litellm>=1.93.2",
     "pydantic>=2.6",
     "pyyaml>=6.0",
 ]

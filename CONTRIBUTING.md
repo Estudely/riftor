@@ -1,7 +1,7 @@
 # Contributing to riftor
 
-Thanks for your interest in riftor. This is an early-stage, open-source
-offensive-security agent — contributions, bug reports, and ideas are welcome.
+Thanks for your interest in riftor. Contributions, bug reports, and ideas are
+welcome.
 
 ## Ground rules
 - **Authorized use only.** riftor is for security testing you are explicitly
@@ -29,21 +29,24 @@ uv run python dev/smoke.py           # headless TUI integration (prints all *_OK
 ```
 
 Everything runs **offline** — no model/API key needed. `tests/` holds focused
-unit tests (engagement, reports, permissions, config, agent, parsers, tools,
-sessions); `dev/smoke.py` drives the real TUI headlessly end-to-end. Install the
-pre-commit hooks to run these automatically: `make install-hooks`.
+unit and integration tests; `dev/smoke.py` supplements them by driving the
+real TUI headlessly end-to-end. Install the pre-commit hooks to run these
+automatically: `make install-hooks`.
 
 ## Project layout
 ```
 riftor/
-  tui/           Textual app, widgets, themes, modals
-  agent/         provider (litellm), context, session, prompts
-  tools/         core tools + engagement tools (registry in __init__)
-  engagement/    scope, sqlite state, CVSS, report rendering
-  safety/        permission modal + audit log
-dev/smoke.py     the test suite
+  tui/           Textual app, commands, widgets, themes
+  agent/         providers, context, sessions, workers
+  tools/         core and engagement tools (registry in __init__)
+  engagement/    scope, SQLite state, methodology, reporting
+  safety/        permissions and audit log
+tests/           focused unit and integration tests
+dev/smoke.py     headless end-to-end TUI smoke check
 ```
-A high-level roadmap lives in [`todo.md`](./todo.md).
+For current behavior, see the [README](./README.md),
+[`docs/configuration.md`](./docs/configuration.md), and the versioned release
+notes under [`docs/`](./docs/).
 
 ## Conventions
 - Python 3.11+, `ruff` (line length 100) for lint/format.
@@ -51,7 +54,8 @@ A high-level roadmap lives in [`todo.md`](./todo.md).
   renders it. New tools go in `riftor/tools/` and are registered in
   `riftor/tools/__init__.py`.
 - Add/extend a check in `dev/smoke.py` for new behavior where practical.
-- Conventional-ish commit messages (`fix:`, `docs:`, `Phase N: …`).
+- Use descriptive commit prefixes such as `fix:`, `feat:`, `docs:`, and
+  `chore:`.
 
 ## Releases (maintainers)
 `pyproject.toml` is the single source of truth for the version — `riftor
